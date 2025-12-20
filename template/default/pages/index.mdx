@@ -1,0 +1,53 @@
+---
+title: "Scratch"
+description: "A CLI for building static MDX websites with Bun"
+keywords: ["MDX", "static site", "React", "Bun", "markdown"]
+author: "Scratch"
+type: "website"
+lang: "en"
+---
+
+
+<div className="flex items-center justify-center gap-4 mr-10">
+  <img src="/scratch.png" alt="Scratch" className="h-20 w-16 pb-4" />
+  <h1 className="text-4xl font-bold">Scratch</h1>
+</div>
+
+Scratch compiles MDX files into beatiful static websites. Write in Markdown, embed React components, and publish in seconds.
+
+## Quick Start
+
+```bash
+# Install scratch 
+brew install scratch 
+
+# Start the dev server
+scratch dev
+
+# Build for production
+scratch build
+
+# Publish 
+scratch push
+```
+
+## Why use Scratch?
+
+Scratch lets you write in Markdown and embed interactive react components, like this counter:
+
+<Counter />
+
+It's great for building personal websites like [koomen.dev](https://koomen.dev) or writing technical content with interactive components like [this essay](https://koomen.dev/essays/horseless-carriages).
+
+## Features
+
+- **Zero config** - Create a new project with `scratch create` and start writing
+- **No boilerplate** - Just put markdown in `pages/`, code in `components/` 
+- **MDX support** - Embed interactive react components in your writing
+- **Built on [Bun](https://bun.com/)** - Fast builds, hot reloads, and built-in typescript support
+
+## Examples
+
+If you included examples when creating this project, you can view them [here](/examples).
+
+[View on GitHub](https://github.com/koomen/scratch)

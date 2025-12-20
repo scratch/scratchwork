@@ -1,0 +1,244 @@
+import { watch } from 'fs';
+import path from 'path';
+import { getBuildContext } from '../context';
+import { buildCommand } from './build';
+import log from '../logger';
+
+interface DevOptions {
+  port?: number;
+  open?: boolean;
+}
+
+// Store connected WebSocket clients for live reload
+const clients = new Set<any>();
+
+/**
+ * Try to start a dev server on the given port, with fallback to subsequent ports if in use.
+ */
+async function startDevServerWithFallback(
+  buildDir: string,
+  preferredPort: number,
+  maxAttempts = 10
+): Promise<{ server: ReturnType<typeof Bun.serve>; port: number }> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const port = preferredPort + attempt;
+    try {
+      const server = Bun.serve({
+        port,
+        async fetch(req) {
+          const url = new URL(req.url);
+          let pathname = url.pathname;
+
+          // Handle WebSocket upgrade for live reload
+          if (pathname === '/__live_reload') {
+            const upgraded = server.upgrade(req);
+            if (!upgraded) {
+              return new Response('WebSocket upgrade failed', { status: 400 });
+            }
+            return undefined as any;
+          }
+
+          // Serve files from build directory
+          let filePath = path.join(buildDir, pathname);
+
+          // Handle directory index (e.g., /posts -> /posts/index.html)
+          if (!pathname.includes('.')) {
+            // Try adding /index.html
+            const indexPath = path.join(filePath, 'index.html');
+            if (await Bun.file(indexPath).exists()) {
+              filePath = indexPath;
+            } else if (await Bun.file(filePath + '.html').exists()) {
+              filePath = filePath + '.html';
+            }
+          }
+
+          const file = Bun.file(filePath);
+          if (await file.exists()) {
+            // For HTML files, inject live reload script
+            if (filePath.endsWith('.html')) {
+              let content = await file.text();
+              content = injectLiveReloadScript(content, port);
+              return new Response(content, {
+                headers: {
+                  'Content-Type': 'text/html',
+                },
+              });
+            }
+
+            // For all other files (including binary), serve directly
+            return new Response(file, {
+              headers: {
+                'Content-Type': getContentType(filePath),
+              },
+            });
+          }
+
+          return new Response('Not Found', { status: 404 });
+        },
+
+        websocket: {
+          open(ws) {
+            clients.add(ws);
+          },
+          close(ws) {
+            clients.delete(ws);
+          },
+          message() {
+            // No messages expected from client
+          },
+        },
+      });
+      return { server, port };
+    } catch (error) {
+      // If port is in use, try the next one
+      const err = error as any;
+      if (err.code === 'EADDRINUSE' || (error instanceof Error && error.message.includes('port'))) {
+        log.debug(`Port ${port} in use, trying ${port + 1}`);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(
+    `Could not find an available port (tried ${preferredPort}-${preferredPort + maxAttempts - 1}).\n` +
+    `Check if other processes are using these ports:\n` +
+    `  lsof -i :${preferredPort}`
+  );
+}
+
+/**
+ * Run a development server using Bun
+ */
+export async function devCommand(options: DevOptions = {}) {
+  const ctx = getBuildContext();
+  const preferredPort = typeof options.port === 'string' ? parseInt(options.port, 10) : (options.port || 5173);
+
+  // Validate port number
+  if (isNaN(preferredPort) || preferredPort < 1 || preferredPort > 65535) {
+    throw new Error(`Invalid port number: "${options.port}". Port must be a number between 1 and 65535.`);
+  }
+
+  log.debug('Starting Bun dev server...');
+
+  // Initial build
+  await buildCommand({ ssg: false });
+
+  // Start the HTTP server with port fallback
+  const { server, port } = await startDevServerWithFallback(ctx.buildDir, preferredPort);
+
+  log.info(`Dev server running at http://localhost:${port}/`);
+
+  // Open browser if requested
+  if (options.open !== false) {
+    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    Bun.spawn([opener, `http://localhost:${port}`]);
+  }
+
+  // Watch for file changes (pages, components, and src config)
+  const watchDirs = [
+    ctx.pagesDir,
+    ctx.componentsDir,
+    path.join(ctx.rootDir, 'src'),
+  ];
+  const watchers: ReturnType<typeof watch>[] = [];
+
+  let rebuildTimeout: Timer | null = null;
+  let isRebuilding = false;
+  const debouncedRebuild = () => {
+    if (rebuildTimeout) {
+      clearTimeout(rebuildTimeout);
+    }
+    rebuildTimeout = setTimeout(async () => {
+      if (isRebuilding) return;
+      isRebuilding = true;
+      log.info('File change detected, rebuilding...');
+      try {
+        await buildCommand({ ssg: false });
+        // Notify all connected clients to reload
+        for (const client of clients) {
+          client.send('reload');
+        }
+        log.debug('Rebuild complete, reloading browsers...');
+      } catch (error) {
+        log.error('Rebuild failed:', error);
+      } finally {
+        isRebuilding = false;
+      }
+    }, 100);
+  };
+
+  for (const dir of watchDirs) {
+    try {
+      const watcher = watch(dir, { recursive: true }, (event, filename) => {
+        if (filename && !filename.startsWith('.')) {
+          debouncedRebuild();
+        }
+      });
+      watchers.push(watcher);
+    } catch {
+      // Directory might not exist, skip
+    }
+  }
+
+  // Graceful shutdown
+  const shutdown = () => {
+    log.info('Shutting down...');
+    for (const watcher of watchers) {
+      watcher.close();
+    }
+    server.stop();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+/**
+ * Inject live reload script into HTML
+ */
+function injectLiveReloadScript(html: string, port: number): string {
+  const script = `
+<script>
+(function() {
+  const ws = new WebSocket('ws://localhost:${port}/__live_reload');
+  ws.onmessage = function(event) {
+    if (event.data === 'reload') {
+      location.reload();
+    }
+  };
+  ws.onclose = function() {
+    // Try to reconnect after a delay
+    setTimeout(function() {
+      location.reload();
+    }, 1000);
+  };
+})();
+</script>`;
+
+  return html.replace('</body>', `${script}\n</body>`);
+}
+
+/**
+ * Get content type for a file
+ */
+function getContentType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const types: Record<string, string> = {
+    '.html': 'text/html',
+    '.js': 'application/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.eot': 'application/vnd.ms-fontobject',
+  };
+  return types[ext] || 'application/octet-stream';
+}
