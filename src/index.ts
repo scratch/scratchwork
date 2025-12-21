@@ -4,7 +4,6 @@ import { Command } from 'commander';
 import fs from 'fs/promises';
 import { buildCommand } from './cmd/build';
 import { createCommand } from './cmd/create';
-import { initCommand } from './cmd/init';
 import { devCommand } from './cmd/dev';
 import { previewCommand } from './cmd/preview';
 import { getBuildContext, setBuildContext } from './context';
@@ -20,27 +19,20 @@ program
   .option('-q, --quiet', 'Quiet mode (errors only)');
 
 program
-  .command('init')
-  .description('Initialize a Scratch project (flag-based, no prompts)')
+  .command('create')
+  .description('Create a new Scratch project')
   .argument('[path]', 'Path to project directory', '.')
-  .option('-f, --full', 'Include theme.css and components')
-  .option('-e, --examples', 'Include example files')
+  .option('--src', 'Include src/ directory (default)')
+  .option('--no-src', 'Exclude src/ directory')
+  .option('--examples', 'Include example pages (default)')
+  .option('--no-examples', 'Exclude example pages')
+  .option('--package', 'Include package.json with dependencies')
+  .option('--no-package', 'Exclude package.json (default)')
+  .option('--minimal', 'Shorthand for --no-src --no-examples --no-package')
+  .option('--full', 'Shorthand for --src --examples --package')
   .action(async (path, options) => {
     try {
-      await initCommand(path, options);
-    } catch (error) {
-      log.error('Failed to initialize project:', error);
-      process.exit(1);
-    }
-  });
-
-program
-  .command('create')
-  .description('Create a new Scratch project (interactive prompts)')
-  .argument('[path]', 'Path to project directory', '.')
-  .action(async (path) => {
-    try {
-      await createCommand(path);
+      await createCommand(path, options);
     } catch (error) {
       log.error('Failed to create project:', error);
       process.exit(1);

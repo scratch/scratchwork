@@ -1,122 +1,134 @@
-# scratch
+<p align="center">
+  <img src="./template/public/scratch.svg" alt="Scratch" height="100" />
+</p>
 
-Scratch is an opinionated static site generator for MDX files.
+<h1 align="center">Scratch</h1>
 
-## Using Tailwind CSS
+<p align="center">
+    Make beatiful websites with markdown and react
+</p>
 
-Tailwind works out-of-the-box – no extra configuration required.
-Simply reference Tailwind utility classes in your MDX files or React components
-and Scratch will automatically generate and bundle the corresponding stylesheet
-for you. During development the styles are served live; in production builds
-`/tailwind.css` is emitted and linked from every generated HTML page.
+---
 
-## Installation
+Scratch compiles MDX files into beautiful static websites. Write in Markdown, embed React components, and publish to the web.
+
+## Quick Start
 
 ```bash
-npm install -g scratch
+# Install scratch
+[TBD]
+
+# Create a new project
+scratch create
+
+# Start the dev server
+scratch dev
 ```
 
-## Usage
+## Why Scratch?
 
-### Project Structure
+Scratch was designed for **collaborative writing with coding agents** like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in [Markdown](https://daringfireball.net/projects/markdown/) and embed React components when it's easier to express yourselve with code.
 
-Your source files should be arranged as follows in your project directory:
+Scratch uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing. Use default styling or change the look and feel of your work with [Tailwind CSS](https://tailwindcss.com/) and custom Markdown components.
+
+When you're ready, `scratch build` your project into a static website that can be hosted anywhere. Scratch is built on [Bun](https://bun.com/) so builds are lightning-fast and typescript works out-of-the-box.
+
+## No Boilerplate
+
+Scratch uses an opionated project structure to avoid the need for boilerplate and configuration. A simple Scratch project (created with `scratch create`) looks like this:
 
 ```
-/
+mysite/
 ├── pages/
 │   ├── index.mdx
-│   └── about.mdx
-│   └── articles/
-│       ├── index.mdx
-│       ├── article1.mdx
-│       └── article2.mdx
-├── components/
-│   ├── PageWrapper.tsx    # A component that wraps every page
-│   └── Header.tsx
-│
-└── static/
+│   ├── Counter.tsx
+|   └── examples/
+|       ├── index.md
+|       ├── markdown.md
+|       ├── todolist-spec.mdx
+|       └── todolist.tsx
+└── public/
+    ├── logo.png
     └── favicon.ico
 ```
 
-### Global Options
+Use `scratch build` to compile this project into a [static website](https://scratch.dev/template).
 
-These options can be used with any command:
+Borrowing heavily from [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography), Scratch uses default styles and Markdown components to render your prose with a clean aesthetic. Code blocks use syntax highlighting by [Shiki](https://shiki.style/).
 
-- `-v, --verbose` - Show detailed output
-- `-q, --quiet` - Show only errors
+You can change styles and customize the page wrapper component by including the `src/` directory when you run `scratch create`:
 
-### Commands
-
-#### Create a new project
-
-```bash
-scratch create [path]
+```
+mysite/
+├── pages/
+│   ├── index.mdx
+|   └── Counter.tsx
+├── public/
+|   ├── logo.png
+|   └── favicon.ico
+└── src/
+    ├── markdown/
+    ├── PageWrapper.tsx
+    └── tailwind.css
 ```
 
-Creates a new Scratch project in the specified directory (defaults to current directory).
+Component files and js/ts libraries can live anywhere in `pages/` and `src/`. They are auto-detected by Scratch and don't need to be explicitly importated in your .mdx files as long as the filename matches the component name.
 
-#### Build the site
+Scratch installs build dependencies You can add third-party dependencies by including a `package.json` file in your project root.
 
-```bash
-scratch build [path] [options]
-```
+## Built with [Bun](https://bun.com/)
 
-Builds the site for production.
+Scratch is built on [Bun](https://bun.com/) for lightning-fast builds, development with HMR, and native typescript support. It uses the [Tailwind CSS](https://tailwindcss.com/) framework to make component styling easy. 
+
+Scratch compiles Javascript (.js), Typescript (.ts), JSX (.jsx), TSX (.tsx), Markdown (.md), and MDX (.mdx
+
+## Commands
+
+### `scratch create [path]`
+
+Create a new Scratch project. When run interactively, prompts for which components to include. Use flags to skip prompts.
 
 **Options:**
-- `-b, --build <path>` - Build directory
-- `-d, --development` - Development mode
-- `-s, --ssg [value]` - Static site generation (default: true)
-- `--strict` - Do not inject PageWrapper component or missing imports
-
-#### Development server
+- `--src` / `--no-src` - Include or exclude the `src/` directory (default: include)
+- `--examples` / `--no-examples` - Include or exclude example pages (default: include)
+- `--package` / `--no-package` - Include or exclude `package.json` (default: exclude)
+- `--minimal` - Shorthand for `--no-src --no-examples --no-package`
+- `--full` - Shorthand for `--src --examples --package`
 
 ```bash
-scratch dev [path] [options]
+scratch create mysite           # Interactive prompts
+scratch create mysite --full    # Include everything
+scratch create mysite --minimal # Minimal project (pages only)
 ```
 
-Starts a development server with hot reloading.
+### `scratch dev`
+
+Start the development server with hot module replacement. Watches for file changes and automatically rebuilds. Opens your browser to the local server.
+
+```bash
+scratch dev mysite
+```
+
+### `scratch build`
+
+Build your project for production. Compiles all MDX/MD files to static HTML, bundles JavaScript, and processes Tailwind CSS.
 
 **Options:**
-- `-d, --development` - Development mode
-- `-n, --no-open` - Do not open dev server endpoint automatically
-- `-p, --port <port>` - Port for dev server (default: 5173)
-- `--strict` - Do not inject PageWrapper component or missing imports
+- `--ssg [true/false]` - Enable static site generation to pre-render pages. (default: true)
+- `--development` - Build in development mode (unminified, with source maps)
 
-#### Preview server
+### `scratch preview`
 
-```bash
-scratch preview [path] [options]
-```
-
-Serves the built site locally for a production-like preview.
-
-**Options:**
-- `-n, --no-open` - Do not open preview server endpoint automatically
-- `-p, --port <port>` - Port for preview server (default: 4173)
-
-#### Clean build directory
+Preview the production build locally. Serves the `dist/` directory on a local server.
 
 ```bash
-scratch clean [path]
+scratch preview mysite
 ```
 
-Cleans the build directory and temporary files.
+### `scratch clean`
 
-## Architecture
+Remove build artifacts (`dist/` and `.scratch-build-cache/` directories).xs
 
-1. Scan `./pages` for MDX files
-2. Create TSX entry files in `.temp/client-src/` from templates
-3. Build Tailwind CSS using the Tailwind CLI
-4. (If SSG enabled) Build and render server modules:
-   - Create server JSX entry files in `.temp/server-src/`
-   - Run `Bun.build()` with server target
-   - Import compiled modules and render to HTML strings
-5. Run `Bun.build()` with browser target and MDX plugin:
-   - Wrap MDX components with `PageWrapper` via `createPreprocessMdxPlugin()`
-   - Inject missing component imports via `createPreprocessMdxPlugin()`
-   - Transform MDX files into React components
-6. Create HTML files with script/CSS references
-7. Inject frontmatter metadata into HTML
-8. Copy assets to `./build`
+## License
+
+MIT

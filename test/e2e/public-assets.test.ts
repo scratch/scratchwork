@@ -8,7 +8,7 @@ describe("Public assets", () => {
   test("files in public/ are copied to dist/", async () => {
     // 1. Create a fresh project
     const tempDir = await mkTempDir("public-assets-");
-    runCliSync(["init", "sandbox", "--full"], tempDir);
+    runCliSync(["create", "sandbox"], tempDir);
 
     const sandboxDir = path.join(tempDir, "sandbox");
     const publicDir = path.join(sandboxDir, "public");
