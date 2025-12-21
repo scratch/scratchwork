@@ -3,10 +3,10 @@
 import { Command } from 'commander';
 import fs from 'fs/promises';
 import { buildCommand } from './cmd/build';
+import { createCommand } from './cmd/create';
 import { devCommand } from './cmd/dev';
 import { previewCommand } from './cmd/preview';
 import { getBuildContext, setBuildContext } from './context';
-import { materializeTemplates } from './template';
 import log, { setLogLevel } from './logger';
 
 const program = new Command();
@@ -25,45 +25,7 @@ program
   .option('-E, --no-examples', 'Do not include example files')
   .action(async (path, options) => {
     try {
-      let includeExamples = options.examples;
-
-      // If neither flag provided, prompt interactively
-      if (includeExamples === undefined) {
-        const readline = await import('readline');
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-        const response = await new Promise<string>((resolve) => {
-          rl.question('Include examples? (Y/n) ', (answer) => {
-            rl.close();
-            resolve(answer.trim().toLowerCase());
-          });
-        });
-        includeExamples = response !== 'n' && response !== 'no';
-      }
-
-      const created = await materializeTemplates('default', path);
-
-      if (includeExamples) {
-        const exampleFiles = await materializeTemplates('examples', path);
-        created.push(...exampleFiles);
-      }
-
-      if (created.length > 0) {
-        log.info('Created:');
-        for (const file of created.sort()) {
-          log.info(`  ${file}`);
-        }
-        log.info('');
-        log.info('Start the development server:');
-        if (path !== '.') {
-          log.info(`  cd ${path}`);
-        }
-        log.info('  scratch dev');
-      } else {
-        log.info('No files created (project already exists)');
-      }
+      await createCommand(path, options);
     } catch (error) {
       log.error('Failed to create project:', error);
       process.exit(1);
