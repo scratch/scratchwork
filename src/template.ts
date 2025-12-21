@@ -57,7 +57,7 @@ function isSrcFile(relativePath: string): boolean {
 export interface MaterializeOptions {
   /** Include src/ directory (default: true) */
   includeSrc?: boolean;
-  /** Include pages/examples/ (default: false) */
+  /** Include pages/examples/ (default: true) */
   includeExamples?: boolean;
   /** Overwrite existing files (default: false) */
   overwrite?: boolean;
@@ -78,7 +78,7 @@ export async function materializeProjectTemplates(
   targetDir: string,
   options: MaterializeOptions = {}
 ): Promise<string[]> {
-  const { includeSrc = true, includeExamples = false, overwrite = false } = options;
+  const { includeSrc = true, includeExamples = true, overwrite = false } = options;
   const created: string[] = [];
 
   await fs.mkdir(targetDir, { recursive: true });

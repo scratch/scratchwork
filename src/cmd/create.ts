@@ -1,37 +1,78 @@
+import path from 'path';
+import fs from 'fs/promises';
 import { materializeProjectTemplates } from '../template';
+import { BUILD_DEPENDENCIES } from '../context';
 import log from '../logger';
 
+interface CreateOptions {
+  src?: boolean;
+  examples?: boolean;
+  package?: boolean;
+  minimal?: boolean;
+  full?: boolean;
+}
+
 /**
- * Prompt user with a yes/no question.
- * Returns true for yes (default), false for no.
+ * Generate a package.json file for the project.
  */
-async function promptYesNo(question: string): Promise<boolean> {
-  const readline = await import('readline');
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  const response = await new Promise<string>((resolve) => {
-    rl.question(`${question} (Y/n) `, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase());
-    });
-  });
-  return response !== 'n' && response !== 'no';
+async function generatePackageJson(targetDir: string, projectName: string): Promise<void> {
+  const packageJson = {
+    name: projectName,
+    private: true,
+    scripts: {
+      dev: 'scratch dev',
+      build: 'scratch build',
+    },
+    dependencies: Object.fromEntries(
+      BUILD_DEPENDENCIES.map(pkg => [pkg, 'latest'])
+    ),
+  };
+
+  const packageJsonPath = path.join(targetDir, 'package.json');
+  await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
 }
 
 /**
  * Create a new Scratch project.
- * Always prompts interactively for options.
+ * Flag-based with sensible defaults.
+ *
+ * Defaults: --src, --examples, --no-package
+ * Shorthands: --minimal (no src, no examples, no package), --full (everything)
  */
-export async function createCommand(targetPath: string) {
-  const includeSrc = await promptYesNo('Include src/ directory?');
-  const includeExamples = await promptYesNo('Include examples?');
+export async function createCommand(targetPath: string, options: CreateOptions = {}) {
+  // Start with defaults
+  let includeSrc = true;
+  let includeExamples = true;
+  let includePackage = false;
+
+  // Apply shorthand flags first
+  if (options.minimal) {
+    includeSrc = false;
+    includeExamples = false;
+    includePackage = false;
+  }
+  if (options.full) {
+    includeSrc = true;
+    includeExamples = true;
+    includePackage = true;
+  }
+
+  // Explicit flags override shorthands
+  if (options.src !== undefined) includeSrc = options.src;
+  if (options.examples !== undefined) includeExamples = options.examples;
+  if (options.package !== undefined) includePackage = options.package;
 
   const created = await materializeProjectTemplates(targetPath, {
     includeSrc,
     includeExamples,
   });
+
+  // Generate package.json if requested
+  if (includePackage) {
+    const projectName = path.basename(path.resolve(targetPath));
+    await generatePackageJson(targetPath, projectName);
+    created.push('package.json');
+  }
 
   if (created.length > 0) {
     log.info('Created:');
