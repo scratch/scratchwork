@@ -1,4 +1,4 @@
-import { materializeTemplates } from '../template';
+import { materializeProjectTemplates } from '../template';
 import log from '../logger';
 
 interface CreateOptions {
@@ -27,12 +27,9 @@ export async function createCommand(targetPath: string, options: CreateOptions =
     includeExamples = response !== 'n' && response !== 'no';
   }
 
-  const created = await materializeTemplates('default', targetPath);
-
-  if (includeExamples) {
-    const exampleFiles = await materializeTemplates('examples', targetPath);
-    created.push(...exampleFiles);
-  }
+  const created = await materializeProjectTemplates(targetPath, {
+    includeExamples,
+  });
 
   if (created.length > 0) {
     log.info('Created:');

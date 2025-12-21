@@ -52,19 +52,19 @@ Components from both directories are auto-imported into MDX files by basename.
 
 Templates are embedded directly into the compiled executable for portability.
 
-**Source directories** (`template/`):
-- `default/` - Default project files (pages, components, theme.css, .gitignore)
-- `examples/` - Example pages and components (Counter, TodoList, markdown examples)
-- `internal/` - Internal build infrastructure (entry-client.tsx, entry-server.jsx)
+**Directory structure** (`template/`):
+- `_build/` - Internal build infrastructure (entry-client.tsx, entry-server.jsx) - never copied to user projects
+- `pages/examples/` - Example pages (TodoList, markdown examples) - optionally included via `--examples` flag
+- Everything else - Default project files copied to new projects (pages, components, theme.css, .gitignore)
 
-**Compilation**: `scripts/compile-templates.ts` reads all template files and generates `src/template.generated.ts` containing escaped file contents. This runs automatically during `bun run build`.
+**Compilation**: `scripts/compile-templates.ts` reads all template files and generates `src/template.generated.ts` as a flat `{ path: content }` object. This runs automatically during `bun run build`.
 
 **Runtime API** (`src/template.ts`):
-- `materializeTemplates(category, targetDir)` - Write all templates in a category to disk
-- `materializeTemplate(category, filename, targetPath)` - Write a single template file
-- `getTemplateContent(category, filename)` - Get template content as string
-- `hasTemplate(category, filename)` - Check if template exists
-- `listTemplateFiles(category)` - List all files in a category
+- `materializeProjectTemplates(targetDir, options)` - Write project templates to disk (excludes `_build/`, optionally includes examples)
+- `materializeTemplate(templatePath, targetPath)` - Write a single template file
+- `getTemplateContent(templatePath)` - Get template content as string
+- `hasTemplate(templatePath)` - Check if template exists
+- `listTemplateFiles()` - List all template files
 
 **Fallback resolution**: During build, if a required file is missing from the user's project, the embedded template is materialized to `.scratch-build-cache/embedded-templates/` and used instead.
 
@@ -83,10 +83,10 @@ Templates are embedded directly into the compiled executable for portability.
 
 ### File Search Patterns
 The build system searches multiple file names for key files, falling back to embedded templates:
-- **CSS input**: `theme.css` → `tailwind.css` → `index.css` → `globals.css` → embedded `default/theme.css`
-- **Client entry**: `entry-client.tsx` → `entry.tsx` → `client.tsx` → embedded `internal/entry-client.tsx`
-- **Server entry**: `entry-server.jsx` → `index.jsx` → `server.jsx` → embedded `internal/entry-server.jsx`
-- **PageWrapper**: `components/PageWrapper.jsx` or `.tsx` → embedded `default/components/PageWrapper.jsx`
+- **CSS input**: `theme.css` → `tailwind.css` → `index.css` → `globals.css` → embedded `theme.css`
+- **Client entry**: `entry-client.tsx` → `entry.tsx` → `client.tsx` → `build/entry-client.tsx` → `_build/entry-client.tsx` → embedded `_build/entry-client.tsx`
+- **Server entry**: `entry-server.jsx` → `index.jsx` → `server.jsx` → `build/entry-server.jsx` → `_build/entry-server.jsx` → embedded `_build/entry-server.jsx`
+- **PageWrapper**: `components/PageWrapper.jsx` or `.tsx` → embedded `components/PageWrapper.jsx`
 
 ### Development Server
 The dev server (`src/cmd/dev.ts`) provides:
@@ -129,6 +129,7 @@ bun run src/index.ts dev /tmp/test-scratch
 2. Build config is in `src/buncfg.ts`
 
 ### Adding template files
-1. Add to `template/default/` for user-facing files (copied to new projects)
-2. Add to `template/internal/` for internal build infrastructure (not user-facing)
-3. Run `bun run compile-templates` to regenerate `src/template.generated.ts`, or just run `bun run build` which does this automatically
+1. Add to `template/` for user-facing files (copied to new projects)
+2. Add to `template/_build/` for internal build infrastructure (not copied to user projects)
+3. Add to `template/pages/examples/` for example pages (only copied when `--examples` flag is used)
+4. Run `bun run compile-templates` to regenerate `src/template.generated.ts`, or just run `bun run build` which does this automatically

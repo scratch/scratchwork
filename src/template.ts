@@ -1,32 +1,40 @@
 import fs from 'fs/promises';
 import path from 'path';
 import log from './logger';
-import { templates, type TemplateCategory } from './template.generated';
+import { templates } from './template.generated';
 
 export { templates };
-export type { TemplateCategory };
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
 /**
- * Write all templates from a category to a target directory.
- * Does not overwrite existing files unless overwrite is true.
+ * Write project templates to a target directory.
+ * Excludes _build/ files (internal build infrastructure).
+ * Optionally includes pages/examples/ files.
  * Returns list of files that were created.
  */
-export async function materializeTemplates(
-  category: TemplateCategory,
+export async function materializeProjectTemplates(
   targetDir: string,
-  options: { overwrite?: boolean } = {}
+  options: { includeExamples?: boolean; overwrite?: boolean } = {}
 ): Promise<string[]> {
-  const { overwrite = false } = options;
+  const { includeExamples = false, overwrite = false } = options;
   const created: string[] = [];
-  const templateFiles = templates[category];
 
   await fs.mkdir(targetDir, { recursive: true });
 
-  for (const [relativePath, content] of Object.entries(templateFiles)) {
+  for (const [relativePath, content] of Object.entries(templates)) {
+    // Skip _build/ files (internal build infrastructure)
+    if (relativePath.startsWith('_build/')) {
+      continue;
+    }
+
+    // Skip examples unless explicitly included
+    if (!includeExamples && relativePath.startsWith('pages/examples/')) {
+      continue;
+    }
+
     const targetPath = path.join(targetDir, relativePath);
     const targetDirPath = path.dirname(targetPath);
 
@@ -51,15 +59,13 @@ export async function materializeTemplates(
  * Creates parent directories as needed.
  */
 export async function materializeTemplate(
-  category: TemplateCategory,
-  filename: string,
+  templatePath: string,
   targetPath: string
 ): Promise<void> {
-  const templateFiles = templates[category] as Record<string, string>;
-  const content = templateFiles[filename];
+  const content = templates[templatePath];
 
   if (!content) {
-    throw new Error(`Template not found: ${category}/${filename}`);
+    throw new Error(`Template not found: ${templatePath}`);
   }
 
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
@@ -69,15 +75,11 @@ export async function materializeTemplate(
 /**
  * Get the content of a template file without writing to disk.
  */
-export function getTemplateContent(
-  category: TemplateCategory,
-  filename: string
-): string {
-  const templateFiles = templates[category] as Record<string, string>;
-  const content = templateFiles[filename];
+export function getTemplateContent(templatePath: string): string {
+  const content = templates[templatePath];
 
   if (!content) {
-    throw new Error(`Template not found: ${category}/${filename}`);
+    throw new Error(`Template not found: ${templatePath}`);
   }
 
   return content;
@@ -86,17 +88,13 @@ export function getTemplateContent(
 /**
  * Check if a template file exists.
  */
-export function hasTemplate(
-  category: TemplateCategory,
-  filename: string
-): boolean {
-  const templateFiles = templates[category] as Record<string, string>;
-  return filename in templateFiles;
+export function hasTemplate(templatePath: string): boolean {
+  return templatePath in templates;
 }
 
 /**
- * List all template files in a category.
+ * List all template files.
  */
-export function listTemplateFiles(category: TemplateCategory): string[] {
-  return Object.keys(templates[category]);
+export function listTemplateFiles(): string[] {
+  return Object.keys(templates);
 }
