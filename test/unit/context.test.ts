@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { BuildContext, Entry, setBuildContext, getBuildContext } from '../../src/context';
 import { mkTempDir } from '../test-util';
 import path from 'path';
-import { materializeTemplates } from '../../src/template';
+import { materializeProjectTemplates } from '../../src/template';
 import fs from 'fs/promises';
 
 let tempDir: string;
@@ -14,7 +14,7 @@ beforeAll(async () => {
 describe('BuildContext.constructor', () => {
   test('constructs build context with correct root directory', async () => {
     const projectDir = path.join(tempDir, 'project');
-    await materializeTemplates('default', projectDir);
+    await materializeProjectTemplates(projectDir);
 
     // sleep for 1 second to ensure the files are created
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -213,7 +213,7 @@ describe('BuildContext path finding methods', () => {
 describe('BuildContext.getEntries', () => {
   test('finds and creates entries for all mdx files', async () => {
     const projectDir = path.join(tempDir, 'get-entries-test');
-    await materializeTemplates('default', projectDir);
+    await materializeProjectTemplates(projectDir);
 
     // Add a short delay to ensure files are written
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -228,7 +228,7 @@ describe('BuildContext.getEntries', () => {
 
   test('caches entries on subsequent calls', async () => {
     const projectDir = path.join(tempDir, 'entries-cache-test');
-    await materializeTemplates('default', projectDir);
+    await materializeProjectTemplates(projectDir);
     const context = new BuildContext({ path: projectDir });
 
     const entries1 = await context.getEntries();

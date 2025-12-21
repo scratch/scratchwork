@@ -2,13 +2,7 @@ import { buildFileMap, type FileMapResult } from './util';
 import _path from 'path';
 import fs from 'fs/promises';
 import { globSync } from 'fast-glob';
-import {
-  templates,
-  materializeTemplate,
-  getTemplateContent,
-  hasTemplate,
-  type TemplateCategory,
-} from './template';
+import { templates, materializeTemplate, hasTemplate } from './template';
 import log from './logger';
 
 const BUILD_DEPENDENCIES = ['react', 'react-dom', '@mdx-js/react', 'tailwindcss', '@tailwindcss/cli'];
@@ -199,7 +193,7 @@ export class BuildContext {
    */
   private async resolvePathWithFallback(
     candidates: string[],
-    fallback: { category: TemplateCategory; filename: string }
+    fallbackTemplatePath: string
   ): Promise<string> {
     for (const candidate of candidates) {
       const userPath = _path.resolve(this.rootDir, candidate);
@@ -207,7 +201,7 @@ export class BuildContext {
         return userPath;
       }
     }
-    return this.materializeEmbeddedFile(fallback.category, fallback.filename);
+    return this.materializeEmbeddedFile(fallbackTemplatePath);
   }
 
   /**
@@ -219,7 +213,7 @@ export class BuildContext {
     if (await fs.exists(userMarkdownDir)) {
       return userMarkdownDir;
     }
-    return this.materializeEmbeddedDir('default', 'components/markdown');
+    return this.materializeEmbeddedDir('components/markdown');
   }
 
   /**
@@ -229,7 +223,7 @@ export class BuildContext {
   async tailwindCssSrcPath(): Promise<string> {
     return this.resolvePathWithFallback(
       ['theme.css', 'tailwind.css', 'index.css', 'globals.css'],
-      { category: 'default', filename: 'theme.css' }
+      'theme.css'
     );
   }
 
@@ -239,8 +233,8 @@ export class BuildContext {
    */
   async clientTsxSrcPath(): Promise<string> {
     return this.resolvePathWithFallback(
-      ['entry-client.tsx', 'entry.tsx', 'client.tsx'],
-      { category: 'internal', filename: 'entry-client.tsx' }
+      ['entry-client.tsx', 'entry.tsx', 'client.tsx', 'build/entry-client.tsx', '_build/entry-client.tsx'],
+      '_build/entry-client.tsx'
     );
   }
 
@@ -250,8 +244,8 @@ export class BuildContext {
    */
   async serverJsxSrcPath(): Promise<string> {
     return this.resolvePathWithFallback(
-      ['entry-server.jsx', 'index.jsx', 'server.jsx'],
-      { category: 'internal', filename: 'entry-server.jsx' }
+      ['entry-server.jsx', 'index.jsx', 'server.jsx', 'build/entry-server.jsx', '_build/entry-server.jsx'],
+      '_build/entry-server.jsx'
     );
   }
 
@@ -262,7 +256,7 @@ export class BuildContext {
   async pageWrapperPath(): Promise<string> {
     return this.resolvePathWithFallback(
       ['components/PageWrapper.jsx', 'components/PageWrapper.tsx'],
-      { category: 'default', filename: 'components/PageWrapper.jsx' }
+      'components/PageWrapper.jsx'
     );
   }
 
@@ -270,18 +264,14 @@ export class BuildContext {
    * Materialize a single embedded template file to the temp directory.
    * Returns the path to the materialized file.
    */
-  private async materializeEmbeddedFile(
-    category: TemplateCategory,
-    filename: string
-  ): Promise<string> {
-    const cacheKey = `${category}/${filename}`;
-    if (this.materializedPaths.has(cacheKey)) {
-      return this.materializedPaths.get(cacheKey)!;
+  private async materializeEmbeddedFile(templatePath: string): Promise<string> {
+    if (this.materializedPaths.has(templatePath)) {
+      return this.materializedPaths.get(templatePath)!;
     }
 
-    const targetPath = _path.resolve(this.embeddedTemplatesDir(), category, filename);
-    await materializeTemplate(category, filename, targetPath);
-    this.materializedPaths.set(cacheKey, targetPath);
+    const targetPath = _path.resolve(this.embeddedTemplatesDir(), templatePath);
+    await materializeTemplate(templatePath, targetPath);
+    this.materializedPaths.set(templatePath, targetPath);
     return targetPath;
   }
 
@@ -289,21 +279,17 @@ export class BuildContext {
    * Materialize all files in an embedded template subdirectory.
    * Returns the path to the materialized directory.
    */
-  private async materializeEmbeddedDir(
-    category: TemplateCategory,
-    dirname: string
-  ): Promise<string> {
-    const cacheKey = `${category}/${dirname}/`;
+  private async materializeEmbeddedDir(dirname: string): Promise<string> {
+    const cacheKey = `${dirname}/`;
     if (this.materializedPaths.has(cacheKey)) {
       return this.materializedPaths.get(cacheKey)!;
     }
 
-    const targetDir = _path.resolve(this.embeddedTemplatesDir(), category, dirname);
-    const templateFiles = templates[category] as Record<string, string>;
+    const targetDir = _path.resolve(this.embeddedTemplatesDir(), dirname);
 
     // Find all files that start with this dirname
     const prefix = dirname + '/';
-    for (const [filename, content] of Object.entries(templateFiles)) {
+    for (const [filename, content] of Object.entries(templates)) {
       if (filename.startsWith(prefix)) {
         const relativePath = filename.slice(prefix.length);
         const targetPath = _path.resolve(targetDir, relativePath);
@@ -368,7 +354,6 @@ export class BuildContext {
       // Fallback: Add PageWrapper from embedded template if not in project
       if (!('PageWrapper' in result.map)) {
         const pageWrapperPath = await this.materializeEmbeddedFile(
-          'default',
           'components/PageWrapper.jsx'
         );
         result.map['PageWrapper'] = pageWrapperPath;
@@ -379,9 +364,9 @@ export class BuildContext {
       for (const comp of markdownComponents) {
         if (!(comp in result.map)) {
           // Check for .tsx variant first
-          const filename = `components/markdown/${comp}.tsx`;
-          if (hasTemplate('default', filename)) {
-            const componentPath = await this.materializeEmbeddedFile('default', filename);
+          const templatePath = `components/markdown/${comp}.tsx`;
+          if (hasTemplate(templatePath)) {
+            const componentPath = await this.materializeEmbeddedFile(templatePath);
             result.map[comp] = componentPath;
           }
         }
