@@ -7,7 +7,10 @@ scratch is a CLI tool for building static MDX-based websites using Bun. Users cr
 ## Architecture
 
 ### CLI Commands (`src/index.ts`)
-- `create [path]` - Scaffold a new project from templates
+- `init [path]` - Initialize a minimal project (pages/, public/, .gitignore, AGENTS.md)
+- `create [path]` - Create a project with interactive prompts for components and examples
+  - `--full` / `--no-full` - Include/exclude theme.css and components/
+  - `--examples` / `--no-examples` - Include/exclude example pages
 - `build [path]` - Build the static site
 - `dev [path]` - Development server with hot reload
 - `preview [path]` - Preview the built site

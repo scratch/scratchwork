@@ -6,20 +6,82 @@ import { templates } from './template.generated';
 export { templates };
 
 // ============================================================================
+// TEMPLATE TIERS
+// ============================================================================
+
+/**
+ * Files included in minimal tier (init command, or create --no-full --no-examples)
+ * All other project files are in the "full" tier (components, theme.css)
+ */
+const MINIMAL_FILES = new Set([
+  '.gitignore',
+  'AGENTS.md',
+  'pages/index.mdx',
+  'pages/Counter.jsx',
+  'public/scratch.svg',
+]);
+
+/**
+ * Check if a file belongs to the minimal tier
+ */
+function isMinimalFile(relativePath: string): boolean {
+  // Check exact matches
+  if (MINIMAL_FILES.has(relativePath)) {
+    return true;
+  }
+  // public/ directory (for any future files)
+  if (relativePath.startsWith('public/')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if a file belongs to the examples tier
+ */
+function isExamplesFile(relativePath: string): boolean {
+  return relativePath.startsWith('pages/examples/');
+}
+
+/**
+ * Check if a file belongs to the full tier (components + theme)
+ */
+function isFullFile(relativePath: string): boolean {
+  return (
+    relativePath === 'theme.css' ||
+    relativePath.startsWith('components/')
+  );
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+export interface MaterializeOptions {
+  /** Include theme.css and components/ (default: true) */
+  includeComponents?: boolean;
+  /** Include pages/examples/ (default: false) */
+  includeExamples?: boolean;
+  /** Overwrite existing files (default: false) */
+  overwrite?: boolean;
+}
 
 /**
  * Write project templates to a target directory.
  * Excludes _build/ files (internal build infrastructure).
- * Optionally includes pages/examples/ files.
+ *
+ * Tiers:
+ * - Minimal: pages/index.mdx, pages/Counter.jsx, public/, .gitignore, AGENTS.md
+ * - Full components: theme.css, components/* (controlled by includeComponents)
+ * - Examples: pages/examples/* (controlled by includeExamples)
+ *
  * Returns list of files that were created.
  */
 export async function materializeProjectTemplates(
   targetDir: string,
-  options: { includeExamples?: boolean; overwrite?: boolean } = {}
+  options: MaterializeOptions = {}
 ): Promise<string[]> {
-  const { includeExamples = false, overwrite = false } = options;
+  const { includeComponents = true, includeExamples = false, overwrite = false } = options;
   const created: string[] = [];
 
   await fs.mkdir(targetDir, { recursive: true });
@@ -30,8 +92,24 @@ export async function materializeProjectTemplates(
       continue;
     }
 
-    // Skip examples unless explicitly included
-    if (!includeExamples && relativePath.startsWith('pages/examples/')) {
+    // Determine if file should be included based on tier
+    const isMinimal = isMinimalFile(relativePath);
+    const isFull = isFullFile(relativePath);
+    const isExamples = isExamplesFile(relativePath);
+
+    // Skip full tier files unless includeComponents is true
+    if (isFull && !includeComponents) {
+      continue;
+    }
+
+    // Skip examples unless includeExamples is true
+    if (isExamples && !includeExamples) {
+      continue;
+    }
+
+    // Skip files that don't belong to any known tier (shouldn't happen)
+    if (!isMinimal && !isFull && !isExamples) {
+      log.debug(`Skipping unknown tier file: ${relativePath}`);
       continue;
     }
 
