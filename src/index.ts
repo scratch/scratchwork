@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import fs from 'fs/promises';
 import { buildCommand } from './cmd/build';
 import { createCommand } from './cmd/create';
+import { initCommand } from './cmd/init';
 import { devCommand } from './cmd/dev';
 import { previewCommand } from './cmd/preview';
 import { getBuildContext, setBuildContext } from './context';
@@ -19,13 +20,27 @@ program
   .option('-q, --quiet', 'Quiet mode (errors only)');
 
 program
-  .command('create')
+  .command('init')
+  .description('Initialize a Scratch project (flag-based, no prompts)')
   .argument('[path]', 'Path to project directory', '.')
+  .option('-f, --full', 'Include theme.css and components')
   .option('-e, --examples', 'Include example files')
-  .option('-E, --no-examples', 'Do not include example files')
   .action(async (path, options) => {
     try {
-      await createCommand(path, options);
+      await initCommand(path, options);
+    } catch (error) {
+      log.error('Failed to initialize project:', error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('create')
+  .description('Create a new Scratch project (interactive prompts)')
+  .argument('[path]', 'Path to project directory', '.')
+  .action(async (path) => {
+    try {
+      await createCommand(path);
     } catch (error) {
       log.error('Failed to create project:', error);
       process.exit(1);
