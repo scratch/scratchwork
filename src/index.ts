@@ -6,8 +6,7 @@ import { buildCommand } from './cmd/build';
 import { devCommand } from './cmd/dev';
 import { previewCommand } from './cmd/preview';
 import { getBuildContext, setBuildContext } from './context';
-import { mirror } from './util';
-import template from './template';
+import { materializeTemplates } from './template';
 import log, { setLogLevel } from './logger';
 
 const program = new Command();
@@ -44,10 +43,10 @@ program
         includeExamples = response !== 'n' && response !== 'no';
       }
 
-      const created = await mirror(template.defaultTemplateDir, path, { recursive: true });
+      const created = await materializeTemplates('default', path);
 
       if (includeExamples) {
-        const exampleFiles = await mirror(template.examplesTemplateDir, path, { recursive: true });
+        const exampleFiles = await materializeTemplates('examples', path);
         created.push(...exampleFiles);
       }
 
@@ -62,10 +61,6 @@ program
           log.info(`  cd ${path}`);
         }
         log.info('  scratch dev');
-        if (!includeExamples) {
-          log.info('');
-          log.info('To add examples later, run: scratch examples');
-        }
       } else {
         log.info('No files created (project already exists)');
       }
@@ -148,26 +143,6 @@ program
       log.info('Cleaned dist/ and .scratch-build-cache/');
     } catch (error) {
       log.error('Clean failed:', error);
-      process.exit(1);
-    }
-  });
-
-program
-  .command('examples')
-  .argument('[path]', 'Path to project directory', '.')
-  .action(async (path) => {
-    try {
-      const created = await mirror(template.examplesTemplateDir, path, { recursive: true });
-      if (created.length > 0) {
-        log.info('Added examples:');
-        for (const file of created.sort()) {
-          log.info(`  ${file}`);
-        }
-      } else {
-        log.info('No files created (examples already exist)');
-      }
-    } catch (error) {
-      log.error('Failed to add examples:', error);
       process.exit(1);
     }
   });
