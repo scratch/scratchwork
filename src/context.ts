@@ -195,17 +195,30 @@ export class BuildContext {
   }
 
   /**
+   * Resolve a path by checking candidates in the project, falling back to embedded template.
+   */
+  private async resolvePathWithFallback(
+    candidates: string[],
+    fallback: { category: TemplateCategory; filename: string }
+  ): Promise<string> {
+    for (const candidate of candidates) {
+      const userPath = _path.resolve(this.rootDir, candidate);
+      if (await fs.exists(userPath)) {
+        return userPath;
+      }
+    }
+    return this.materializeEmbeddedFile(fallback.category, fallback.filename);
+  }
+
+  /**
    * Get the path to the markdown components directory.
    * Falls back to embedded templates if not in project.
    */
   async markdownComponentsDir(): Promise<string> {
-    // Check if user has their own markdown components
     const userMarkdownDir = _path.resolve(this.componentsDir, 'markdown');
     if (await fs.exists(userMarkdownDir)) {
       return userMarkdownDir;
     }
-
-    // Materialize embedded markdown components to temp dir
     return this.materializeEmbeddedDir('default', 'components/markdown');
   }
 
@@ -214,54 +227,32 @@ export class BuildContext {
    * Falls back to embedded template if not in project.
    */
   async tailwindCssSrcPath(): Promise<string> {
-    const candidates = ['theme.css', 'tailwind.css', 'index.css', 'globals.css'];
-
-    // Check project root for any of the candidates
-    for (const filename of candidates) {
-      const userPath = _path.resolve(this.rootDir, filename);
-      if (await fs.exists(userPath)) {
-        return userPath;
-      }
-    }
-
-    // Fall back to embedded theme.css
-    return this.materializeEmbeddedFile('default', 'theme.css');
+    return this.resolvePathWithFallback(
+      ['theme.css', 'tailwind.css', 'index.css', 'globals.css'],
+      { category: 'default', filename: 'theme.css' }
+    );
   }
 
   /**
    * Get the path to the client entry template.
-   * Always uses embedded template (it contains placeholders).
+   * Falls back to embedded template if not in project.
    */
   async clientTsxSrcPath(): Promise<string> {
-    // Check if user has a custom entry file
-    const candidates = ['entry-client.tsx', 'entry.tsx', 'client.tsx'];
-    for (const filename of candidates) {
-      const userPath = _path.resolve(this.rootDir, filename);
-      if (await fs.exists(userPath)) {
-        return userPath;
-      }
-    }
-
-    // Use embedded entry-client.tsx
-    return this.materializeEmbeddedFile('internal', 'entry-client.tsx');
+    return this.resolvePathWithFallback(
+      ['entry-client.tsx', 'entry.tsx', 'client.tsx'],
+      { category: 'internal', filename: 'entry-client.tsx' }
+    );
   }
 
   /**
    * Get the path to the server entry template.
-   * Always uses embedded template (it contains placeholders).
+   * Falls back to embedded template if not in project.
    */
   async serverJsxSrcPath(): Promise<string> {
-    // Check if user has a custom entry file
-    const candidates = ['entry-server.jsx', 'index.jsx', 'server.jsx'];
-    for (const filename of candidates) {
-      const userPath = _path.resolve(this.rootDir, filename);
-      if (await fs.exists(userPath)) {
-        return userPath;
-      }
-    }
-
-    // Use embedded entry-server.jsx
-    return this.materializeEmbeddedFile('internal', 'entry-server.jsx');
+    return this.resolvePathWithFallback(
+      ['entry-server.jsx', 'index.jsx', 'server.jsx'],
+      { category: 'internal', filename: 'entry-server.jsx' }
+    );
   }
 
   /**
@@ -269,18 +260,10 @@ export class BuildContext {
    * Falls back to embedded template if not in project.
    */
   async pageWrapperPath(): Promise<string> {
-    const candidates = ['components/PageWrapper.jsx', 'components/PageWrapper.tsx'];
-
-    // Check project for PageWrapper
-    for (const filename of candidates) {
-      const userPath = _path.resolve(this.rootDir, filename);
-      if (await fs.exists(userPath)) {
-        return userPath;
-      }
-    }
-
-    // Fall back to embedded PageWrapper
-    return this.materializeEmbeddedFile('default', 'components/PageWrapper.jsx');
+    return this.resolvePathWithFallback(
+      ['components/PageWrapper.jsx', 'components/PageWrapper.tsx'],
+      { category: 'default', filename: 'components/PageWrapper.jsx' }
+    );
   }
 
   /**
