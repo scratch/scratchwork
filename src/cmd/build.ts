@@ -113,14 +113,23 @@ async function doBuild(options: BuildOptions = {}) {
 
   log.debug(`Building with Bun${ssg ? ' (SSG)' : ''}...`);
 
+  // Timing helper
+  const timings: Record<string, number> = {};
+  const time = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+    const start = performance.now();
+    const result = await fn();
+    timings[name] = performance.now() - start;
+    return result;
+  };
+
   // Reset preprocessing state from any previous builds
   resetPreprocessingState();
 
   // Step 1: Ensure build dependencies are installed
-  await ctx.ensureBuildDependencies();
+  await time('1. Dependencies', () => ctx.ensureBuildDependencies());
 
   // Step 2: Reset directories (preserves node_modules)
-  await ctx.reset();
+  await time('2. Reset dirs', () => ctx.reset());
 
   // Step 3: Create TypeScript entry files for each MDX page
   log.debug('=== TSX ENTRY FILES ===');
@@ -134,16 +143,16 @@ async function doBuild(options: BuildOptions = {}) {
       `Then run 'scratch build' again.`
     );
   }
-  const tsxEntryPts = await createTsxEntries();
+  const tsxEntryPts = await time('3. TSX entries', () => createTsxEntries());
 
   // Step 4: Build Tailwind CSS separately
   log.debug('=== TAILWIND CSS ===');
-  const cssFilename = await buildTailwindCss();
+  const cssFilename = await time('4. Tailwind CSS', () => buildTailwindCss());
 
   // Step 5 (SSG only): Build and render server modules
   if (ssg) {
     log.debug('=== SERVER BUILD (SSG) ===');
-    await buildAndRenderServerModules();
+    await time('5. Server build', () => buildAndRenderServerModules());
   }
 
   // Step 6: Run Bun.build() on the TSX entry points (client build)
@@ -155,7 +164,7 @@ async function doBuild(options: BuildOptions = {}) {
   });
 
   log.debug('=== CLIENT BUILD ===');
-  const result = await Bun.build(buildConfig);
+  const result = await time('6. Client build', () => Bun.build(buildConfig));
 
   if (!result.success) {
     log.error('Build failed:');
@@ -212,26 +221,34 @@ async function doBuild(options: BuildOptions = {}) {
 
   // Step 7: Create HTML files with proper script references
   log.debug('=== HTML GENERATION ===');
-  await createHtmlEntries(ssg, cssFilename, jsOutputMap);
+  await time('7. HTML generation', () => createHtmlEntries(ssg, cssFilename, jsOutputMap));
 
   // Step 8: Inject frontmatter meta tags into HTML files
   log.debug('=== FRONTMATTER INJECTION ===');
-  await injectFrontmatterMeta();
+  await time('8. Frontmatter', () => injectFrontmatterMeta());
 
   // Step 9: Copy to build directory
-  await fs.cp(ctx.clientCompiledDir(), ctx.buildDir, { recursive: true });
+  await time('9. Copy to dist', () => fs.cp(ctx.clientCompiledDir(), ctx.buildDir, { recursive: true }));
 
   // Step 10: Copy static assets from public directory
   if (await fs.exists(ctx.staticDir)) {
     log.debug('=== STATIC ASSETS ===');
-    await fs.cp(ctx.staticDir, ctx.buildDir, { recursive: true });
-    const files = await fs.readdir(ctx.staticDir);
-    for (const file of files) {
-      log.debug(`  ${file}`);
-    }
+    await time('10. Static assets', async () => {
+      await fs.cp(ctx.staticDir, ctx.buildDir, { recursive: true });
+      const files = await fs.readdir(ctx.staticDir);
+      for (const file of files) {
+        log.debug(`  ${file}`);
+      }
+    });
   }
 
   log.debug(`Output in: ${ctx.buildDir}`);
+
+  // Print timing breakdown
+  log.debug('=== TIMING BREAKDOWN ===');
+  for (const [name, ms] of Object.entries(timings)) {
+    log.debug(`  ${name}: ${ms.toFixed(0)}ms`);
+  }
 }
 
 /**
