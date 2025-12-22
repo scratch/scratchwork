@@ -8,7 +8,7 @@
 
 ```bash
 # Install scratch
-[TBD]
+curl -fsSL https://scratch.dev/install.sh | bash
 
 # Create a new project
 scratch create
@@ -120,6 +120,10 @@ scratch preview mysite
 ### `scratch clean`
 
 Remove build artifacts (`dist/` and `.scratch-build-cache/` directories).xs
+
+### `scratch update`
+
+Update the scratch executable to the latest version
 
 ## License
 
