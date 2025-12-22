@@ -21,9 +21,9 @@ scratch dev
 
 Scratch was designed for **collaborative writing with coding agents** like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in [Markdown](https://daringfireball.net/projects/markdown/) and embed React components when it's easier to express yourselve with code.
 
-Scratch uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing. Use default styling or change the look and feel of your work with [Tailwind CSS](https://tailwindcss.com/) and custom Markdown components.
+Scratch uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing.
 
-When you're ready, `scratch build` your project into a static website that can be hosted anywhere. Scratch is built on [Bun](https://bun.com/) so builds are lightning-fast and typescript works out-of-the-box.
+When you're ready, `scratch build` your project into a static website that can be hosted anywhere.
 
 ## No Boilerplate
 
