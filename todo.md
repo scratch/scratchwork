@@ -1,5 +1,5 @@
 # Todo
 
-- [ ] dev server should handle newly-added components
-- [ ] make sure dark mode looks good
+- [x] dev server should handle newly-added components
 - [x] support svg favicons
+- [ ] make sure dark mode looks good
