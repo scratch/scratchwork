@@ -5,7 +5,7 @@ set -e
 # Usage: curl -fsSL https://raw.githubusercontent.com/scratch/scratch/main/install.sh | sh
 
 REPO="scratch/scratch"
-INSTALL_DIR="$HOME/.scratch/bin"
+INSTALL_DIR="$HOME/.local/bin"
 BINARY_NAME="scratch"
 
 # Colors for output
