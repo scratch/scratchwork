@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./template/public/scratch.svg" alt="Scratch" height="100" />
+  <img src="./template/public/scratch.svg" alt="Scratch" height="200" />
 </p>
 
 <h1 align="center">Scratch</h1>
