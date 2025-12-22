@@ -21,7 +21,7 @@ interface Checksums {
 /**
  * Get the platform identifier for the current system.
  */
-function getPlatform(): string {
+export function getPlatform(): string {
   const os = process.platform;
   const arch = process.arch;
 
@@ -38,7 +38,7 @@ function getPlatform(): string {
  * Compare two semver versions.
  * Returns: 1 if a > b, -1 if a < b, 0 if equal
  */
-function compareVersions(a: string, b: string): number {
+export function compareVersions(a: string, b: string): number {
   const partsA = a.replace(/^v/, '').split('.').map(Number);
   const partsB = b.replace(/^v/, '').split('.').map(Number);
 
