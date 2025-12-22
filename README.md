@@ -1,11 +1,7 @@
 <p align="center">
-  <img src="./template/public/scratch.svg" alt="Scratch" height="200" />
-</p>
-
-<h1 align="center">Scratch</h1>
-
-<p align="center">
-    Make beatiful websites with markdown and react
+  <img src="./assets/scratch-logo.svg" alt="Scratch" height="120" />
+  <br><br>
+  <em>Make beautiful websites with markdown and react</em>
 </p>
 
 ## Quick Start
