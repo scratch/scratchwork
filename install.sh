@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eu
 
 # Scratch Installation Script
 # Usage: curl -fsSL https://raw.githubusercontent.com/scratch/scratch/main/install.sh | sh
@@ -7,6 +7,17 @@ set -e
 REPO="scratch/scratch"
 INSTALL_DIR="$HOME/.local/bin"
 BINARY_NAME="scratch"
+
+# Temp directory for downloads (will be set in main())
+temp_dir=""
+
+# Cleanup on exit or interruption
+cleanup() {
+  if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
+    rm -rf "$temp_dir"
+  fi
+}
+trap cleanup EXIT INT TERM
 
 # Colors for output
 RED='\033[0;31m'
@@ -78,8 +89,7 @@ sha256() {
   elif command -v sha256sum &> /dev/null; then
     sha256sum "$file" | awk '{print $1}'
   else
-    warn "No sha256 tool found, skipping checksum verification"
-    echo ""
+    error "No sha256 tool found. Cannot verify download integrity."
   fi
 }
 
@@ -156,13 +166,13 @@ main() {
   # Download binary
   local binary_name="scratch-${platform}"
   local download_url="https://github.com/$REPO/releases/download/$version/$binary_name"
-  local temp_dir=$(mktemp -d)
+  temp_dir=$(mktemp -d)  # Set global so trap can clean up
   local temp_binary="$temp_dir/$binary_name"
 
   info "Downloading $binary_name..."
   download "$download_url" "$temp_binary"
 
-  # Download and verify checksum
+  # Download and verify checksum (mandatory for security)
   local checksums_url="https://github.com/$REPO/releases/download/$version/checksums.json"
   local checksums_file="$temp_dir/checksums.json"
 
@@ -171,22 +181,20 @@ main() {
     if [[ -n "$expected_hash" ]]; then
       info "Verifying checksum..."
       local actual_hash=$(sha256 "$temp_binary")
-      if [[ -n "$actual_hash" && "$actual_hash" != "$expected_hash" ]]; then
-        rm -rf "$temp_dir"
+      if [[ "$actual_hash" != "$expected_hash" ]]; then
         error "Checksum mismatch! Expected $expected_hash, got $actual_hash"
       fi
       info "Checksum verified"
+    else
+      error "Could not extract checksum for platform: $platform"
     fi
   else
-    warn "Could not download checksums, skipping verification"
+    error "Could not download checksums. Installation aborted for security."
   fi
 
   # Install binary
   chmod +x "$temp_binary"
   mv "$temp_binary" "$INSTALL_DIR/$BINARY_NAME"
-
-  # Cleanup
-  rm -rf "$temp_dir"
 
   # Add to PATH
   add_to_path

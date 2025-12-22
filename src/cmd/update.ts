@@ -1,10 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { createWriteStream } from 'fs';
+import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createHash } from 'crypto';
 import log from '../logger';
-import { VERSION, GITHUB_API, RELEASES_URL, REPO } from '../version';
+import { VERSION, GITHUB_API } from '../version';
 
 interface GitHubRelease {
   tag_name: string;
@@ -72,7 +73,8 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
   }
 
   const fileStream = createWriteStream(destPath);
-  await pipeline(response.body as any, fileStream);
+  const nodeStream = Readable.fromWeb(response.body as import('stream/web').ReadableStream);
+  await pipeline(nodeStream, fileStream);
 }
 
 /**
