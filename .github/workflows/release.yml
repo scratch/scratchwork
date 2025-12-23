@@ -41,6 +41,17 @@ jobs:
           echo '}' >> checksums.json
           cat checksums.json
 
+      - name: Extract release notes from CHANGELOG
+        id: changelog
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          # Extract content between this version header and the next (or end of file)
+          NOTES=$(awk "/^## \[${VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
+          # Handle multi-line output for GitHub Actions
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -50,4 +61,4 @@ jobs:
             dist/scratch-linux-arm64
             dist/scratch-linux-x64
             dist/checksums.json
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.notes }}
