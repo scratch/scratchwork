@@ -43,7 +43,9 @@ const prFilePath = path.join(import.meta.dir, '..', 'PULL_REQUEST.md');
 const isResumeMode = existsSync(prFilePath);
 
 if (isResumeMode) {
-  console.log('\n==> Resuming PR creation (PULL_REQUEST.md already exists)');
+  console.log('\n==> Resuming PR creation');
+  console.log('    PULL_REQUEST.md already exists.');
+  console.log('    Please review and confirm to continue.');
 } else {
   // Generate PR details using Claude Code CLI
   console.log('\n==> Generating pull request details with Claude...');

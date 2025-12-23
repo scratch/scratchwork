@@ -91,7 +91,9 @@ if (existsSync(changelogPath)) {
 }
 
 if (isResumeMode) {
-  console.log(`\n==> Resuming release v${newVersion} (CHANGELOG.md already has entry)`);
+  console.log(`\n==> Resuming release v${newVersion}`);
+  console.log('    CHANGELOG.md already has an entry for this version.');
+  console.log('    Please review and confirm to continue.');
 } else {
   // Generate release notes using Claude Code CLI
   console.log('\n==> Generating release notes with Claude...');
