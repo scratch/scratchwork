@@ -132,7 +132,10 @@ export async function getBunBuildConfig(options: BunBuildConfigOptions): Promise
   // Build rehype plugins list
   const highlighter = await getShikiHighlighter();
   const rehypePlugins: any[] = [
-    [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light' }],
+    [rehypeShikiFromHighlighter, highlighter, {
+      theme: 'github-light',
+      defaultLanguage: 'text',  // Use 'text' for code blocks without a language
+    }],
   ];
   if (!ctx.options.strict) {
     rehypePlugins.push(createRehypeFootnotesPlugin());
@@ -198,7 +201,10 @@ export async function getServerBunBuildConfig(options: BunBuildConfigOptions): P
   // Build rehype plugins list
   const highlighter = await getShikiHighlighter();
   const rehypePlugins: any[] = [
-    [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light' }],
+    [rehypeShikiFromHighlighter, highlighter, {
+      theme: 'github-light',
+      defaultLanguage: 'text',  // Use 'text' for code blocks without a language
+    }],
   ];
   if (!ctx.options.strict) {
     rehypePlugins.push(createRehypeFootnotesPlugin());
