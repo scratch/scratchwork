@@ -5,7 +5,33 @@ import { globSync } from 'fast-glob';
 import { templates, materializeTemplate, hasTemplate } from './template';
 import log from './logger';
 
-export const BUILD_DEPENDENCIES = ['react', 'react-dom', '@mdx-js/react', 'tailwindcss', '@tailwindcss/cli'];
+export const BUILD_DEPENDENCIES = ['react', 'react-dom', '@mdx-js/react', 'tailwindcss', '@tailwindcss/cli', '@tailwindcss/typography'];
+
+/**
+ * Remove a file or directory with retry logic for transient errors (EACCES, EBUSY).
+ * This handles cases where files are temporarily locked by other processes.
+ */
+async function rmWithRetry(
+  path: string,
+  options: { recursive?: boolean; force?: boolean } = {},
+  maxRetries = 3,
+  delayMs = 100
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await fs.rm(path, options);
+      return;
+    } catch (error: any) {
+      const isRetryable = error?.code === 'EACCES' || error?.code === 'EBUSY';
+      if (isRetryable && attempt < maxRetries) {
+        log.debug(`Retry ${attempt}/${maxRetries} for rm ${path}: ${error.code}`);
+        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
 
 let CONTEXT: BuildContext | undefined;
 
@@ -161,7 +187,7 @@ export class BuildContext {
   }
 
   async resetBuildDir() {
-    await fs.rm(this.buildDir, { recursive: true, force: true });
+    await rmWithRetry(this.buildDir, { recursive: true, force: true });
     await fs.mkdir(this.buildDir, { recursive: true });
   }
 
@@ -176,11 +202,11 @@ export class BuildContext {
       const entries = await fs.readdir(this.tempDir);
       for (const entry of entries) {
         if (entry !== 'node_modules' && entry !== 'package.json') {
-          await fs.rm(_path.resolve(this.tempDir, entry), { recursive: true, force: true });
+          await rmWithRetry(_path.resolve(this.tempDir, entry), { recursive: true, force: true });
         }
       }
     } else {
-      await fs.rm(this.tempDir, { recursive: true, force: true });
+      await rmWithRetry(this.tempDir, { recursive: true, force: true });
       await fs.mkdir(this.tempDir, { recursive: true });
     }
 

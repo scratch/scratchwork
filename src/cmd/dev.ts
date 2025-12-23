@@ -63,14 +63,17 @@ async function startDevServerWithFallback(
               return new Response(content, {
                 headers: {
                   'Content-Type': 'text/html',
+                  'Cache-Control': 'no-store, no-cache, must-revalidate',
                 },
               });
             }
 
             // For all other files (including binary), serve directly
+            // Disable caching in dev mode to ensure fresh content on HMR
             return new Response(file, {
               headers: {
                 'Content-Type': getContentType(filePath),
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
               },
             });
           }

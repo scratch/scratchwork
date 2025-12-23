@@ -7,18 +7,20 @@ import rehypeShikiFromHighlighter from '@shikijs/rehype/core';
 import { createHighlighter, type Highlighter } from 'shiki';
 import { realpathSync } from 'fs';
 import { getBuildContext } from './context';
-import { createPreprocessMdxPlugin, createRehypeFootnotesPlugin } from './preprocess';
+import { createPreprocessMdxPlugin, createRehypeFootnotesPlugin, createNotProsePlugin } from './preprocess';
 import path from 'path';
 import type { VFile } from 'vfile';
 
 // Cached highlighter instance for reuse across builds
 let cachedHighlighter: Highlighter | null = null;
 
+const SHIKI_LANGS = ['javascript', 'typescript', 'jsx', 'tsx', 'css', 'html', 'json', 'bash', 'shell', 'python', 'markdown', 'text'];
+
 async function getShikiHighlighter(): Promise<Highlighter> {
   if (!cachedHighlighter) {
     cachedHighlighter = await createHighlighter({
-      themes: ['github-light', 'github-dark'],
-      langs: ['javascript', 'typescript', 'jsx', 'tsx', 'css', 'html', 'json', 'bash', 'shell', 'python', 'markdown'],
+      themes: ['github-light'],
+      langs: SHIKI_LANGS,
     });
   }
   return cachedHighlighter;
@@ -114,12 +116,14 @@ export async function getBunBuildConfig(options: BunBuildConfigOptions): Promise
   // Add preprocessing plugin unless in strict mode
   if (!ctx.options.strict) {
     remarkPlugins.push(createPreprocessMdxPlugin(componentMap, componentConflicts));
+    // Add not-prose class to self-closing components
+    remarkPlugins.push(createNotProsePlugin());
   }
 
   // Build rehype plugins list
   const highlighter = await getShikiHighlighter();
   const rehypePlugins: any[] = [
-    [rehypeShikiFromHighlighter, highlighter, { themes: { light: 'github-light', dark: 'github-dark' } }],
+    [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light' }],
   ];
   if (!ctx.options.strict) {
     rehypePlugins.push(createRehypeFootnotesPlugin());
@@ -178,12 +182,14 @@ export async function getServerBunBuildConfig(options: BunBuildConfigOptions): P
 
   if (!ctx.options.strict) {
     remarkPlugins.push(createPreprocessMdxPlugin(componentMap, componentConflicts));
+    // Add not-prose class to self-closing components
+    remarkPlugins.push(createNotProsePlugin());
   }
 
   // Build rehype plugins list
   const highlighter = await getShikiHighlighter();
   const rehypePlugins: any[] = [
-    [rehypeShikiFromHighlighter, highlighter, { themes: { light: 'github-light', dark: 'github-dark' } }],
+    [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light' }],
   ];
   if (!ctx.options.strict) {
     rehypePlugins.push(createRehypeFootnotesPlugin());

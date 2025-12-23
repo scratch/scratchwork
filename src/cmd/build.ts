@@ -10,9 +10,13 @@ import log from '../logger';
 /**
  * Common MDX/JSX errors and their user-friendly explanations
  */
-const ERROR_PATTERNS: Array<{ pattern: RegExp; getMessage: (match: RegExpMatchArray, filePath?: string) => string }> = [
+const ERROR_PATTERNS: Array<{
+  pattern: RegExp;
+  getMessage: (match: RegExpMatchArray, filePath?: string) => string;
+}> = [
   {
-    pattern: /The `style` prop expects a mapping from style properties to values, not a string/,
+    pattern:
+      /The `style` prop expects a mapping from style properties to values, not a string/,
     getMessage: (_, filePath) =>
       `MDX syntax error${filePath ? ` in ${filePath}` : ''}:\n` +
       `  HTML-style "style" attributes don't work in MDX.\n\n` +
@@ -30,7 +34,8 @@ const ERROR_PATTERNS: Array<{ pattern: RegExp; getMessage: (match: RegExpMatchAr
       `  MDX uses JSX syntax, so use className instead of class.`,
   },
   {
-    pattern: /Element type is invalid: expected a string.*but got: (undefined|object)/,
+    pattern:
+      /Element type is invalid: expected a string.*but got: (undefined|object)/,
     getMessage: (_, filePath) =>
       `MDX syntax error${filePath ? ` in ${filePath}` : ''}:\n` +
       `  A JSX element couldn't be rendered. Common causes:\n\n` +
@@ -63,9 +68,12 @@ const ERROR_PATTERNS: Array<{ pattern: RegExp; getMessage: (match: RegExpMatchAr
  * Attempt to extract the source file path from an error
  */
 function extractFilePath(error: Error | string): string | undefined {
-  const errorStr = error instanceof Error ? error.stack || error.message : error;
+  const errorStr =
+    error instanceof Error ? error.stack || error.message : error;
   // Look for paths in server-compiled or client-compiled directories
-  const match = errorStr.match(/(?:server-compiled|client-compiled)\/([^/]+)\/index\.js/);
+  const match = errorStr.match(
+    /(?:server-compiled|client-compiled)\/([^/]+)\/index\.js/
+  );
   if (match) {
     return `pages/${match[1]}.mdx`;
   }
@@ -137,10 +145,10 @@ async function doBuild(options: BuildOptions = {}) {
   if (Object.keys(entries).length === 0) {
     throw new Error(
       `No pages found. Create MDX files in the pages/ directory.\n\n` +
-      `Example:\n` +
-      `  mkdir -p pages\n` +
-      `  echo "# Hello World" > pages/index.mdx\n\n` +
-      `Then run 'scratch build' again.`
+        `Example:\n` +
+        `  mkdir -p pages\n` +
+        `  echo "# Hello World" > pages/index.mdx\n\n` +
+        `Then run 'scratch build' again.`
     );
   }
   const tsxEntryPts = await time('3. TSX entries', () => createTsxEntries());
@@ -470,7 +478,8 @@ async function createHtmlEntries(ssg: boolean = false, cssFilename: string, jsOu
   const faviconLinks = await getFaviconLinkTags();
 
   // Build HTML for each entry
-  const ssgFlagScript = '<script rel="modulepreload" type="module">window.__scratch_ssg = true;</script>';
+  const ssgFlagScript =
+    '<script rel="modulepreload" type="module">window.__scratch_ssg = true;</script>';
 
   for (const [name, entry] of Object.entries(entries)) {
     const htmlPath = entry.getArtifactPath('.html', ctx.clientCompiledDir());
@@ -485,7 +494,8 @@ async function createHtmlEntries(ssg: boolean = false, cssFilename: string, jsOu
     const relativeJsPath = '/' + path.relative(ctx.clientCompiledDir(), jsPath);
 
     // Get SSG content if available
-    const ssgContent = ssg && renderedContent.has(name) ? renderedContent.get(name)! : '';
+    const ssgContent =
+      ssg && renderedContent.has(name) ? renderedContent.get(name)! : '';
 
     // Build HTML directly (avoids issues with empty template variables)
     const html = `<!doctype html>
@@ -595,6 +605,8 @@ async function injectFrontmatterMeta() {
   }
 
   if (injectedCount > 0) {
-    log.debug(`Injected frontmatter meta tags into ${injectedCount} HTML files`);
+    log.debug(
+      `Injected frontmatter meta tags into ${injectedCount} HTML files`
+    );
   }
 }
