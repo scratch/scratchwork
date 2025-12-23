@@ -3,7 +3,7 @@ import type { Plugin } from "unified";
 import { visit } from "unist-util-visit";
 import { is } from "unist-util-is";
 import { parse } from "acorn";
-import type { Node, Root } from "mdast";
+import type { Node, Root, Code } from "mdast";
 import log from "./logger";
 
 let PREPROCESSING_STARTED = false;

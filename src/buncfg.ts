@@ -14,11 +14,13 @@ import type { VFile } from 'vfile';
 // Cached highlighter instance for reuse across builds
 let cachedHighlighter: Highlighter | null = null;
 
+const SHIKI_LANGS = ['javascript', 'typescript', 'jsx', 'tsx', 'css', 'html', 'json', 'bash', 'shell', 'python', 'markdown', 'text'];
+
 async function getShikiHighlighter(): Promise<Highlighter> {
   if (!cachedHighlighter) {
     cachedHighlighter = await createHighlighter({
       themes: ['github-light'],
-      langs: ['javascript', 'typescript', 'jsx', 'tsx', 'css', 'html', 'json', 'bash', 'shell', 'python', 'markdown'],
+      langs: SHIKI_LANGS,
     });
   }
   return cachedHighlighter;
@@ -121,10 +123,7 @@ export async function getBunBuildConfig(options: BunBuildConfigOptions): Promise
   // Build rehype plugins list
   const highlighter = await getShikiHighlighter();
   const rehypePlugins: any[] = [
-    [rehypeShikiFromHighlighter, highlighter, {
-      theme: 'github-light',
-      defaultLanguage: 'text',  // Use 'text' for code blocks without a language
-    }],
+    [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light' }],
   ];
   if (!ctx.options.strict) {
     rehypePlugins.push(createRehypeFootnotesPlugin());
@@ -190,10 +189,7 @@ export async function getServerBunBuildConfig(options: BunBuildConfigOptions): P
   // Build rehype plugins list
   const highlighter = await getShikiHighlighter();
   const rehypePlugins: any[] = [
-    [rehypeShikiFromHighlighter, highlighter, {
-      theme: 'github-light',
-      defaultLanguage: 'text',  // Use 'text' for code blocks without a language
-    }],
+    [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light' }],
   ];
   if (!ctx.options.strict) {
     rehypePlugins.push(createRehypeFootnotesPlugin());

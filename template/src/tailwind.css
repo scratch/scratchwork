@@ -7,6 +7,19 @@
  * See: https://github.com/tailwindlabs/tailwindcss-typography
  */
 
+/*
+ * Style code blocks to match Shiki github-light theme.
+ * This ensures consistent styling whether or not Shiki processes the block.
+ */
+pre:has(> code) {
+  @apply bg-white rounded-lg overflow-x-auto;
+}
+
+pre > code {
+  @apply block p-4 text-sm leading-relaxed;
+  color: #24292e;
+}
+
 /* Custom interactive elements */
 .copy-button {
   @apply absolute top-2 right-2 px-2 py-1 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity;
