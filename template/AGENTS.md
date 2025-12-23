@@ -183,25 +183,66 @@ Files in `public/` are copied directly to the build output. Reference them with 
 
 ## Theming
 
-Scratch uses custom prose styling defined in `src/tailwind.css` for markdown content. The default template includes:
+Scratch uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography) for markdown styling. The `prose` class is applied via PageWrapper.
 
-- `scratch-prose` class for typography styling
-- Dark mode support (follows system preference via `.dark` class)
+### Customizing Typography
 
-### Customizing the Theme
+- **Size variants**: Add `prose-sm`, `prose-lg`, `prose-xl` in PageWrapper.jsx
+- **Color themes**: Add `prose-slate`, `prose-zinc`, `prose-neutral`, etc.
 
-The `src/tailwind.css` file contains all prose styling for markdown elements. You can customize:
+### Overriding Prose Styling (No Custom Component)
 
-- Headings (h1-h4), paragraphs, links, lists
-- Code blocks and inline code
-- Blockquotes, tables, images
-- Light and dark mode colors
+Tailwind Typography supports element modifiers to override styling for specific element types directly in `PageWrapper.jsx`:
 
-Simply edit the `.scratch-prose` rules in `src/tailwind.css` to match your design.
+```jsx
+<div className="prose prose-a:text-blue-600 prose-a:hover:text-blue-800 prose-headings:font-bold">
+```
 
-### Dark Mode
+Available element modifiers:
+- `prose-headings:` - all headings (h1-h6)
+- `prose-h1:`, `prose-h2:`, etc. - specific heading levels
+- `prose-a:` - links
+- `prose-p:` - paragraphs
+- `prose-blockquote:` - blockquotes
+- `prose-code:` - inline code
+- `prose-pre:` - code blocks
+- `prose-ol:`, `prose-ul:`, `prose-li:` - lists
+- `prose-table:`, `prose-th:`, `prose-td:` - tables
+- `prose-img:`, `prose-figure:`, `prose-figcaption:` - images
 
-Dark mode is enabled by default and follows system preferences. The `PageWrapper` component uses the `scratch-prose` class, and dark mode styles are automatically applied when the `.dark` class is present on a parent element.
+You can also add CSS overrides in `src/tailwind.css`:
+```css
+.prose a {
+  @apply text-blue-600 hover:text-blue-800 no-underline;
+}
+```
+
+### Overriding with Custom Components
+
+For more complex overrides (adding interactivity, conditional logic), create a custom component in `src/markdown/`:
+
+1. Create/edit a component (e.g., `Link.tsx`)
+2. Export from `src/markdown/index.ts` and add to `MDXComponents`
+
+Example:
+```tsx
+// src/markdown/Link.tsx
+export default function Link({ href, children, ...props }) {
+  const isExternal = href?.startsWith('http');
+  return (
+    <a
+      href={href}
+      target={isExternal ? '_blank' : undefined}
+      rel={isExternal ? 'noopener noreferrer' : undefined}
+      {...props}
+    >
+      {children}
+    </a>
+  );
+}
+```
+
+Use `not-prose` class to exclude elements from typography styling.
 
 ## Generated Files
 
