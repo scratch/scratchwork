@@ -7,38 +7,54 @@ interface RevertOptions {
 }
 
 /**
- * Revert a file to its template version.
+ * Revert a file or directory to its template version.
  */
 export async function revertCommand(filePath: string | undefined, options: RevertOptions = {}): Promise<void> {
+  const allFiles = listTemplateFiles();
+
   // List available templates if --list flag is provided
   if (options.list) {
-    const files = listTemplateFiles();
     log.info('Available template files:');
-    for (const file of files.sort()) {
+    for (const file of allFiles.sort()) {
+      // Skip internal build infrastructure
+      if (file.startsWith('_build/')) continue;
       console.log(`  ${file}`);
     }
     return;
   }
 
   if (!filePath) {
-    log.error('Please provide a file path to revert, or use --list to see available templates.');
+    log.error('Please provide a file or directory path to revert, or use --list to see available templates.');
     process.exit(1);
   }
 
-  // Normalize the path (remove leading ./ if present)
-  const templatePath = filePath.replace(/^\.\//, '');
+  // Normalize the path (remove leading ./ and trailing /)
+  const templatePath = filePath.replace(/^\.\//, '').replace(/\/$/, '');
 
-  if (!hasTemplate(templatePath)) {
-    log.error(`No template found for: ${templatePath}`);
-    console.log(`\nThis command should be run from the project root.`);
-    console.log(`Use 'scratch revert --list' to see all available templates.`);
-    process.exit(1);
+  // Check if it's an exact file match
+  if (hasTemplate(templatePath)) {
+    const targetPath = path.resolve(process.cwd(), templatePath);
+    await materializeTemplate(templatePath, targetPath);
+    log.info(`Reverted ${templatePath}`);
+    return;
   }
 
-  // Target path in the project (cwd)
-  const targetPath = path.resolve(process.cwd(), templatePath);
+  // Check if it's a directory (find all templates that start with this path)
+  const dirPrefix = templatePath + '/';
+  const matchingFiles = allFiles.filter(f => f.startsWith(dirPrefix));
 
-  // Copy template to target
-  await materializeTemplate(templatePath, targetPath);
-  log.info(`Reverted ${templatePath}`);
+  if (matchingFiles.length > 0) {
+    for (const file of matchingFiles) {
+      const targetPath = path.resolve(process.cwd(), file);
+      await materializeTemplate(file, targetPath);
+      log.info(`Reverted ${file}`);
+    }
+    return;
+  }
+
+  // No match found
+  log.error(`No template found for: ${templatePath}`);
+  console.log(`\nThis command should be run from the project root.`);
+  console.log(`Use 'scratch revert --list' to see all available templates.`);
+  process.exit(1);
 }
