@@ -32,17 +32,18 @@
   @apply text-gray-900 font-semibold text-sm bg-gray-100 rounded px-1.5 py-0.5 border border-gray-300 shadow-sm;
 }
 
-/* Task lists (GFM checkboxes) - remove bullets */
+/* Task lists (GFM checkboxes) - align checkboxes with bullet points */
 .prose :where(ul.contains-task-list):not(:where([class~='not-prose'] *)) {
   @apply list-none pl-0;
 }
 
-.prose :where(li.task-list-item):not(:where([class~='not-prose'] *)) {
-  @apply pl-0;
+.prose :where(li.task-list-item > input[type='checkbox']):not(:where([class~='not-prose'] *)) {
+  @apply mr-2 align-middle ml-1;
 }
 
-.prose :where(li.task-list-item > input[type='checkbox']):not(:where([class~='not-prose'] *)) {
-  @apply mr-2 align-middle;
+/* Tables - add horizontal margins */
+.prose :where(table):not(:where([class~='not-prose'] *)) {
+  @apply mx-6;
 }
 
 /*
