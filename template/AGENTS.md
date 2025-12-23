@@ -112,6 +112,8 @@ Components can accept children in different ways:
 <Chart data={myData} />
 ```
 
+Self-closing components are automatically wrapped in a `<div className="not-prose">` wrapper, so they won't inherit Tailwind Typography styles. This is useful for components that render their own styled content (charts, forms, interactive widgets).
+
 **Inline children** (text on the same line):
 ```mdx
 <Button>Click me</Button>

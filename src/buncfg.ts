@@ -7,7 +7,7 @@ import rehypeShikiFromHighlighter from '@shikijs/rehype/core';
 import { createHighlighter, type Highlighter } from 'shiki';
 import { realpathSync } from 'fs';
 import { getBuildContext } from './context';
-import { createPreprocessMdxPlugin, createRehypeFootnotesPlugin } from './preprocess';
+import { createPreprocessMdxPlugin, createRehypeFootnotesPlugin, createNotProsePlugin } from './preprocess';
 import path from 'path';
 import type { VFile } from 'vfile';
 
@@ -114,6 +114,8 @@ export async function getBunBuildConfig(options: BunBuildConfigOptions): Promise
   // Add preprocessing plugin unless in strict mode
   if (!ctx.options.strict) {
     remarkPlugins.push(createPreprocessMdxPlugin(componentMap, componentConflicts));
+    // Add not-prose class to self-closing components
+    remarkPlugins.push(createNotProsePlugin());
   }
 
   // Build rehype plugins list
@@ -178,6 +180,8 @@ export async function getServerBunBuildConfig(options: BunBuildConfigOptions): P
 
   if (!ctx.options.strict) {
     remarkPlugins.push(createPreprocessMdxPlugin(componentMap, componentConflicts));
+    // Add not-prose class to self-closing components
+    remarkPlugins.push(createNotProsePlugin());
   }
 
   // Build rehype plugins list
