@@ -6,6 +6,7 @@ import { buildCommand } from './cmd/build';
 import { createCommand } from './cmd/create';
 import { devCommand } from './cmd/dev';
 import { previewCommand } from './cmd/preview';
+import { revertCommand } from './cmd/revert';
 import { updateCommand } from './cmd/update';
 import { getBuildContext, setBuildContext } from './context';
 import log, { setLogLevel } from './logger';
@@ -126,6 +127,20 @@ program
       await updateCommand();
     } catch (error) {
       log.error('Update failed:', error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('revert')
+  .description('Revert a file to its template version')
+  .argument('[file]', 'File to revert')
+  .option('-l, --list', 'List available template files')
+  .action(async (file, options) => {
+    try {
+      await revertCommand(file, options);
+    } catch (error) {
+      log.error('Revert failed:', error);
       process.exit(1);
     }
   });
