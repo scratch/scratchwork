@@ -37,13 +37,16 @@
   @apply list-none pl-0;
 }
 
-.prose :where(li.task-list-item > input[type='checkbox']):not(:where([class~='not-prose'] *)) {
+.prose
+  :where(li.task-list-item > input[type='checkbox']):not(
+    :where([class~='not-prose'] *)
+  ) {
   @apply mr-2 align-middle ml-1;
 }
 
-/* Tables - add horizontal margins */
+/* Tables - add horizontal padding, prevent overflow */
 .prose :where(table):not(:where([class~='not-prose'] *)) {
-  @apply mx-6;
+  @apply mx-4 w-auto max-w-full;
 }
 
 /*
