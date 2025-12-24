@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.0] - 2025-12-24
+
+This release includes internal refactoring for better maintainability, improved developer experience, and security hardening for HTML output.
+
+### Improvements
+
+- Dev server now watches the `public/` directory for changes, triggering rebuilds when static assets are modified
+- Syntax highlighting now supports all languages bundled with Shiki (previously limited to a small subset)
+- Confirmation prompts in `bun run pr` and `bun run release` now default to "yes" for faster workflows
+
+### Bug Fixes
+
+- Fixed potential XSS vulnerability by properly escaping frontmatter values when injecting meta tags into HTML
+- Improved error messages when components referenced in MDX files are not found
+
 ## [0.0.9] - 2025-12-24
 
 This release simplifies project creation with better defaults and fixes a critical build issue when dependencies need to be installed.
