@@ -1,17 +1,39 @@
-import path from "path";
-import fs from "fs";
-import type { Plugin } from "unified";
-import { visit } from "unist-util-visit";
-import { is } from "unist-util-is";
-import { parse } from "acorn";
-import type { Node, Root, Code } from "mdast";
-import log from "./logger";
+import path from 'path';
+import fs from 'fs';
+import type { Plugin } from 'unified';
+import { visit } from 'unist-util-visit';
+import { is } from 'unist-util-is';
+import { parse } from 'acorn';
+import type { Node, Root } from 'mdast';
+import log from './logger';
+
+/**
+ * Strip comments from source code to avoid false positives in regex matching.
+ */
+function stripComments(content: string): string {
+  return content
+    .replace(/\/\/.*$/gm, '') // Remove single-line comments
+    .replace(/\/\*[\s\S]*?\*\//g, ''); // Remove multi-line comments
+}
+
+/**
+ * Check if content has a default export using regex.
+ * Exported for testing.
+ */
+export function checkDefaultExport(content: string): boolean {
+  const stripped = stripComments(content);
+  return (
+    /export\s+default\s+/.test(stripped) ||
+    /export\s*\{[^}]*\bas\s+default\b/.test(stripped) ||
+    /export\s*\{\s*default\s*\}\s*from/.test(stripped)
+  );
+}
 
 // Cache for checking if files have default exports
 const defaultExportCache = new Map<string, boolean>();
 
 /**
- * Check if a file has a default export by reading and parsing it.
+ * Check if a file has a default export.
  * Results are cached for performance.
  */
 function hasDefaultExport(filePath: string): boolean {
@@ -19,18 +41,17 @@ function hasDefaultExport(filePath: string): boolean {
     return defaultExportCache.get(filePath)!;
   }
 
+  let hasDefault = false;
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    // Simple heuristic: check for common default export patterns
-    const hasDefault = /export\s+default\s+/.test(content) ||
-                       /export\s*\{\s*\w+\s+as\s+default\s*\}/.test(content);
-    defaultExportCache.set(filePath, hasDefault);
-    return hasDefault;
+    hasDefault = checkDefaultExport(content);
   } catch {
-    // If we can't read the file, assume named export
-    defaultExportCache.set(filePath, false);
-    return false;
+    // Can't read file - assume named export
+    hasDefault = false;
   }
+
+  defaultExportCache.set(filePath, hasDefault);
+  return hasDefault;
 }
 
 let PREPROCESSING_STARTED = false;
@@ -61,32 +82,34 @@ export function resetPreprocessingState(): void {
 // `@types/mdast` don't include MDX extensions, so we fall back to `any` where
 // necessary.
 interface MdxjsEsmNode {
-  type: "mdxjsEsm";
+  type: 'mdxjsEsm';
   value: string;
   data?: any;
 }
 
 // Node types for JSX elements in MDX
 type JsxElementNode = {
-  type: "mdxJsxFlowElement" | "mdxJsxTextElement";
+  type: 'mdxJsxFlowElement' | 'mdxJsxTextElement';
   name: string | null;
   children?: Node[];
   attributes?: MdxJsxAttribute[];
 };
 
 // MDX JSX attribute types
-type MdxJsxAttribute = {
-  type: "mdxJsxAttribute";
-  name: string;
-  value: string | null;
-} | {
-  type: "mdxJsxExpressionAttribute";
-  value: string;
-};
+type MdxJsxAttribute =
+  | {
+      type: 'mdxJsxAttribute';
+      name: string;
+      value: string | null;
+    }
+  | {
+      type: 'mdxJsxExpressionAttribute';
+      value: string;
+    };
 
 export type ComponentMap = Record<string, string>;
 
-const PAGE_WRAPPER = "PageWrapper";
+const PAGE_WRAPPER = 'PageWrapper';
 
 /**
  * Create a remark plugin that injects import statements for locally defined
@@ -95,7 +118,7 @@ const PAGE_WRAPPER = "PageWrapper";
  */
 export const createPreprocessMdxPlugin = (
   componentMap: ComponentMap,
-  componentConflicts: Set<string> = new Set(),
+  componentConflicts: Set<string> = new Set()
 ): Plugin => {
   const plugin: Plugin = () => {
     return (tree: Node, file: any) => {
@@ -103,18 +126,20 @@ export const createPreprocessMdxPlugin = (
       const { invoked, imported } = findComponents(tree);
 
       if (!PREPROCESSING_STARTED) {
-        log.debug("=== MDX PREPROCESSING ===");
+        log.debug('=== MDX PREPROCESSING ===');
         PREPROCESSING_STARTED = true;
       }
 
-      log.debug(`Processing: ${file?.path ? path.relative(process.cwd(), file.path) : 'unknown'}`);
+      log.debug(
+        `Processing: ${file?.path ? path.relative(process.cwd(), file.path) : 'unknown'}`
+      );
 
       // wrap mdx content in PageWrapper component if it is found in the
       // src directory and not already invoked in the MDX file
       if (PAGE_WRAPPER in componentMap && !invoked.has(PAGE_WRAPPER)) {
         log.debug(`  - Wrapping content in PageWrapper`);
         const wrapperNode = {
-          type: "mdxJsxFlowElement",
+          type: 'mdxJsxFlowElement',
           name: PAGE_WRAPPER,
           attributes: [],
           children: root.children,
@@ -130,31 +155,34 @@ export const createPreprocessMdxPlugin = (
       // Check for ambiguous components (multiple files with same name)
       const ambiguous = toInject.filter((comp) => componentConflicts.has(comp));
       if (ambiguous.length > 0) {
-        const filePath = file.path ? path.relative(process.cwd(), file.path) : 'unknown';
+        const filePath = file.path
+          ? path.relative(process.cwd(), file.path)
+          : 'unknown';
         const err = new Error(
           `Ambiguous component import in ${filePath}: "${ambiguous.join('", "')}" ` +
-          `exists in multiple files in src/. ` +
-          `Add an explicit import to specify which one to use.`
+            `exists in multiple files in src/. ` +
+            `Add an explicit import to specify which one to use.`
         );
         // Collect error since Bun.build() swallows thrown errors from remark plugins
         preprocessingErrors.push(err);
-        // Still remove ambiguous components from injection to avoid further errors
-        toInject.splice(0, toInject.length, ...toInject.filter((c) => !ambiguous.includes(c)));
       }
 
+      // Remove ambiguous components from injection to avoid further errors
+      const safeToInject = toInject.filter((c) => !ambiguous.includes(c));
+
       let mdxFileDir: string;
-      if (file && typeof file.path === "string") {
+      if (file && typeof file.path === 'string') {
         mdxFileDir = path.dirname(file.path as string);
       } else {
         mdxFileDir = process.cwd();
       }
 
       // create import statements for missing components
-      const newImportNodes: MdxjsEsmNode[] = toInject.map((name) => {
+      const newImportNodes: MdxjsEsmNode[] = safeToInject.map((name) => {
         const absPath = componentMap[name]!; // non-null assertion – guarded above
-        let relPath = path.relative(mdxFileDir, absPath).replace(/\\/g, "/");
-        if (!relPath.startsWith(".")) {
-          relPath = "./" + relPath;
+        let relPath = path.relative(mdxFileDir, absPath).replace(/\\/g, '/');
+        if (!relPath.startsWith('.')) {
+          relPath = './' + relPath;
         }
 
         // Use default import if file has default export, otherwise use named import
@@ -162,20 +190,22 @@ export const createPreprocessMdxPlugin = (
         const stmt = isDefault
           ? `import ${name} from '${relPath}';`
           : `import { ${name} } from '${relPath}';`;
-        log.debug(`  - injecting ${isDefault ? 'default' : 'named'} import from ${relPath}`);
+        log.debug(
+          `  - injecting ${isDefault ? 'default' : 'named'} import from ${relPath}`
+        );
         const estree = parse(stmt, {
-          ecmaVersion: "latest",
-          sourceType: "module",
+          ecmaVersion: 'latest',
+          sourceType: 'module',
         });
         return {
-          type: "mdxjsEsm",
+          type: 'mdxjsEsm',
           value: stmt,
           data: { estree },
         };
       });
 
       // inject missing import statements
-      root.children! = [...newImportNodes, ...root.children];
+      root.children = [...newImportNodes, ...root.children];
     };
   };
 
@@ -189,14 +219,11 @@ export const createPreprocessMdxPlugin = (
 export const createRehypeFootnotesPlugin = (): Plugin => {
   return () => {
     return (tree: any) => {
-      // Find the footnotes section and the PageWrapper div
+      if (!tree.children || !Array.isArray(tree.children)) return;
+
+      // Find the footnotes section (has data-footnotes attribute)
       let footnotesSection: any = null;
       let footnotesIndex = -1;
-      let pageWrapperDiv: any = null;
-
-      // The structure is: root > [PageWrapper div, footnotes section]
-      // We need to move footnotes inside the PageWrapper div
-      if (!tree.children || !Array.isArray(tree.children)) return;
 
       for (let i = 0; i < tree.children.length; i++) {
         const child = tree.children[i];
@@ -205,26 +232,27 @@ export const createRehypeFootnotesPlugin = (): Plugin => {
           if (props.dataFootnotes || props['data-footnotes']) {
             footnotesSection = child;
             footnotesIndex = i;
+            break;
           }
-        }
-        // PageWrapper renders as a div - find it by checking if it contains content
-        if (child.type === 'element' && child.tagName === 'div' && !pageWrapperDiv) {
-          pageWrapperDiv = child;
-        }
-        // Also check for mdxJsxFlowElement (JSX in hast)
-        if (child.type === 'mdxJsxFlowElement' && child.name === 'PageWrapper') {
-          pageWrapperDiv = child;
         }
       }
 
-      // If we found both, move footnotes inside PageWrapper
-      if (footnotesSection && pageWrapperDiv && footnotesIndex > -1) {
-        // Remove footnotes from root
-        tree.children.splice(footnotesIndex, 1);
-        // Add to end of PageWrapper's children
-        if (!pageWrapperDiv.children) pageWrapperDiv.children = [];
-        pageWrapperDiv.children.push(footnotesSection);
-      }
+      // No footnotes to move
+      if (!footnotesSection || footnotesIndex === -1) return;
+
+      // Find the PageWrapper JSX element
+      const pageWrapper = tree.children.find(
+        (child: any) =>
+          child.type === 'mdxJsxFlowElement' && child.name === 'PageWrapper'
+      );
+
+      // If no PageWrapper found, leave footnotes where they are
+      if (!pageWrapper) return;
+
+      // Move footnotes inside PageWrapper
+      tree.children.splice(footnotesIndex, 1);
+      if (!pageWrapper.children) pageWrapper.children = [];
+      pageWrapper.children.push(footnotesSection);
     };
   };
 };
@@ -245,11 +273,15 @@ export const createNotProsePlugin = (): Plugin => {
 
       // We need to collect nodes to wrap first, then wrap them
       // (can't modify tree while visiting)
-      const nodesToWrap: { node: JsxElementNode; parent: any; index: number }[] = [];
+      const nodesToWrap: {
+        node: JsxElementNode;
+        parent: any;
+        index: number;
+      }[] = [];
 
       visit(
         tree,
-        ["mdxJsxFlowElement"],
+        ['mdxJsxFlowElement'],
         (node: Node, index: number | undefined, parent: any) => {
           const jsxNode = node as JsxElementNode;
 
@@ -260,18 +292,23 @@ export const createNotProsePlugin = (): Plugin => {
           if (jsxNode.name === PAGE_WRAPPER) return;
 
           // Self-closing components have no children or empty children array
-          const isSelfClosing = !jsxNode.children || jsxNode.children.length === 0;
+          const isSelfClosing =
+            !jsxNode.children || jsxNode.children.length === 0;
           if (!isSelfClosing) return;
 
           // Skip if already wrapped in a not-prose div
-          if (parent && parent.type === "mdxJsxFlowElement" && parent.name === "div") {
+          if (
+            parent &&
+            parent.type === 'mdxJsxFlowElement' &&
+            parent.name === 'div'
+          ) {
             const parentAttrs = parent.attributes || [];
             const hasNotProse = parentAttrs.some(
               (attr: any) =>
-                attr.type === "mdxJsxAttribute" &&
-                attr.name === "className" &&
-                typeof attr.value === "string" &&
-                attr.value.includes("not-prose")
+                attr.type === 'mdxJsxAttribute' &&
+                attr.name === 'className' &&
+                typeof attr.value === 'string' &&
+                attr.value.includes('not-prose')
             );
             if (hasNotProse) return;
           }
@@ -279,7 +316,7 @@ export const createNotProsePlugin = (): Plugin => {
           if (index !== undefined && parent) {
             nodesToWrap.push({ node: jsxNode, parent, index });
           }
-        },
+        }
       );
 
       // Wrap nodes in reverse order to preserve indices
@@ -288,13 +325,13 @@ export const createNotProsePlugin = (): Plugin => {
 
         // Create wrapper div with not-prose class
         const wrapper = {
-          type: "mdxJsxFlowElement",
-          name: "div",
+          type: 'mdxJsxFlowElement',
+          name: 'div',
           attributes: [
             {
-              type: "mdxJsxAttribute",
-              name: "className",
-              value: "not-prose",
+              type: 'mdxJsxAttribute',
+              name: 'className',
+              value: 'not-prose',
             },
           ],
           children: [node],
@@ -310,7 +347,7 @@ export const createNotProsePlugin = (): Plugin => {
 
 /**
  * Find all JSX element names that look like React components
- * (theystart with an uppercase letter).
+ * (they start with an uppercase letter).
  * @param tree
  * @returns
  */
@@ -323,15 +360,15 @@ function findComponents(tree: Node) {
 
   visit(
     tree,
-    ["mdxJsxFlowElement", "mdxJsxTextElement", "mdxjsEsm"],
+    ['mdxJsxFlowElement', 'mdxJsxTextElement', 'mdxjsEsm'],
     (node: Node) => {
       // Find all react components used in an MDX document
-      if (is(node, "mdxJsxFlowElement") || is(node, "mdxJsxTextElement")) {
+      if (is(node, 'mdxJsxFlowElement') || is(node, 'mdxJsxTextElement')) {
         const name = (node as JsxElementNode).name;
         if (!name) return;
 
         // Grab the first part before a dot (e.g. `Foo.Bar` -> `Foo`)
-        const primaryName = name.split(".")[0] as string; // Type assertion to assure TypeScript this is a string
+        const primaryName = name.split('.')[0] as string;
 
         if (/^[A-Z]/.test(primaryName)) {
           invoked.add(primaryName);
@@ -339,16 +376,16 @@ function findComponents(tree: Node) {
 
         // Collect already-imported identifiers from existing ESM blocks so we
         // don't add duplicates
-      } else if (is(node, "mdxjsEsm")) {
+      } else if (is(node, 'mdxjsEsm')) {
         const value = (node as MdxjsEsmNode).value;
 
         let match: RegExpExecArray | null;
         while ((match = importRegex.exec(value)) !== null) {
-          const importClause = match[1] || "";
+          const importClause = match[1] || '';
 
           importClause
-            .replace(/[{}]/g, "") // Remove curly braces
-            .split(",") // Split by comma
+            .replace(/[{}]/g, '') // Remove curly braces
+            .split(',') // Split by comma
             .forEach((part) => {
               const name = part.trim();
               if (!name) return;
@@ -360,7 +397,7 @@ function findComponents(tree: Node) {
             });
         }
       }
-    },
+    }
   );
 
   return { invoked, imported };

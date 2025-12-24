@@ -198,16 +198,6 @@ describe('BuildContext path finding methods', () => {
     const tailwindPath = await context.tailwindCssSrcPath();
     expect(tailwindPath).toBe(path.join(projectDir, 'src', 'index.css'));
   });
-
-  test('serverJsxSrcPath finds existing index.jsx', async () => {
-    const projectDir = path.join(tempDir, 'server-jsx-test');
-    await fs.mkdir(projectDir, { recursive: true });
-    await fs.writeFile(path.join(projectDir, 'index.jsx'), 'export default () => {}');
-    const context = new BuildContext({ path: projectDir });
-
-    const jsxPath = await context.serverJsxSrcPath();
-    expect(jsxPath).toBe(path.join(projectDir, 'index.jsx'));
-  });
 });
 
 describe('BuildContext.getEntries', () => {
@@ -264,10 +254,10 @@ describe('BuildContext directory getter methods', () => {
     const projectDir = '/test/project';
     const context = new BuildContext({ path: projectDir });
 
-    expect(context.clientSrcDir()).toBe(path.resolve(projectDir, '.scratch-build-cache/client-src'));
-    expect(context.clientCompiledDir()).toBe(path.resolve(projectDir, '.scratch-build-cache/client-compiled'));
-    expect(context.serverSrcDir()).toBe(path.resolve(projectDir, '.scratch-build-cache/server-src'));
-    expect(context.serverCompiledDir()).toBe(path.resolve(projectDir, '.scratch-build-cache/server-compiled'));
+    expect(context.clientSrcDir).toBe(path.resolve(projectDir, '.scratch-build-cache/client-src'));
+    expect(context.clientCompiledDir).toBe(path.resolve(projectDir, '.scratch-build-cache/client-compiled'));
+    expect(context.serverSrcDir).toBe(path.resolve(projectDir, '.scratch-build-cache/server-src'));
+    expect(context.serverCompiledDir).toBe(path.resolve(projectDir, '.scratch-build-cache/server-compiled'));
   });
 });
 

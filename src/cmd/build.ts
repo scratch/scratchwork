@@ -3,7 +3,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { getBuildContext } from '../context';
 import { getBunBuildConfig, getServerBunBuildConfig } from '../buncfg';
-import { render } from '../util';
+import { render, escapeHtml } from '../util';
 import { getPreprocessingErrors, resetPreprocessingState } from '../preprocess';
 import log from '../logger';
 
@@ -130,8 +130,9 @@ async function doBuild(options: BuildOptions = {}) {
     return result;
   };
 
-  // Reset preprocessing state from any previous builds
+  // Reset state from any previous builds
   resetPreprocessingState();
+  renderedContent.clear();
 
   // Step 1: Ensure build dependencies are installed
   await time('1. Dependencies', () => ctx.ensureBuildDependencies());
@@ -151,7 +152,11 @@ async function doBuild(options: BuildOptions = {}) {
         `Then run 'scratch build' again.`
     );
   }
-  const tsxEntryPts = await time('3. TSX entries', () => createTsxEntries());
+  const tsxEntryPts = await time('3. TSX entries', async () => createEntries({
+    extension: '.tsx',
+    outDir: ctx.clientSrcDir,
+    templatePath: await ctx.clientTsxSrcPath(),
+  }));
 
   // Step 4: Build Tailwind CSS separately
   log.debug('=== TAILWIND CSS ===');
@@ -167,8 +172,8 @@ async function doBuild(options: BuildOptions = {}) {
   const entryPaths = Object.values(tsxEntryPts);
   const buildConfig = await getBunBuildConfig({
     entryPts: entryPaths,
-    outDir: ctx.clientCompiledDir(),
-    root: ctx.clientSrcDir(),
+    outDir: ctx.clientCompiledDir,
+    root: ctx.clientSrcDir,
   });
 
   log.debug('=== CLIENT BUILD ===');
@@ -182,7 +187,7 @@ async function doBuild(options: BuildOptions = {}) {
   }
 
   if (!result.success) {
-    const errorMessages = result.logs.map(log => String(log)).join('\n');
+    const errorMessages = result.logs.map(msg => String(msg)).join('\n');
     throw new Error(`Client build failed:\n${errorMessages}`);
   }
 
@@ -205,7 +210,7 @@ async function doBuild(options: BuildOptions = {}) {
   // e.g., "index" -> "index", "examples/index" -> "examples/index"
   const basePathToEntry: Record<string, string> = {};
   for (const [entryName, tsxPath] of Object.entries(tsxEntryPts)) {
-    const relativeTsx = path.relative(ctx.clientSrcDir(), tsxPath);
+    const relativeTsx = path.relative(ctx.clientSrcDir, tsxPath);
     const basePath = relativeTsx.replace(/\.tsx$/, '');
     basePathToEntry[basePath] = entryName;
   }
@@ -217,7 +222,7 @@ async function doBuild(options: BuildOptions = {}) {
     if (output.kind === 'entry-point' && output.path.endsWith('.js')) {
       // Get relative path and strip hash to get base path
       // e.g., "examples/index-abc123.js" -> "examples/index"
-      const relativePath = path.relative(ctx.clientCompiledDir(), output.path);
+      const relativePath = path.relative(ctx.clientCompiledDir, output.path);
       const dir = path.dirname(relativePath);
       const basename = path.basename(relativePath, '.js');
       const nameWithoutHash = basename.replace(/-[a-z0-9]+$/, '');
@@ -240,7 +245,7 @@ async function doBuild(options: BuildOptions = {}) {
   await time('8. Frontmatter', () => injectFrontmatterMeta());
 
   // Step 9: Copy to build directory
-  await time('9. Copy to dist', () => fs.cp(ctx.clientCompiledDir(), ctx.buildDir, { recursive: true }));
+  await time('9. Copy to dist', () => fs.cp(ctx.clientCompiledDir, ctx.buildDir, { recursive: true }));
 
   // Step 10: Copy static assets from public directory
   if (await fs.exists(ctx.staticDir)) {
@@ -263,21 +268,27 @@ async function doBuild(options: BuildOptions = {}) {
   }
 }
 
+interface CreateEntriesOptions {
+  extension: '.tsx' | '.jsx';
+  outDir: string;
+  templatePath: string;
+}
+
 /**
- * Create TSX entry files from template for each MDX page
+ * Create entry files from a template for each MDX page.
+ * Used for both client (.tsx) and server (.jsx) entries.
  */
-async function createTsxEntries(): Promise<Record<string, string>> {
+async function createEntries(options: CreateEntriesOptions): Promise<Record<string, string>> {
+  const { extension, outDir, templatePath } = options;
   const ctx = getBuildContext();
   const entries = await ctx.getEntries();
-  const tsxEntryPts: Record<string, string> = {};
-
-  const tsxTemplatePath = await ctx.clientTsxSrcPath();
+  const entryPts: Record<string, string> = {};
 
   for (const [name, entry] of Object.entries(entries)) {
-    const artifactPath = entry.getArtifactPath('.tsx', ctx.clientSrcDir());
+    const artifactPath = entry.getArtifactPath(extension, outDir);
 
     await render(
-      tsxTemplatePath,
+      templatePath,
       artifactPath,
       {},
       {
@@ -286,11 +297,11 @@ async function createTsxEntries(): Promise<Record<string, string>> {
       }
     );
 
-    tsxEntryPts[name] = artifactPath;
+    entryPts[name] = artifactPath;
     log.debug(`  ${path.relative(ctx.rootDir, artifactPath)}`);
   }
 
-  return tsxEntryPts;
+  return entryPts;
 }
 
 /**
@@ -299,7 +310,7 @@ async function createTsxEntries(): Promise<Record<string, string>> {
 async function buildTailwindCss() {
   const ctx = getBuildContext();
   const inputCss = await ctx.tailwindCssSrcPath();
-  const outputCss = path.join(ctx.clientCompiledDir(), 'tailwind.css');
+  const outputCss = path.join(ctx.clientCompiledDir, 'tailwind.css');
   const nodeModulesDir = await ctx.nodeModulesDir();
 
   // Ensure output directory exists
@@ -311,7 +322,7 @@ async function buildTailwindCss() {
 
   // Add @source directive for embedded template src (after @import "tailwindcss" if present)
   // The embedded templates are materialized to the temp directory during the build
-  const embeddedSrcDir = path.resolve(ctx.embeddedTemplatesDir(), 'src');
+  const embeddedSrcDir = path.resolve(ctx.embeddedTemplatesDir, 'src');
   const sourceDirective = `@source "${embeddedSrcDir}";\n`;
 
   // Insert after @import "tailwindcss" or at the beginning
@@ -352,7 +363,7 @@ async function buildTailwindCss() {
   const builtCssContent = await fs.readFile(outputCss);
   const hash = createHash('md5').update(builtCssContent).digest('hex').slice(0, 8);
   const hashedFilename = `tailwind-${hash}.css`;
-  const hashedOutputCss = path.join(ctx.clientCompiledDir(), hashedFilename);
+  const hashedOutputCss = path.join(ctx.clientCompiledDir, hashedFilename);
   await fs.rename(outputCss, hashedOutputCss);
 
   return hashedFilename;
@@ -369,13 +380,17 @@ async function buildAndRenderServerModules() {
 
   // Create server entry files (JSX files that export render())
   log.debug('Creating server entry files:');
-  const serverEntryPts = await createServerEntries();
+  const serverEntryPts = await createEntries({
+    extension: '.jsx',
+    outDir: ctx.serverSrcDir,
+    templatePath: await ctx.serverJsxSrcPath(),
+  });
 
   // Build server modules with Bun (target: bun for server-side execution)
   const buildConfig = await getServerBunBuildConfig({
     entryPts: Object.values(serverEntryPts),
-    outDir: ctx.serverCompiledDir(),
-    root: ctx.serverSrcDir(),
+    outDir: ctx.serverCompiledDir,
+    root: ctx.serverSrcDir,
   });
 
   log.debug('Running Bun.build() for server...');
@@ -392,7 +407,7 @@ async function buildAndRenderServerModules() {
   }
 
   if (!result.success) {
-    const errorMessages = result.logs.map(log => String(log)).join('\n');
+    const errorMessages = result.logs.map(msg => String(msg)).join('\n');
     throw new Error(`Server build failed:\n${errorMessages}`);
   }
 
@@ -414,7 +429,7 @@ async function buildAndRenderServerModules() {
   const entries = await ctx.getEntries();
   log.debug(`Rendering ${Object.keys(entries).length} pages:`);
   for (const [name, entry] of Object.entries(entries)) {
-    const modulePath = entry.getArtifactPath('.js', ctx.serverCompiledDir());
+    const modulePath = entry.getArtifactPath('.js', ctx.serverCompiledDir);
 
     // Import the compiled server module
     const serverModule = await import(modulePath);
@@ -424,36 +439,6 @@ async function buildAndRenderServerModules() {
     renderedContent.set(name, html);
     log.debug(`  ${path.relative(ctx.rootDir, entry.absPath)}`);
   }
-}
-
-/**
- * Create server JSX entry files for SSG rendering
- */
-async function createServerEntries(): Promise<Record<string, string>> {
-  const ctx = getBuildContext();
-  const entries = await ctx.getEntries();
-  const serverEntryPts: Record<string, string> = {};
-
-  const serverTemplatePath = await ctx.serverJsxSrcPath();
-
-  for (const [name, entry] of Object.entries(entries)) {
-    const artifactPath = entry.getArtifactPath('.jsx', ctx.serverSrcDir());
-
-    await render(
-      serverTemplatePath,
-      artifactPath,
-      {},
-      {
-        entrySourceMdxImportPath: entry.absPath,
-        markdownComponentsPath: await ctx.markdownComponentsDir(),
-      }
-    );
-
-    serverEntryPts[name] = artifactPath;
-    log.debug(`  ${path.relative(ctx.rootDir, artifactPath)}`);
-  }
-
-  return serverEntryPts;
 }
 
 /**
@@ -493,7 +478,7 @@ async function createHtmlEntries(ssg: boolean = false, cssFilename: string, jsOu
     '<script rel="modulepreload" type="module">window.__scratch_ssg = true;</script>';
 
   for (const [name, entry] of Object.entries(entries)) {
-    const htmlPath = entry.getArtifactPath('.html', ctx.clientCompiledDir());
+    const htmlPath = entry.getArtifactPath('.html', ctx.clientCompiledDir);
 
     // Look up the actual hashed JS path from the build output
     const jsPath = jsOutputMap[name];
@@ -502,7 +487,7 @@ async function createHtmlEntries(ssg: boolean = false, cssFilename: string, jsOu
     }
 
     // Calculate relative path from HTML to JS
-    const relativeJsPath = '/' + path.relative(ctx.clientCompiledDir(), jsPath);
+    const relativeJsPath = '/' + path.relative(ctx.clientCompiledDir, jsPath);
 
     // Get SSG content if available
     const ssgContent =
@@ -546,49 +531,52 @@ async function injectFrontmatterMeta() {
       continue;
     }
 
-    const htmlPath = entry.getArtifactPath('.html', ctx.clientCompiledDir());
+    const htmlPath = entry.getArtifactPath('.html', ctx.clientCompiledDir);
     let html = await fs.readFile(htmlPath, 'utf-8');
 
     const metadata = entry.frontmatterData;
 
-    // Build meta tags
+    // Helper to safely escape metadata values
+    const e = (val: unknown): string => escapeHtml(String(val));
+
+    // Build meta tags (escape all user-provided values to prevent XSS)
     let metaTags = [
-      metadata.title && `<title>${metadata.title}</title>`,
+      metadata.title && `<title>${e(metadata.title)}</title>`,
       metadata.description &&
-        `<meta name="description" content="${metadata.description}">`,
+        `<meta name="description" content="${e(metadata.description)}">`,
       metadata.keywords &&
-        `<meta name="keywords" content="${Array.isArray(metadata.keywords) ? metadata.keywords.join(', ') : metadata.keywords}">`,
-      metadata.author && `<meta name="author" content="${metadata.author}">`,
-      metadata.robots && `<meta name="robots" content="${metadata.robots}">`,
+        `<meta name="keywords" content="${e(Array.isArray(metadata.keywords) ? metadata.keywords.join(', ') : metadata.keywords)}">`,
+      metadata.author && `<meta name="author" content="${e(metadata.author)}">`,
+      metadata.robots && `<meta name="robots" content="${e(metadata.robots)}">`,
 
       // Open Graph
       metadata.title &&
-        `<meta property="og:title" content="${metadata.title}">`,
+        `<meta property="og:title" content="${e(metadata.title)}">`,
       metadata.description &&
-        `<meta property="og:description" content="${metadata.description}">`,
+        `<meta property="og:description" content="${e(metadata.description)}">`,
       metadata.image &&
-        `<meta property="og:image" content="${metadata.image}">`,
-      metadata.url && `<meta property="og:url" content="${metadata.url}">`,
-      `<meta property="og:type" content="${metadata.type || 'article'}">`,
+        `<meta property="og:image" content="${e(metadata.image)}">`,
+      metadata.url && `<meta property="og:url" content="${e(metadata.url)}">`,
+      `<meta property="og:type" content="${e(metadata.type || 'article')}">`,
 
       // Twitter
       metadata.title &&
-        `<meta name="twitter:title" content="${metadata.title}">`,
+        `<meta name="twitter:title" content="${e(metadata.title)}">`,
       metadata.description &&
-        `<meta name="twitter:description" content="${metadata.description}">`,
+        `<meta name="twitter:description" content="${e(metadata.description)}">`,
       metadata.image &&
-        `<meta name="twitter:image" content="${metadata.image}">`,
-      `<meta name="twitter:card" content="${metadata.twitterCard || 'summary_large_image'}">`,
+        `<meta name="twitter:image" content="${e(metadata.image)}">`,
+      `<meta name="twitter:card" content="${e(metadata.twitterCard || 'summary_large_image')}">`,
 
       // Dates
       metadata.publishDate &&
-        `<meta property="article:published_time" content="${metadata.publishDate}">`,
+        `<meta property="article:published_time" content="${e(metadata.publishDate)}">`,
       metadata.modifiedDate &&
-        `<meta property="article:modified_time" content="${metadata.modifiedDate}">`,
+        `<meta property="article:modified_time" content="${e(metadata.modifiedDate)}">`,
 
       // Canonical
       metadata.canonical &&
-        `<link rel="canonical" href="${metadata.canonical}">`,
+        `<link rel="canonical" href="${e(metadata.canonical)}">`,
     ]
       .filter(Boolean)
       .join('\n    ');
@@ -598,7 +586,7 @@ async function injectFrontmatterMeta() {
       const tagMetas = (
         Array.isArray(metadata.tags) ? metadata.tags : [metadata.tags]
       )
-        .map((tag: string) => `<meta property="article:tag" content="${tag}">`)
+        .map((tag: string) => `<meta property="article:tag" content="${e(tag)}">`)
         .join('\n    ');
       metaTags += '\n    ' + tagMetas;
     }
@@ -608,7 +596,7 @@ async function injectFrontmatterMeta() {
 
     // Update lang attribute if specified
     if (metadata.lang) {
-      html = html.replace('<html lang="en">', `<html lang="${metadata.lang}">`);
+      html = html.replace('<html lang="en">', `<html lang="${e(metadata.lang)}">`);
     }
 
     await fs.writeFile(htmlPath, html);

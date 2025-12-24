@@ -1,6 +1,81 @@
 import path from 'path';
 import fs from 'fs/promises';
+import readline from 'readline';
 import { glob } from 'fast-glob';
+import { spawnSync } from 'child_process';
+import log from './logger';
+
+/**
+ * Spawn bun commands synchronously using Node's child_process.
+ * Uses the current executable with BUN_BE_BUN=1 so scratch can run bun commands
+ * without requiring bun to be installed separately.
+ */
+export function spawnBunSync(
+  args: string[],
+  options: { cwd?: string; stdio?: 'pipe' | 'inherit' } = {}
+): { exitCode: number; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, args, {
+    cwd: options.cwd,
+    encoding: 'utf-8',
+    stdio: options.stdio === 'inherit' ? 'inherit' : 'pipe',
+    env: {
+      ...process.env,
+      BUN_BE_BUN: '1',
+    },
+  });
+
+  return {
+    exitCode: result.status ?? 1,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+  };
+}
+
+/**
+ * Run bun install in a directory.
+ * Throws an error with helpful message if install fails.
+ */
+export function bunInstall(cwd: string): void {
+  const result = spawnBunSync(['install'], { cwd, stdio: 'pipe' });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Failed to install dependencies.\n\n` +
+        `This can happen if:\n` +
+        `  - No network connection\n` +
+        `  - Bun is not installed correctly\n` +
+        `  - Disk space is low\n\n` +
+        `Details: ${result.stderr || result.stdout || 'Unknown error'}`
+    );
+  }
+}
+
+/**
+ * Remove a file or directory with retry logic for transient errors (EACCES, EBUSY).
+ * This handles cases where files are temporarily locked by other processes.
+ */
+export async function rmWithRetry(
+  filePath: string,
+  options: { recursive?: boolean; force?: boolean } = {},
+  maxRetries = 3,
+  delayMs = 100
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await fs.rm(filePath, options);
+      return;
+    } catch (error: any) {
+      const isRetryable = error?.code === 'EACCES' || error?.code === 'EBUSY';
+      if (isRetryable && attempt < maxRetries) {
+        log.debug(
+          `Retry ${attempt}/${maxRetries} for rm ${filePath}: ${error.code}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
 
 /**
  * Simple template rendering function
@@ -81,7 +156,19 @@ export async function buildFileMap(
 }
 
 /**
- * Get content type for a file based on extension
+ * Escape HTML entities to prevent XSS when inserting user content into HTML.
+ */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Get content type for a file based on extension.
  */
 export function getContentType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
@@ -102,4 +189,34 @@ export function getContentType(filePath: string): string {
     '.eot': 'application/vnd.ms-fontobject',
   };
   return types[ext] || 'application/octet-stream';
+}
+
+/**
+ * Prompt user for yes/no confirmation.
+ * Auto-confirms with default value when not running in a TTY (non-interactive).
+ */
+export async function confirm(question: string, defaultValue: boolean): Promise<boolean> {
+  // Auto-confirm when not in a TTY (scripts, tests, piped input)
+  if (!process.stdin.isTTY) {
+    return defaultValue;
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const hint = defaultValue ? '[Y/n]' : '[y/N]';
+
+  return new Promise((resolve) => {
+    rl.question(`${question} ${hint} `, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      if (trimmed === '') {
+        resolve(defaultValue);
+      } else {
+        resolve(trimmed === 'y' || trimmed === 'yes');
+      }
+    });
+  });
 }

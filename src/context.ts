@@ -1,67 +1,24 @@
-import { buildFileMap, type FileMapResult } from './util';
-import _path from 'path';
+import {
+  buildFileMap,
+  bunInstall,
+  rmWithRetry,
+  type FileMapResult,
+} from './util';
+import path from 'path';
 import fs from 'fs/promises';
-import { spawnSync, execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { globSync } from 'fast-glob';
 import { templates, materializeTemplate, hasTemplate } from './template';
 import log from './logger';
 
-export const BUILD_DEPENDENCIES = ['react', 'react-dom', '@mdx-js/react', 'tailwindcss', '@tailwindcss/cli', '@tailwindcss/typography'];
-
-/**
- * Spawn bun commands synchronously using Node's child_process.
- * Uses the current executable with BUN_BE_BUN=1 so scratch can run bun commands
- * without requiring bun to be installed separately.
- *
- * Note: We use Node's spawnSync instead of Bun.spawn to avoid a Bun runtime issue
- * where Bun.build() fails after spawning a child bun process in the same execution.
- */
-export function spawnBunSync(
-  args: string[],
-  options: { cwd?: string; stdio?: 'pipe' | 'inherit' } = {}
-): { exitCode: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, args, {
-    cwd: options.cwd,
-    encoding: 'utf-8',
-    stdio: options.stdio === 'inherit' ? 'inherit' : 'pipe',
-    env: {
-      ...process.env,
-      BUN_BE_BUN: '1',
-    },
-  });
-
-  return {
-    exitCode: result.status ?? 1,
-    stdout: result.stdout || '',
-    stderr: result.stderr || '',
-  };
-}
-
-/**
- * Remove a file or directory with retry logic for transient errors (EACCES, EBUSY).
- * This handles cases where files are temporarily locked by other processes.
- */
-async function rmWithRetry(
-  path: string,
-  options: { recursive?: boolean; force?: boolean } = {},
-  maxRetries = 3,
-  delayMs = 100
-): Promise<void> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      await fs.rm(path, options);
-      return;
-    } catch (error: any) {
-      const isRetryable = error?.code === 'EACCES' || error?.code === 'EBUSY';
-      if (isRetryable && attempt < maxRetries) {
-        log.debug(`Retry ${attempt}/${maxRetries} for rm ${path}: ${error.code}`);
-        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
-      } else {
-        throw error;
-      }
-    }
-  }
-}
+export const BUILD_DEPENDENCIES = [
+  'react',
+  'react-dom',
+  '@mdx-js/react',
+  'tailwindcss',
+  '@tailwindcss/cli',
+  '@tailwindcss/typography',
+];
 
 let CONTEXT: BuildContext | undefined;
 
@@ -111,153 +68,122 @@ export class BuildContext {
 
   constructor(opts: BuildContextInitOptions) {
     this.options = opts;
-    this.rootDir = _path.resolve(opts.path || opts.rootDirName || '.');
-    this.tempDir = _path.resolve(this.rootDir, opts.tempDirName || '.scratch-build-cache');
-    this.buildDir = _path.resolve(this.rootDir, opts.buildDirName || 'dist');
-    this.srcDir = _path.resolve(
+    this.rootDir = path.resolve(opts.path || opts.rootDirName || '.');
+    this.tempDir = path.resolve(
       this.rootDir,
-      opts.srcDirName || 'src'
+      opts.tempDirName || '.scratch-build-cache'
     );
-    this.pagesDir = _path.resolve(this.rootDir, opts.pagesDirName || 'pages');
-    this.staticDir = _path.resolve(this.rootDir, opts.staticDirName || 'public');
+    this.buildDir = path.resolve(this.rootDir, opts.buildDirName || 'dist');
+    this.srcDir = path.resolve(this.rootDir, opts.srcDirName || 'src');
+    this.pagesDir = path.resolve(this.rootDir, opts.pagesDirName || 'pages');
+    this.staticDir = path.resolve(
+      this.rootDir,
+      opts.staticDirName || 'public'
+    );
   }
 
-  clientSrcDir = () => _path.resolve(this.tempDir, 'client-src');
-  clientCompiledDir = () => _path.resolve(this.tempDir, 'client-compiled');
-  serverSrcDir = () => _path.resolve(this.tempDir, 'server-src');
-  serverCompiledDir = () => _path.resolve(this.tempDir, 'server-compiled');
+  get clientSrcDir(): string {
+    return path.resolve(this.tempDir, 'client-src');
+  }
 
-  /**
-   * Directory where embedded templates are materialized
-   */
-  embeddedTemplatesDir = () => _path.resolve(this.tempDir, 'embedded-templates');
+  get clientCompiledDir(): string {
+    return path.resolve(this.tempDir, 'client-compiled');
+  }
+
+  get serverSrcDir(): string {
+    return path.resolve(this.tempDir, 'server-src');
+  }
+
+  get serverCompiledDir(): string {
+    return path.resolve(this.tempDir, 'server-compiled');
+  }
+
+  get embeddedTemplatesDir(): string {
+    return path.resolve(this.tempDir, 'embedded-templates');
+  }
 
   /**
    * Returns the node_modules directory to use for build dependencies.
    * If user has package.json, uses project root. Otherwise uses cache.
    */
   async nodeModulesDir(): Promise<string> {
-    const userPackageJson = _path.resolve(this.rootDir, 'package.json');
+    const userPackageJson = path.resolve(this.rootDir, 'package.json');
     if (await fs.exists(userPackageJson)) {
-      return _path.resolve(this.rootDir, 'node_modules');
+      return path.resolve(this.rootDir, 'node_modules');
     }
-    return _path.resolve(this.tempDir, 'node_modules');
+    return path.resolve(this.tempDir, 'node_modules');
   }
 
   /**
    * Ensures build dependencies are installed.
    * - If user has package.json: runs bun install in project root
    * - Otherwise: installs required packages to .scratch-build-cache/node_modules
+   *
+   * Note: After installing dependencies, we must restart the build in a fresh
+   * subprocess due to a Bun runtime bug where Bun.build() fails after spawning
+   * a child bun process in the same execution.
    */
   async ensureBuildDependencies(): Promise<void> {
-    const userPackageJson = _path.resolve(this.rootDir, 'package.json');
-    const userNodeModules = _path.resolve(this.rootDir, 'node_modules');
+    const userPackageJson = path.resolve(this.rootDir, 'package.json');
 
-    // If user has package.json, install deps in project root
     if (await fs.exists(userPackageJson)) {
-      if (await fs.exists(userNodeModules)) {
-        log.debug('Using existing project node_modules');
-        return;
+      const userNodeModules = path.resolve(this.rootDir, 'node_modules');
+      const needsInstall = !(await fs.exists(userNodeModules));
+
+      if (needsInstall) {
+        log.info('Installing dependencies...');
+        bunInstall(this.rootDir);
+        log.info('Dependencies installed');
+        this.restartBuildInSubprocess();
       }
+    } else {
+      const cacheNodeModules = path.resolve(this.tempDir, 'node_modules');
+      const needsInstall = !(await fs.exists(cacheNodeModules));
 
-      log.info('Installing dependencies...');
-      try {
-        execSync(`"${process.execPath}" install`, {
-          cwd: this.rootDir,
-          stdio: 'pipe',
-          env: { ...process.env, BUN_BE_BUN: '1' },
-        });
-      } catch (error: any) {
-        throw new Error(
-          `Failed to install dependencies.\n\n` +
-          `This can happen if:\n` +
-          `  - No network connection\n` +
-          `  - Bun is not installed correctly\n` +
-          `  - Disk space is low\n\n` +
-          `Details: ${error.stderr?.toString() || error.message}`
-        );
-      }
-      log.info('Dependencies installed');
+      await this.ensureCachePackageJson();
 
-      // Work around a Bun runtime issue: Bun.build() with target='bun' fails
-      // after spawning a child bun process in the same execution.
-      // Re-run the build in a fresh subprocess.
-      log.debug('Re-running build in subprocess to work around Bun runtime issue');
-      // In compiled Bun binaries, argv is ["bun", "/$bunfs/root/...", ...args]
-      // so we skip the first two elements and use execPath as the executable
-      const args = process.argv.slice(2);
-      const buildResult = spawnSync(process.execPath, args, {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        env: process.env,
-      });
-      process.exit(buildResult.status ?? 1);
-    }
-
-    // No package.json - use build cache
-    const cacheNodeModules = _path.resolve(this.tempDir, 'node_modules');
-
-    // Check if all required packages exist
-    let needsInstall = !(await fs.exists(cacheNodeModules));
-    if (!needsInstall) {
-      for (const pkg of BUILD_DEPENDENCIES) {
-        const pkgPath = _path.resolve(cacheNodeModules, pkg);
-        if (!(await fs.exists(pkgPath))) {
-          needsInstall = true;
-          break;
-        }
+      if (needsInstall) {
+        log.info('Installing build dependencies...');
+        bunInstall(this.tempDir);
+        log.info('Build dependencies installed');
+        this.restartBuildInSubprocess();
       }
     }
+  }
 
-    if (needsInstall) {
-      log.info('Installing build dependencies...');
-      await fs.mkdir(this.tempDir, { recursive: true });
+  /**
+   * Re-run the build in a fresh subprocess to work around Bun runtime issue.
+   * Bun.build() fails after spawning a child bun process in the same execution.
+   */
+  private restartBuildInSubprocess(): never {
+    log.debug('Re-running build in subprocess to work around Bun runtime issue');
+    const args = process.argv.slice(2);
+    const result = spawnSync(process.execPath, args, {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+      env: process.env,
+    });
+    process.exit(result.status ?? 1);
+  }
 
-      // Create minimal package.json
-      const packageJson = {
-        name: 'scratch-build-cache',
-        private: true,
-        dependencies: Object.fromEntries(
-          BUILD_DEPENDENCIES.map(pkg => [pkg, 'latest'])
-        ),
-      };
-      await fs.writeFile(
-        _path.resolve(this.tempDir, 'package.json'),
-        JSON.stringify(packageJson, null, 2)
-      );
-
-      // Run bun install
-      try {
-        execSync(`"${process.execPath}" install`, {
-          cwd: this.tempDir,
-          stdio: 'pipe',
-          env: { ...process.env, BUN_BE_BUN: '1' },
-        });
-      } catch (error: any) {
-        throw new Error(
-          `Failed to install build dependencies.\n\n` +
-          `This can happen if:\n` +
-          `  - No network connection\n` +
-          `  - Bun is not installed correctly\n` +
-          `  - Disk space is low\n\n` +
-          `Details: ${error.stderr?.toString() || error.message}`
-        );
-      }
-
-      log.info('Build dependencies installed');
-
-      // Work around a Bun runtime issue: Bun.build() with target='bun' fails
-      // after spawning a child bun process in the same execution.
-      // Re-run the build in a fresh subprocess.
-      log.debug('Re-running build in subprocess to work around Bun runtime issue');
-      const args = process.argv.slice(2);
-      const buildResult = spawnSync(process.execPath, args, {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        env: process.env,
-      });
-      process.exit(buildResult.status ?? 1);
+  /**
+   * Ensures a package.json exists in the build cache with required dependencies.
+   */
+  private async ensureCachePackageJson(): Promise<void> {
+    const cachePackageJson = path.resolve(this.tempDir, 'package.json');
+    if (await fs.exists(cachePackageJson)) {
+      return;
     }
+
+    await fs.mkdir(this.tempDir, { recursive: true });
+    const packageJson = {
+      name: 'scratch-build-cache',
+      private: true,
+      dependencies: Object.fromEntries(
+        BUILD_DEPENDENCIES.map((pkg) => [pkg, 'latest'])
+      ),
+    };
+    await fs.writeFile(cachePackageJson, JSON.stringify(packageJson, null, 2));
   }
 
   async reset() {
@@ -272,8 +198,7 @@ export class BuildContext {
 
   async resetTempDir() {
     // Preserve node_modules if it exists to avoid reinstalling every build
-    const nodeModulesPath = _path.resolve(this.tempDir, 'node_modules');
-    const packageJsonPath = _path.resolve(this.tempDir, 'package.json');
+    const nodeModulesPath = path.resolve(this.tempDir, 'node_modules');
     const hasNodeModules = await fs.exists(nodeModulesPath);
 
     if (hasNodeModules) {
@@ -281,7 +206,10 @@ export class BuildContext {
       const entries = await fs.readdir(this.tempDir);
       for (const entry of entries) {
         if (entry !== 'node_modules' && entry !== 'package.json') {
-          await rmWithRetry(_path.resolve(this.tempDir, entry), { recursive: true, force: true });
+          await rmWithRetry(path.resolve(this.tempDir, entry), {
+            recursive: true,
+            force: true,
+          });
         }
       }
     } else {
@@ -306,7 +234,7 @@ export class BuildContext {
     fallbackTemplatePath: string
   ): Promise<string> {
     for (const candidate of candidates) {
-      const userPath = _path.resolve(this.rootDir, candidate);
+      const userPath = path.resolve(this.rootDir, candidate);
       if (await fs.exists(userPath)) {
         return userPath;
       }
@@ -319,7 +247,7 @@ export class BuildContext {
    * Falls back to embedded templates if not in project.
    */
   async markdownComponentsDir(): Promise<string> {
-    const userMarkdownDir = _path.resolve(this.srcDir, 'markdown');
+    const userMarkdownDir = path.resolve(this.srcDir, 'markdown');
     if (await fs.exists(userMarkdownDir)) {
       return userMarkdownDir;
     }
@@ -343,7 +271,7 @@ export class BuildContext {
    */
   async clientTsxSrcPath(): Promise<string> {
     return this.resolvePathWithFallback(
-      ['entry-client.tsx', 'entry.tsx', 'client.tsx', 'build/entry-client.tsx', '_build/entry-client.tsx'],
+      ['_build/entry-client.tsx'],
       '_build/entry-client.tsx'
     );
   }
@@ -354,7 +282,7 @@ export class BuildContext {
    */
   async serverJsxSrcPath(): Promise<string> {
     return this.resolvePathWithFallback(
-      ['entry-server.jsx', 'index.jsx', 'server.jsx', 'build/entry-server.jsx', '_build/entry-server.jsx'],
+      ['_build/entry-server.jsx'],
       '_build/entry-server.jsx'
     );
   }
@@ -379,7 +307,7 @@ export class BuildContext {
       return this.materializedPaths.get(templatePath)!;
     }
 
-    const targetPath = _path.resolve(this.embeddedTemplatesDir(), templatePath);
+    const targetPath = path.resolve(this.embeddedTemplatesDir, templatePath);
     await materializeTemplate(templatePath, targetPath);
     this.materializedPaths.set(templatePath, targetPath);
     return targetPath;
@@ -395,15 +323,15 @@ export class BuildContext {
       return this.materializedPaths.get(cacheKey)!;
     }
 
-    const targetDir = _path.resolve(this.embeddedTemplatesDir(), dirname);
+    const targetDir = path.resolve(this.embeddedTemplatesDir, dirname);
 
     // Find all files that start with this dirname
     const prefix = dirname + '/';
     for (const [filename, content] of Object.entries(templates)) {
       if (filename.startsWith(prefix)) {
         const relativePath = filename.slice(prefix.length);
-        const targetPath = _path.resolve(targetDir, relativePath);
-        await fs.mkdir(_path.dirname(targetPath), { recursive: true });
+        const targetPath = path.resolve(targetDir, relativePath);
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
         await fs.writeFile(targetPath, content);
       }
     }
@@ -476,7 +404,8 @@ export class BuildContext {
           // Check for .tsx variant first
           const templatePath = `src/markdown/${comp}.tsx`;
           if (hasTemplate(templatePath)) {
-            const componentPath = await this.materializeEmbeddedFile(templatePath);
+            const componentPath =
+              await this.materializeEmbeddedFile(templatePath);
             result.map[comp] = componentPath;
           }
         }
@@ -514,10 +443,10 @@ export class Entry {
   frontmatterData?: Record<string, any>;
 
   constructor(sourceFile: string, baseDir: string) {
-    this.absPath = _path.resolve(sourceFile);
-    this.baseDir = _path.resolve(baseDir);
+    this.absPath = path.resolve(sourceFile);
+    this.baseDir = path.resolve(baseDir);
 
-    this.relPath = _path.relative(this.baseDir, this.absPath);
+    this.relPath = path.relative(this.baseDir, this.absPath);
 
     // The entry name is the relative path to the source file without the extension
     this.name = this.relPath.replace(/\.[^/.]+$/, '');
@@ -528,10 +457,10 @@ export class Entry {
    */
   getArtifactPath(extension: string, baseDir: string): string {
     // check if the basename of the entry name is "index"
-    const basename = _path.basename(this.name);
+    const basename = path.basename(this.name);
     if (basename === 'index') {
-      return _path.resolve(baseDir, this.name + extension);
+      return path.resolve(baseDir, this.name + extension);
     }
-    return _path.resolve(baseDir, this.name + '/index' + extension);
+    return path.resolve(baseDir, this.name + '/index' + extension);
   }
 }
