@@ -191,6 +191,57 @@ export function getContentType(filePath: string): string {
   return types[ext] || 'application/octet-stream';
 }
 
+interface TreeNode {
+  [key: string]: TreeNode | null;
+}
+
+/**
+ * Format a list of file paths as a directory tree.
+ */
+export function formatFileTree(files: string[]): string[] {
+  // Build tree structure
+  const tree: TreeNode = {};
+  for (const file of files.sort()) {
+    const parts = file.split('/');
+    let node = tree;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isFile = i === parts.length - 1;
+      if (isFile) {
+        node[part] = null;
+      } else {
+        if (!node[part]) node[part] = {};
+        node = node[part] as TreeNode;
+      }
+    }
+  }
+
+  // Render tree to lines
+  const lines: string[] = [];
+  function render(node: TreeNode, prefix: string) {
+    // Sort: directories first, then files, alphabetically within each group
+    const entries = Object.entries(node).sort(([aName, aChildren], [bName, bChildren]) => {
+      const aIsDir = aChildren !== null;
+      const bIsDir = bChildren !== null;
+      if (aIsDir && !bIsDir) return -1;
+      if (!aIsDir && bIsDir) return 1;
+      return aName.localeCompare(bName);
+    });
+    entries.forEach(([name, children], index) => {
+      const isLast = index === entries.length - 1;
+      const connector = prefix === '' ? '' : (isLast ? '└── ' : '├── ');
+      const isDir = children !== null;
+      lines.push(prefix + connector + name + (isDir ? '/' : ''));
+      if (isDir) {
+        const childPrefix = prefix === '' ? '  ' : prefix + (isLast ? '    ' : '│   ');
+        render(children, childPrefix);
+      }
+    });
+  }
+  render(tree, '');
+  return lines;
+}
+
 /**
  * Prompt user for yes/no confirmation.
  * Auto-confirms with default value when not running in a TTY (non-interactive).

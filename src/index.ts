@@ -6,7 +6,7 @@ import { buildCommand } from './cmd/build';
 import { createCommand } from './cmd/create';
 import { devCommand } from './cmd/dev';
 import { previewCommand } from './cmd/preview';
-import { revertCommand } from './cmd/revert';
+import { getCommand } from './cmd/get';
 import { updateCommand } from './cmd/update';
 import { getBuildContext, setBuildContext } from './context';
 import log, { setLogLevel } from './logger';
@@ -40,7 +40,7 @@ program
   .description('Create a new Scratch project')
   .argument('[path]', 'Path to project directory', '.')
   .option('--no-src', 'Exclude src/ directory')
-  .option('--no-examples', 'Exclude example pages')
+  .option('--examples', 'Include example pages')
   .option('--no-package', 'Exclude package.json')
   .action(
     withErrorHandling('Create', async (path, options) => {
@@ -113,14 +113,15 @@ program
   );
 
 program
-  .command('revert')
-  .description('Revert a file to its template version')
-  .argument('[file]', 'File to revert')
+  .command('get')
+  .aliases(['revert', 'eject'])
+  .description('Clone a file or directory from the built-in templates')
+  .argument('[file]', 'File or directory to get')
   .option('-l, --list', 'List available template files')
   .option('-f, --force', 'Overwrite existing files without confirmation')
   .action(
-    withErrorHandling('Revert', async (file, options) => {
-      await revertCommand(file, options);
+    withErrorHandling('Get', async (file, options) => {
+      await getCommand(file, options);
     })
   );
 

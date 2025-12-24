@@ -2,29 +2,28 @@ import path from 'path';
 import fs from 'fs/promises';
 import { hasTemplate, materializeTemplate, listUserFacingTemplateFiles } from '../template';
 import { generatePackageJson } from './create';
-import { confirm } from '../util';
+import { confirm, formatFileTree } from '../util';
 import log from '../logger';
 
-interface RevertOptions {
+interface GetOptions {
   list?: boolean;
   force?: boolean;
 }
 
 /**
- * Revert a file or directory to its template version.
+ * Get a file or directory from the templates.
  * Creates new files immediately. For existing files, prompts for confirmation (unless --force).
  */
-export async function revertCommand(filePath: string | undefined, options: RevertOptions = {}): Promise<void> {
+export async function getCommand(filePath: string | undefined, options: GetOptions = {}): Promise<void> {
   const allFiles = listUserFacingTemplateFiles();
 
   // List available templates if --list flag is provided
   if (options.list) {
-    log.info('Available template files:');
-    for (const file of allFiles.sort()) {
-      log.info(`  ${file}`);
+    log.info('Available template files:\n');
+    const filesWithPackageJson = [...allFiles, 'package.json'];
+    for (const line of formatFileTree(filesWithPackageJson)) {
+      log.info(`  ${line}`);
     }
-    // package.json is generated, not templated, but can be reverted
-    log.info(`  package.json`);
     return;
   }
 
@@ -34,7 +33,12 @@ export async function revertCommand(filePath: string | undefined, options: Rever
   }
 
   // Normalize the path (remove leading ./ and trailing /)
-  const templatePath = filePath.replace(/^\.\//, '').replace(/\/$/, '');
+  let templatePath = filePath.replace(/^\.\//, '').replace(/\/$/, '');
+
+  // Special case: "examples" is an alias for "pages/examples"
+  if (templatePath === 'examples') {
+    templatePath = 'pages/examples';
+  }
 
   // Special case: package.json is generated, not templated
   if (templatePath === 'package.json') {
@@ -72,7 +76,7 @@ export async function revertCommand(filePath: string | undefined, options: Rever
   if (filesToRevert.length === 0) {
     log.error(`No template found for: ${templatePath}`);
     log.info(`This command should be run from the project root.`);
-    log.info(`Use 'scratch revert --list' to see all available templates.`);
+    log.info(`Use 'scratch get --list' to see all available templates.`);
     process.exit(1);
   }
 
@@ -90,10 +94,15 @@ export async function revertCommand(filePath: string | undefined, options: Rever
   }
 
   // Create new files immediately
-  for (const file of newFiles) {
-    const targetPath = path.resolve(process.cwd(), file);
-    await materializeTemplate(file, targetPath);
-    log.info(`Created ${file}`);
+  if (newFiles.length > 0) {
+    for (const file of newFiles) {
+      const targetPath = path.resolve(process.cwd(), file);
+      await materializeTemplate(file, targetPath);
+    }
+    log.info('Created:\n');
+    for (const line of formatFileTree(newFiles)) {
+      log.info(`  ${line}`);
+    }
   }
 
   // Handle existing files
@@ -101,11 +110,14 @@ export async function revertCommand(filePath: string | undefined, options: Rever
     let shouldOverwrite = options.force === true;
 
     if (!shouldOverwrite) {
-      log.info('');
-      log.info('The following files will be overwritten:');
-      for (const file of existingFiles) {
-        log.info(`  ${file}`);
+      if (newFiles.length > 0) {
+        log.info('');
       }
+      log.info('The following files will be overwritten:\n');
+      for (const line of formatFileTree(existingFiles)) {
+        log.info(`  ${line}`);
+      }
+      log.info('');
       shouldOverwrite = await confirm('Overwrite these files?', true);
     }
 
@@ -113,7 +125,13 @@ export async function revertCommand(filePath: string | undefined, options: Rever
       for (const file of existingFiles) {
         const targetPath = path.resolve(process.cwd(), file);
         await materializeTemplate(file, targetPath);
-        log.info(`Reverted ${file}`);
+      }
+      if (newFiles.length > 0) {
+        log.info('');
+      }
+      log.info('Restored:\n');
+      for (const line of formatFileTree(existingFiles)) {
+        log.info(`  ${line}`);
       }
     } else {
       log.info(`Skipped ${existingFiles.length} existing file${existingFiles.length === 1 ? '' : 's'}.`);

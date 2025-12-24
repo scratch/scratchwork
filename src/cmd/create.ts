@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { materializeProjectTemplates } from '../template';
 import { BUILD_DEPENDENCIES } from '../context';
+import { formatFileTree } from '../util';
 import log from '../logger';
 
 interface CreateOptions {
@@ -13,7 +14,10 @@ interface CreateOptions {
 /**
  * Generate a package.json file for the project.
  */
-export async function generatePackageJson(targetDir: string, projectName: string): Promise<void> {
+export async function generatePackageJson(
+  targetDir: string,
+  projectName: string
+): Promise<void> {
   const packageJson = {
     name: projectName,
     private: true,
@@ -22,24 +26,31 @@ export async function generatePackageJson(targetDir: string, projectName: string
       build: 'scratch build',
     },
     dependencies: Object.fromEntries(
-      BUILD_DEPENDENCIES.map(pkg => [pkg, 'latest'])
+      BUILD_DEPENDENCIES.map((pkg) => [pkg, 'latest'])
     ),
   };
 
   const packageJsonPath = path.join(targetDir, 'package.json');
-  await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
+  await fs.writeFile(
+    packageJsonPath,
+    JSON.stringify(packageJson, null, 2) + '\n'
+  );
 }
 
 /**
  * Create a new Scratch project.
  *
- * Includes src/, examples, and package.json by default.
- * Use --no-src, --no-examples, or --no-package to exclude.
+ * Includes src/ and package.json by default.
+ * Use --no-src or --no-package to exclude.
+ * Use --examples to include example pages.
  */
-export async function createCommand(targetPath: string, options: CreateOptions = {}) {
-  // Defaults: include everything (--no-* flags set these to false)
+export async function createCommand(
+  targetPath: string,
+  options: CreateOptions = {}
+) {
+  // Defaults: include src and package, exclude examples
   const includeSrc = options.src !== false;
-  const includeExamples = options.examples !== false;
+  const includeExamples = options.examples === true;
   const includePackage = options.package !== false;
 
   const created = await materializeProjectTemplates(targetPath, {
@@ -47,17 +58,24 @@ export async function createCommand(targetPath: string, options: CreateOptions =
     includeExamples,
   });
 
-  // Generate package.json if requested
+  // Generate package.json if requested (skip if it already exists)
   if (includePackage) {
-    const projectName = path.basename(path.resolve(targetPath));
-    await generatePackageJson(targetPath, projectName);
-    created.push('package.json');
+    const packageJsonPath = path.join(targetPath, 'package.json');
+    if (!(await fs.exists(packageJsonPath))) {
+      const projectName = path.basename(path.resolve(targetPath));
+      await generatePackageJson(targetPath, projectName);
+      created.push('package.json');
+    }
   }
 
   if (created.length > 0) {
-    log.info('Created:');
-    for (const file of created.sort()) {
-      log.info(`  ${file}`);
+    if (targetPath == '.') {
+      log.info(`Created a new Scratch project:\n`);
+    } else {
+      log.info(`Created a new Scratch project in ${targetPath}:\n`);
+    }
+    for (const line of formatFileTree(created)) {
+      log.info(`  ${line}`);
     }
     log.info('');
     log.info('Start the development server:');
