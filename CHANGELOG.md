@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0] - 2025-12-24
+
+This release improves the CLI experience with better output formatting and sensible defaults for project creation.
+
+### Features
+
+- Added `scratch get` command (replaces `revert`) to clone files from built-in templates, with `revert` and `eject` as aliases
+- Added `examples` shortcut: `scratch get examples` now works as an alias for `scratch get pages/examples`
+
+### Improvements
+
+- `scratch create` now excludes example pages by default (use `--examples` to include them)
+- `scratch create` no longer overwrites an existing `package.json`
+- File lists in CLI output now display as a formatted directory tree
+- Simplified dependency management: builds now always use a `package.json` in the project root (auto-created if missing)
+
 ## [0.1.0] - 2025-12-24
 
 This release includes internal refactoring for better maintainability, improved developer experience, and security hardening for HTML output.
