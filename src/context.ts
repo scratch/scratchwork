@@ -1,6 +1,7 @@
 import { buildFileMap, type FileMapResult } from './util';
 import _path from 'path';
 import fs from 'fs/promises';
+import { spawnSync, execSync } from 'child_process';
 import { globSync } from 'fast-glob';
 import { templates, materializeTemplate, hasTemplate } from './template';
 import log from './logger';
@@ -8,20 +9,32 @@ import log from './logger';
 export const BUILD_DEPENDENCIES = ['react', 'react-dom', '@mdx-js/react', 'tailwindcss', '@tailwindcss/cli', '@tailwindcss/typography'];
 
 /**
- * Spawn bun commands using the current executable with BUN_BE_BUN=1.
- * This allows scratch to run bun commands without requiring bun to be installed separately.
+ * Spawn bun commands synchronously using Node's child_process.
+ * Uses the current executable with BUN_BE_BUN=1 so scratch can run bun commands
+ * without requiring bun to be installed separately.
+ *
+ * Note: We use Node's spawnSync instead of Bun.spawn to avoid a Bun runtime issue
+ * where Bun.build() fails after spawning a child bun process in the same execution.
  */
-export function spawnBun(
+export function spawnBunSync(
   args: string[],
-  options: { cwd?: string; stdout?: 'pipe' | 'inherit'; stderr?: 'pipe' | 'inherit' } = {}
-) {
-  return Bun.spawn([process.execPath, ...args], {
-    ...options,
+  options: { cwd?: string; stdio?: 'pipe' | 'inherit' } = {}
+): { exitCode: number; stdout: string; stderr: string } {
+  const result = spawnSync(process.execPath, args, {
+    cwd: options.cwd,
+    encoding: 'utf-8',
+    stdio: options.stdio === 'inherit' ? 'inherit' : 'pipe',
     env: {
       ...process.env,
       BUN_BE_BUN: '1',
     },
   });
+
+  return {
+    exitCode: result.status ?? 1,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+  };
 }
 
 /**
@@ -148,26 +161,37 @@ export class BuildContext {
       }
 
       log.info('Installing dependencies...');
-      const proc = spawnBun(['install'], {
-        cwd: this.rootDir,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-
-      const exitCode = await proc.exited;
-      if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
+      try {
+        execSync(`"${process.execPath}" install`, {
+          cwd: this.rootDir,
+          stdio: 'pipe',
+          env: { ...process.env, BUN_BE_BUN: '1' },
+        });
+      } catch (error: any) {
         throw new Error(
           `Failed to install dependencies.\n\n` +
           `This can happen if:\n` +
           `  - No network connection\n` +
           `  - Bun is not installed correctly\n` +
           `  - Disk space is low\n\n` +
-          `Details: ${stderr}`
+          `Details: ${error.stderr?.toString() || error.message}`
         );
       }
       log.info('Dependencies installed');
-      return;
+
+      // Work around a Bun runtime issue: Bun.build() with target='bun' fails
+      // after spawning a child bun process in the same execution.
+      // Re-run the build in a fresh subprocess.
+      log.debug('Re-running build in subprocess to work around Bun runtime issue');
+      // In compiled Bun binaries, argv is ["bun", "/$bunfs/root/...", ...args]
+      // so we skip the first two elements and use execPath as the executable
+      const args = process.argv.slice(2);
+      const buildResult = spawnSync(process.execPath, args, {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        env: process.env,
+      });
+      process.exit(buildResult.status ?? 1);
     }
 
     // No package.json - use build cache
@@ -203,26 +227,36 @@ export class BuildContext {
       );
 
       // Run bun install
-      const proc = spawnBun(['install'], {
-        cwd: this.tempDir,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-
-      const exitCode = await proc.exited;
-      if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
+      try {
+        execSync(`"${process.execPath}" install`, {
+          cwd: this.tempDir,
+          stdio: 'pipe',
+          env: { ...process.env, BUN_BE_BUN: '1' },
+        });
+      } catch (error: any) {
         throw new Error(
           `Failed to install build dependencies.\n\n` +
           `This can happen if:\n` +
           `  - No network connection\n` +
           `  - Bun is not installed correctly\n` +
           `  - Disk space is low\n\n` +
-          `Details: ${stderr}`
+          `Details: ${error.stderr?.toString() || error.message}`
         );
       }
 
       log.info('Build dependencies installed');
+
+      // Work around a Bun runtime issue: Bun.build() with target='bun' fails
+      // after spawning a child bun process in the same execution.
+      // Re-run the build in a fresh subprocess.
+      log.debug('Re-running build in subprocess to work around Bun runtime issue');
+      const args = process.argv.slice(2);
+      const buildResult = spawnSync(process.execPath, args, {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        env: process.env,
+      });
+      process.exit(buildResult.status ?? 1);
     }
   }
 
