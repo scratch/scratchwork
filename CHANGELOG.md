@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.1] - 2025-12-25
+
+This release improves test execution speed by enabling parallel test runs.
+
+### Improvements
+
+- Split e2e tests into separate files to enable parallel execution
+- Added `bun run test:parallel` command to run tests concurrently (configurable via `-j` flag or `TEST_CONCURRENCY` env var)
+
 ## [0.2.0] - 2025-12-24
 
 This release improves the CLI experience with better output formatting and sensible defaults for project creation.
