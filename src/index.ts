@@ -6,8 +6,9 @@ import { buildCommand } from './cmd/build';
 import { createCommand } from './cmd/create';
 import { devCommand } from './cmd/dev';
 import { previewCommand } from './cmd/preview';
-import { getCommand } from './cmd/get';
+import { checkoutCommand } from './cmd/checkout';
 import { updateCommand } from './cmd/update';
+import { viewCommand } from './cmd/view';
 import { getBuildContext, setBuildContext } from './context';
 import log, { setLogLevel } from './logger';
 import { VERSION } from './version';
@@ -41,6 +42,7 @@ program
   .argument('[path]', 'Path to project directory', '.')
   .option('--no-src', 'Exclude src/ directory')
   .option('--no-package', 'Exclude package.json')
+  .option('--no-example', 'Create empty pages/ and public/ directories')
   .action(
     withErrorHandling('Create', async (path, options) => {
       await createCommand(path, options);
@@ -53,6 +55,7 @@ program
   .option('-b, --build <path>', 'Build directory')
   .option('-d, --development', 'Development mode')
   .option('--no-ssg', 'Disable static site generation')
+  .option('--static <mode>', 'Static file mode: public, assets, all', 'assets')
   .option('--strict', 'Do not inject PageWrapper component or missing imports')
   .action(
     withErrorHandling('Build', async (path, options) => {
@@ -70,6 +73,7 @@ program
   .option('-d, --development', 'Development mode')
   .option('-n, --no-open', 'Do not open dev server endpoint automatically')
   .option('-p, --port <port>', 'Port for dev server', '5173')
+  .option('--static <mode>', 'Static file mode: public, assets, all', 'assets')
   .option('--strict', 'Do not inject PageWrapper component or missing imports')
   .action(
     withErrorHandling('Dev server', async (path, options) => {
@@ -112,15 +116,30 @@ program
   );
 
 program
-  .command('get')
-  .aliases(['revert', 'eject'])
+  .command('checkout')
+  .aliases(['eject'])
   .description('Clone a file or directory from the built-in templates')
-  .argument('[file]', 'File or directory to get')
+  .argument('[file]', 'File or directory to checkout')
   .option('-l, --list', 'List available template files')
   .option('-f, --force', 'Overwrite existing files without confirmation')
   .action(
-    withErrorHandling('Get', async (file, options) => {
-      await getCommand(file, options);
+    withErrorHandling('Checkout', async (file, options) => {
+      await checkoutCommand(file, options);
+    })
+  );
+
+program
+  .command('view')
+  .description('View markdown file(s) with live reload')
+  .argument('<path>', 'Markdown file or directory to view')
+  .option('-p, --port <port>', 'Port for dev server', '5173')
+  .option('-n, --no-open', 'Do not open browser automatically')
+  .action(
+    withErrorHandling('View', async (file, options) => {
+      await viewCommand(file, {
+        ...options,
+        port: options.port ? parseInt(options.port, 10) : undefined,
+      });
     })
   );
 

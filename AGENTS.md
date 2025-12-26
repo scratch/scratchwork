@@ -10,15 +10,21 @@ scratch is a CLI tool for building static MDX-based websites using Bun. Users cr
 - `create [path]` - Create a new Scratch project
   - `--no-src` - Exclude src/ directory
   - `--no-package` - Exclude package.json
+  - `--no-example` - Create empty pages/ and public/ directories
 - `build [path]` - Build the static site
 - `dev [path]` - Development server with hot reload
 - `preview [path]` - Preview the built site
 - `clean [path]` - Clean build artifacts
 - `update` - Update scratch to the latest version
-- `get [file]` - Clone file/directory from built-in templates
-  - Aliases: `revert`, `eject`
+- `checkout [file]` - Clone file/directory from built-in templates
+  - Alias: `eject`
   - `-l, --list` - List available template files
   - `-f, --force` - Overwrite existing files without confirmation
+- `view <path>` - View markdown file(s) with live reload
+  - If path is a file: opens that file's route
+  - If path is a directory: opens first markdown file alphabetically
+  - `-p, --port <port>` - Port for dev server
+  - `-n, --no-open` - Don't auto-open browser
 
 ### Build Pipeline (`src/cmd/build.ts`)
 1. Ensure build dependencies are installed (react, react-dom, @mdx-js/react, tailwindcss, @tailwindcss/cli)
@@ -51,7 +57,8 @@ Components from both directories are auto-imported into MDX files by basename.
 - `src/cmd/dev.ts` - Development server with live reload
 - `src/cmd/create.ts` - Create command handler
 - `src/cmd/preview.ts` - Preview server for built sites
-- `src/cmd/get.ts` - Get/revert command handler
+- `src/cmd/checkout.ts` - Checkout/revert command handler
+- `src/cmd/view.ts` - View single file with live reload
 - `src/template.ts` - Template runtime API (materialize, getContent, list templates)
 - `src/template.generated.ts` - Compiled template content (generated, not checked in)
 - `scripts/compile-templates.ts` - Compiles template/ files into executable

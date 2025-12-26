@@ -1,4 +1,5 @@
 import { watch } from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 import type { ServerWebSocket } from 'bun';
 import { getBuildContext } from '../context';
@@ -6,9 +7,43 @@ import { buildCommand } from './build';
 import { getContentType } from '../util';
 import log from '../logger';
 
+/**
+ * Given a directory, find the best route to open in the dev server.
+ * Prefers / if /index.md[x] exists, otherwise first markdown file
+ * alphabetically. Returns / if no markdown files are found.
+ */
+export async function findRoute(dir: string): Promise<string> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+
+  // Get all markdown files
+  const mdFiles = entries
+    .filter(
+      (e) => e.isFile() && (e.name.endsWith('.md') || e.name.endsWith('.mdx'))
+    )
+    .map((e) => e.name);
+
+  // Return the route if  the directory contains an index file, or if there
+  // are no markdown files
+  if (
+    mdFiles.includes('index.mdx') ||
+    mdFiles.includes('index.md') ||
+    mdFiles.length == 0
+  ) {
+    return '/';
+  }
+
+  // Return the route corresponding to the first markdown file (alphabetically)
+  mdFiles.sort();
+  const firstFile = mdFiles[0];
+  const basename = path.basename(firstFile, path.extname(firstFile));
+  return `/${basename}`;
+}
+
 interface DevOptions {
   port?: number;
   open?: boolean;
+  route?: string; // Route to open in browser, auto-detected if not specified
+  static?: 'public' | 'assets' | 'all';
 }
 
 // Store connected WebSocket clients for live reload
@@ -97,7 +132,10 @@ async function startDevServerWithFallback(
     } catch (error) {
       // If port is in use, try the next one
       const err = error as NodeJS.ErrnoException;
-      if (err.code === 'EADDRINUSE' || (error instanceof Error && error.message.includes('port'))) {
+      if (
+        err.code === 'EADDRINUSE' ||
+        (error instanceof Error && error.message.includes('port'))
+      ) {
         log.debug(`Port ${port} in use, trying ${port + 1}`);
         continue;
       }
@@ -106,8 +144,8 @@ async function startDevServerWithFallback(
   }
   throw new Error(
     `Could not find an available port (tried ${preferredPort}-${preferredPort + maxAttempts - 1}).\n` +
-    `Check if other processes are using these ports:\n` +
-    `  lsof -i :${preferredPort}`
+      `Check if other processes are using these ports:\n` +
+      `  lsof -i :${preferredPort}`
   );
 }
 
@@ -116,35 +154,42 @@ async function startDevServerWithFallback(
  */
 export async function devCommand(options: DevOptions = {}) {
   const ctx = getBuildContext();
-  const preferredPort = typeof options.port === 'string' ? parseInt(options.port, 10) : (options.port || 5173);
+  const preferredPort = options.port || 5173;
 
   // Validate port number
   if (isNaN(preferredPort) || preferredPort < 1 || preferredPort > 65535) {
-    throw new Error(`Invalid port number: "${options.port}". Port must be a number between 1 and 65535.`);
+    throw new Error(
+      `Invalid port number: "${options.port}". Port must be a number between 1 and 65535.`
+    );
   }
 
   log.debug('Starting Bun dev server...');
 
   // Initial build
-  await buildCommand({ ssg: false });
+  await buildCommand({ ssg: false, static: options.static });
 
   // Start the HTTP server with port fallback
-  const { server, port } = await startDevServerWithFallback(ctx.buildDir, preferredPort);
+  const { server, port } = await startDevServerWithFallback(
+    ctx.buildDir,
+    preferredPort
+  );
 
   log.info(`Dev server running at http://localhost:${port}/`);
 
   // Open browser if requested
   if (options.open !== false) {
-    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-    Bun.spawn([opener, `http://localhost:${port}`]);
+    const opener =
+      process.platform === 'darwin'
+        ? 'open'
+        : process.platform === 'win32'
+          ? 'start'
+          : 'xdg-open';
+    const route = options.route ?? await findRoute(ctx.pagesDir);
+    Bun.spawn([opener, `http://localhost:${port}${route}`]);
   }
 
   // Watch for file changes (pages, src, and public)
-  const watchDirs = [
-    ctx.pagesDir,
-    ctx.srcDir,
-    ctx.staticDir,
-  ];
+  const watchDirs = [ctx.pagesDir, ctx.srcDir, ctx.staticDir];
   const watchers: ReturnType<typeof watch>[] = [];
 
   let rebuildTimeout: Timer | null = null;
@@ -158,7 +203,7 @@ export async function devCommand(options: DevOptions = {}) {
       isRebuilding = true;
       log.info('File change detected, rebuilding...');
       try {
-        await buildCommand({ ssg: false });
+        await buildCommand({ ssg: false, static: options.static });
         // Notify all connected clients to reload
         for (const client of clients) {
           client.send('reload');
