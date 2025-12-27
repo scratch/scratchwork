@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.3] - 2025-12-27
+
+This release focuses on internal architecture improvements and test coverage for the build pipeline.
+
+### Improvements
+
+- Refactored build pipeline to use explicit context passing instead of global state, improving testability
+- Made parallel build step execution declarative (tailwind + server build now defined as a group in the step list)
+- Simplified build step interface by removing trivial `shouldRun()` methods and the unused `BuildPhase` enum
+- Steps now store their own outputs directly to pipeline state instead of returning values
+- Consolidated static file copy steps (pages/ and public/) into a single step
+- Extracted shared Bun.build error handling into a reusable utility
+
+### Documentation
+
+- Updated AGENTS.md with accurate build pipeline documentation
+
 ## [0.2.2] - 2025-12-25
 
 This release simplifies the template structure and improves documentation.
