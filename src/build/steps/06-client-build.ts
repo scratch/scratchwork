@@ -1,62 +1,32 @@
 import path from 'path';
 import type { BuildContext } from '../context';
-import type { BuildPipelineState, ClientBuildOutput } from '../types';
-import { BuildPhase, defineStep } from '../types';
+import type { BuildPipelineState, BuildStep } from '../types';
 import { getBunBuildConfig } from '../buncfg';
-import { getPreprocessingErrors } from '../preprocess';
+import { runBunBuild, type BunBuildResult } from '../bundler';
 import log from '../../logger';
 
-export const clientBuildStep = defineStep<ClientBuildOutput>({
+export const clientBuildStep: BuildStep = {
   name: '06-client-build',
   description: 'Client Bun.build',
-  phase: BuildPhase.ClientBuild,
 
-  shouldRun(): boolean {
-    return true;
-  },
-
-  async execute(ctx: BuildContext, state: BuildPipelineState): Promise<ClientBuildOutput> {
+  async execute(ctx: BuildContext, state: BuildPipelineState): Promise<void> {
     const clientEntryPts = state.outputs.clientEntryPts!;
 
-    // Prepare build config
-    const buildConfig = await getBunBuildConfig({
+    const buildConfig = await getBunBuildConfig(ctx, {
       entryPts: Object.values(clientEntryPts),
       outDir: ctx.clientCompiledDir,
       root: ctx.clientSrcDir,
     });
 
-    // Run client build
-    let buildResult: Awaited<ReturnType<typeof Bun.build>>;
-    try {
-      buildResult = await Bun.build(buildConfig);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new Error(`Client bundle failed: ${errorMessage}`);
-    }
-
-    // Check build result
-    if (!buildResult.success) {
-      const errorMessages = buildResult.logs.map((msg) => String(msg)).join('\n');
-      throw new Error(`Client build failed:\n${errorMessages}`);
-    }
-
-    // Check for preprocessing errors
-    const preprocessErrors = getPreprocessingErrors();
-    if (preprocessErrors.length > 0) {
-      for (const err of preprocessErrors) {
-        log.error(err.message);
-      }
-      throw new Error('MDX preprocessing failed');
-    }
+    const buildResult = await runBunBuild(buildConfig, 'Client');
 
     log.debug(`  Built ${buildResult.outputs.length} client bundles`);
 
-    // Build JS output map
-    const jsOutputMap = buildJsOutputMap(ctx, clientEntryPts, buildResult);
-
-    return { buildResult, jsOutputMap };
+    // Build JS output map and store outputs
+    state.outputs.clientBuildResult = buildResult;
+    state.outputs.jsOutputMap = buildJsOutputMap(ctx, clientEntryPts, buildResult);
   },
-});
+};
 
 /**
  * Build map from entry name to hashed JS output path
@@ -64,7 +34,7 @@ export const clientBuildStep = defineStep<ClientBuildOutput>({
 function buildJsOutputMap(
   ctx: BuildContext,
   clientEntryPts: Record<string, string>,
-  result: Awaited<ReturnType<typeof Bun.build>>
+  result: BunBuildResult
 ): Record<string, string> {
   const jsOutputMap: Record<string, string> = {};
 

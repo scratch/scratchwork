@@ -1,18 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { BuildContext } from '../context';
-import type { BuildPipelineState } from '../types';
-import { BuildPhase, defineStep } from '../types';
+import type { BuildPipelineState, BuildStep } from '../types';
 import log from '../../logger';
 
-export const generateHtmlStep = defineStep({
+export const generateHtmlStep: BuildStep = {
   name: '07-generate-html',
   description: 'Generate HTML files',
-  phase: BuildPhase.GenerateHtml,
-
-  shouldRun(): boolean {
-    return true;
-  },
 
   async execute(ctx: BuildContext, state: BuildPipelineState): Promise<void> {
     const entries = state.outputs.entries!;
@@ -70,7 +64,7 @@ export const generateHtmlStep = defineStep({
       log.debug(`  ${path.relative(ctx.rootDir, htmlPath)}`);
     }
   },
-});
+};
 
 /**
  * Detect favicons in the public directory and return appropriate link tags

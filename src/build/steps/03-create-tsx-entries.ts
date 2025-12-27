@@ -1,7 +1,7 @@
 import path from 'path';
 import type { BuildContext, Entry } from '../context';
-import type { BuildPipelineState, TsxEntriesOutput } from '../types';
-import { BuildPhase, defineStep } from '../types';
+import type { BuildPipelineState } from '../types';
+import type { BuildStep } from '../types';
 import { render } from '../../util';
 import log from '../../logger';
 
@@ -40,16 +40,11 @@ async function createEntries(
   return entryPts;
 }
 
-export const createTsxEntriesStep = defineStep<TsxEntriesOutput>({
+export const createTsxEntriesStep: BuildStep = {
   name: '03-create-tsx-entries',
   description: 'Create TSX/JSX entry files from MDX pages',
-  phase: BuildPhase.CreateTsxEntries,
 
-  shouldRun(): boolean {
-    return true;
-  },
-
-  async execute(ctx: BuildContext, state: BuildPipelineState): Promise<TsxEntriesOutput> {
+  async execute(ctx: BuildContext, state: BuildPipelineState): Promise<void> {
     const entries = await ctx.getEntries();
 
     if (Object.keys(entries).length === 0) {
@@ -100,6 +95,9 @@ export const createTsxEntriesStep = defineStep<TsxEntriesOutput>({
       });
     }
 
-    return { entries, clientEntryPts, serverEntryPts };
+    // Store outputs
+    state.outputs.entries = entries;
+    state.outputs.clientEntryPts = clientEntryPts;
+    state.outputs.serverEntryPts = serverEntryPts;
   },
-});
+};
