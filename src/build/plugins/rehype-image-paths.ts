@@ -9,6 +9,7 @@ import type { Plugin } from 'unified';
 import { visit } from 'unist-util-visit';
 import path from 'path';
 import type { BuildContext } from '../context';
+import { normalizeBase, isInternalAbsolutePath } from '../util';
 import log from '../../logger';
 
 /**
@@ -25,24 +26,6 @@ function isRelativePath(src: string): boolean {
   if (src.startsWith('//')) return false;
 
   return true;
-}
-
-/**
- * Normalize a base path to ensure it starts with / and doesn't end with /
- */
-function normalizeBase(base: string | undefined): string {
-  if (!base) return '';
-
-  let normalized = base;
-  // Ensure starts with /
-  if (!normalized.startsWith('/')) {
-    normalized = '/' + normalized;
-  }
-  // Remove trailing /
-  if (normalized.endsWith('/') && normalized.length > 1) {
-    normalized = normalized.slice(0, -1);
-  }
-  return normalized;
 }
 
 export interface ImagePathsPluginOptions {
@@ -103,23 +86,35 @@ export function createImagePathsPlugin(ctx: BuildContext): Plugin {
       }
 
       /**
-       * Transform a relative src path to an absolute path with base.
+       * Transform an image src path to include the base path.
+       * Handles both relative paths and absolute internal paths.
        */
       function transformSrc(src: string): string | null {
         if (!src || typeof src !== 'string') return null;
-        if (!isRelativePath(src)) return null;
 
-        // Resolve the relative path from the MDX file's directory
-        // e.g., ./photo.png in pages/blog/post.mdx -> blog/photo.png
-        // e.g., ../images/logo.svg in pages/blog/post.mdx -> images/logo.svg
-        const resolvedPath = path.posix.normalize(
-          path.posix.join(fileDir.replace(/\\/g, '/'), src)
-        );
+        // Handle relative paths: resolve relative to MDX file, then prepend base
+        if (isRelativePath(src)) {
+          // Resolve the relative path from the MDX file's directory
+          // e.g., ./photo.png in pages/blog/post.mdx -> blog/photo.png
+          // e.g., ../images/logo.svg in pages/blog/post.mdx -> images/logo.svg
+          const resolvedPath = path.posix.normalize(
+            path.posix.join(fileDir.replace(/\\/g, '/'), src)
+          );
 
-        // Build the final absolute path with base
-        const absolutePath = base + '/' + resolvedPath;
-        log.debug(`  - image: ${src} -> ${absolutePath}`);
-        return absolutePath;
+          // Build the final absolute path with base
+          const absolutePath = base + '/' + resolvedPath;
+          log.debug(`  - image: ${src} -> ${absolutePath}`);
+          return absolutePath;
+        }
+
+        // Handle absolute internal paths: prepend base
+        if (base && isInternalAbsolutePath(src)) {
+          const newSrc = base + src;
+          log.debug(`  - image: ${src} -> ${newSrc}`);
+          return newSrc;
+        }
+
+        return null;
       }
 
       // Handle HAST element nodes (from raw HTML via rehype-raw)
