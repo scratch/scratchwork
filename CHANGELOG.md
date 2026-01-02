@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.10] - 2026-01-02
+
+This release introduces new template components for page layouts and reorganizes the template structure for better customization.
+
+### Features
+
+- Added new template components: Header, Footer, Copyright, and ScratchBadge
+- PageWrapper now automatically includes Header and Footer components
+- Copyright component displays author name from frontmatter (available via `window.__scratch_author__`)
+
+### Improvements
+
+- Moved PageWrapper and layout components to `src/template/` directory for clearer organization
+- Updated default page template with improved content and structure
+- Added smooth rotation animation to folder toggle icons in Files component
+- Refined prose styles: centered h1 headings, links only underline on hover, softer inline code styling
+
 ## [0.3.9] - 2026-01-02
 
 This release renames the `view` command to `watch` for clearer semantics.
