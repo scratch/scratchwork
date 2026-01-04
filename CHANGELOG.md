@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.13] - 2026-01-04
+
+This release ensures the dev server always uses React development mode for better debugging.
+
+### Bug Fixes
+
+- Fixed `scratch dev` to use React development mode, providing full error messages and warnings instead of minified production code
+- Fixed port parsing bug in dev command that caused incorrect fallback port calculation
+
 ## [0.3.12] - 2026-01-03
 
 Minor update with template refinements.
