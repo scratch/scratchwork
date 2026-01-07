@@ -26,6 +26,46 @@ scratch is a CLI tool for building static MDX-based websites using Bun. Users cr
   - If path is a directory: opens first markdown file alphabetically
   - `-p, --port <port>` - Port for dev server
   - `-n, --no-open` - Don't auto-open browser
+- `cloud` - Cloud deployment commands (see Cloud Commands below)
+
+### Cloud Commands (`src/cmd/cloud/`)
+
+**Authentication**:
+- `cloud login` - Log in via OAuth device flow (displays code, opens browser)
+- `cloud logout` - Log out and clear credentials
+- `cloud whoami` - Show current user info (email, name, server URL)
+- `cloud config` - Configure cloud settings (e.g., custom server URL)
+
+**Deployment**:
+- `cloud deploy [path]` - Deploy project to Scratch Cloud
+  - `--name <name>` - Override project name
+  - `--namespace <namespace>` - Override namespace
+  - `--no-build` - Skip build step
+  - Builds project, creates ZIP of dist/, uploads to cloud
+  - Saves config to `.scratch/project.toml`
+  - Opens deployed URL in browser
+
+**Project Management**:
+- `cloud projects list` - List all user's projects (default subcommand)
+- `cloud projects info [name]` - Show project details
+  - Uses `.scratch/project.toml` if no name specified
+  - `--namespace <namespace>` - Specify namespace
+- `cloud projects delete [name]` - Delete project (requires confirmation)
+  - Uses `.scratch/project.toml` if no name specified
+  - `--namespace <namespace>` - Specify namespace
+
+**Share Tokens** (anonymous access):
+- `cloud share [project]` - Create a time-limited share token (default action)
+  - Uses `.scratch/project.toml` if no project specified
+  - `--namespace <namespace>` - Specify namespace
+  - `--name <name>` - Token name
+  - `--duration <duration>` - Token duration (1d, 1w, 1m)
+- `cloud share list [project]` - List share tokens for a project
+  - `--namespace <namespace>` - Specify namespace
+- `cloud share revoke <tokenId> [project]` - Revoke a share token
+  - `--namespace <namespace>` - Specify namespace
+
+**Namespace System**: Projects deploy to either global namespace (`_`) or custom domain-based namespaces. URLs follow pattern: `{pagesUrl}/{namespace}/{projectName}/`
 
 ### Build Pipeline (`src/build/`)
 The build system uses a modular step-based architecture orchestrated by `src/build/orchestrator.ts`:
@@ -76,6 +116,14 @@ These can be ejected from embedded templates using `scratch checkout`.
 - `src/cmd/preview.ts` - Preview server for built sites
 - `src/cmd/checkout.ts` - Checkout/eject command handler
 - `src/cmd/watch.ts` - Watch single file with live reload
+
+**Cloud commands** (`src/cmd/cloud/`):
+- `src/cmd/cloud/index.ts` - Cloud command registration
+- `src/cmd/cloud/auth.ts` - login, logout, whoami, config commands
+- `src/cmd/cloud/deploy.ts` - Deploy command with build integration
+- `src/cmd/cloud/projects.ts` - Project list, info, delete commands
+- `src/cmd/cloud/share.ts` - Share token create, list, revoke commands
+- `src/cmd/cloud/namespace.ts` - Namespace utilities (re-exports from shared)
 
 **Templates**:
 - `src/template.ts` - Template runtime API (materialize, getContent, list templates)
