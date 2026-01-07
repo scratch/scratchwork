@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0] - 2026-01-07
+## [0.4.0] - 2026-01-07
 
 This release introduces Scratch Cloud, a complete deployment platform for hosting your static sites with project management and shareable links.
 
