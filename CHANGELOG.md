@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.14] - 2026-01-07
+
+This release adds a width toggle for switching between narrow and wide page layouts, improves dev server reliability, and introduces a global variables system for build configuration.
+
+### Features
+
+- Added WidthToggle component for switching between narrow (2xl) and wide (full-width) page layouts, with localStorage persistence
+- Added global variables system (`__SCRATCH_BASE__`, `__SCRATCH_SSG__`) accessible in both SSR and client-side code
+
+### Bug Fixes
+
+- Fixed `scratch create` command failing when no path argument provided
+- Fixed intermittent "file not created" and "EEXIST" errors during dev rebuilds by improving directory reset reliability
+- Fixed port detection in dev server to properly notify when falling back to an alternate port
+- Disabled the "Add" button in the TodoList example component when input is empty
+
+### Improvements
+
+- Improved build robustness with filesystem sync verification and retry logic
+- Added detailed diagnostics when Tailwind CSS output file is not created
+- Updated ScratchBadge to use a subtler gray color
+- Improved quick start documentation in the default template
+- Fixed TypeScript capitalization in README
+
 ## [0.3.13] - 2026-01-04
 
 This release ensures the dev server always uses React development mode for better debugging.
