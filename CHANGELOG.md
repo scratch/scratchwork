@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.1] - 2026-01-07
+
+This release fixes a security issue with Cloudflare Access credential storage.
+
+### Security
+
+- Cloudflare Access credentials are now stored securely in `~/.scratch/secrets.json` with owner-only permissions (0o600), rather than in the world-readable config file
+- Added automatic migration: existing CF Access credentials are moved from the old location to secure storage on first access
+
+### Improvements
+
+- Consolidated configuration handling into a unified `src/config/` library with clear separation between user preferences, secrets, auth credentials, and project config
+
 ## [0.4.0] - 2026-01-07
 
 This release introduces Scratch Cloud, a complete deployment platform for hosting your static sites with project management and shareable links.
