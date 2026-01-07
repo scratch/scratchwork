@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.15] - 2026-01-07
+
+Minor update with a layout refinement for wide page mode.
+
+### Improvements
+
+- Increased horizontal padding in wide page layout from 8 to 16 units for better readability
+
 ## [0.3.14] - 2026-01-07
 
 This release adds a width toggle for switching between narrow and wide page layouts, improves dev server reliability, and introduces a global variables system for build configuration.
