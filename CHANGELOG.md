@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0] - 2026-01-07
+
+This release introduces Scratch Cloud, a complete deployment platform for hosting your static sites with project management and shareable links.
+
+### Features
+
+- Added `cloud` command suite for deploying and managing projects on Scratch Cloud:
+  - `cloud login` / `cloud logout` / `cloud whoami` - Authentication via OAuth device flow
+  - `cloud config` - Configure cloud settings including custom server URLs
+  - `cloud deploy` - Build and deploy projects with automatic URL generation
+  - `cloud projects list` / `info` / `delete` - Manage deployed projects
+  - `cloud share` - Create time-limited share tokens for anonymous access
+- Added support for Cloudflare Access service tokens for enterprise authentication
+
+### Improvements
+
+- Added progress messages during build (compiling pages, generating HTML, copying assets)
+- Build completion now shows file count and total size of output
+- Fixed memory leak in Shiki syntax highlighter by properly disposing instances when languages change
+
 ## [0.3.15] - 2026-01-07
 
 Minor update with a layout refinement for wide page mode.
