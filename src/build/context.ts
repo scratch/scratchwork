@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import { globSync } from 'fast-glob';
 import { materializeTemplate } from '../template';
 import { normalizeBase } from './util';
+import log from '../logger';
 
 export type HighlightMode = 'off' | 'popular' | 'auto' | 'all';
 
@@ -117,7 +118,30 @@ export class BuildContext {
    * Always cleans the root outDir to remove stale files from previous builds.
    */
   async resetBuildDir(): Promise<void> {
-    await rmWithRetry(this.outDir, { recursive: true, force: true });
+    log.debug(`Removing build directory: ${this.outDir}`);
+
+    // First try without force to catch permission errors
+    try {
+      await fs.rm(this.outDir, { recursive: true });
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        log.debug(`Initial rm failed (${error?.code}), retrying with force...`);
+        await rmWithRetry(this.outDir, { recursive: true, force: true });
+      }
+    }
+
+    // Verify directory was actually removed before creating
+    if (await fs.exists(this.outDir)) {
+      log.debug(`Build dir still exists after rm, waiting...`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      if (await fs.exists(this.outDir)) {
+        log.debug(`Build dir still exists, forcing removal...`);
+        await rmWithRetry(this.outDir, { recursive: true, force: true });
+      }
+    }
+
+    log.debug(`Creating build directory: ${this.buildDir}`);
     await fs.mkdir(this.buildDir, { recursive: true });
   }
 
@@ -125,7 +149,38 @@ export class BuildContext {
    * Reset the temp directory and clear caches.
    */
   async resetTempDir(): Promise<void> {
-    await rmWithRetry(this.tempDir, { recursive: true, force: true });
+    log.debug(`Removing temp directory: ${this.tempDir}`);
+
+    // First try without force to catch permission errors
+    try {
+      await fs.rm(this.tempDir, { recursive: true });
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        // Directory exists but couldn't be removed - try with force
+        log.debug(`Initial rm failed (${error?.code}), retrying with force...`);
+        await rmWithRetry(this.tempDir, { recursive: true, force: true });
+      }
+    }
+
+    // Verify directory was actually removed
+    if (await fs.exists(this.tempDir)) {
+      log.debug(`Directory still exists after rm, waiting for filesystem sync...`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      if (await fs.exists(this.tempDir)) {
+        // List what's left for debugging
+        try {
+          const remaining = await fs.readdir(this.tempDir, { recursive: true });
+          log.debug(`Files remaining after rm: ${remaining.join(', ')}`);
+        } catch { /* ignore */ }
+
+        // Final aggressive attempt
+        log.debug(`Directory still exists, forcing removal...`);
+        await rmWithRetry(this.tempDir, { recursive: true, force: true });
+      }
+    }
+
+    log.debug(`Creating temp directory: ${this.tempDir}`);
     await fs.mkdir(this.tempDir, { recursive: true });
     this.clearCaches();
   }

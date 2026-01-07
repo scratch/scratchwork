@@ -36,16 +36,55 @@ export const tailwindCssStep: BuildStep = {
     // Use tailwindcss from resolved node_modules
     const tailwindBin = path.resolve(nodeModulesDir, '.bin/tailwindcss');
 
+    log.debug(`  Running: ${tailwindBin} ${args.join(' ')}`);
+    log.debug(`  Output: ${outputCss}`);
+
     const proc = Bun.spawn([tailwindBin, ...args], {
       cwd: ctx.rootDir,
       stdout: 'pipe',
       stderr: 'pipe',
     });
 
-    const exitCode = await proc.exited;
+    // Consume both stdout and stderr to prevent blocking
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+
     if (exitCode !== 0) {
-      const stderr = await new Response(proc.stderr).text();
-      throw new Error(`Tailwind CSS build failed: ${stderr}`);
+      throw new Error(`Tailwind CSS build failed: ${stderr || stdout}`);
+    }
+
+    // Verify the output file was created (with brief retry for filesystem flush)
+    let fileExists = await fs.exists(outputCss);
+    if (!fileExists) {
+      // Brief delay and retry in case of filesystem flush delay
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      fileExists = await fs.exists(outputCss);
+    }
+    if (!fileExists) {
+      // Check if the directory exists and what's in it
+      const dirPath = path.dirname(outputCss);
+      const dirExists = await fs.exists(dirPath);
+      let dirContents = '(dir does not exist)';
+      if (dirExists) {
+        try {
+          const files = await fs.readdir(dirPath);
+          dirContents = files.length > 0 ? files.join(', ') : '(empty)';
+        } catch {
+          dirContents = '(could not read)';
+        }
+      }
+      throw new Error(
+        `Tailwind CSS build completed but output file was not created.\n` +
+          `Expected: ${outputCss}\n` +
+          `Directory exists: ${dirExists}\n` +
+          `Directory contents: ${dirContents}\n` +
+          `Command: ${tailwindBin} ${args.join(' ')}\n` +
+          (stderr ? `Tailwind stderr: ${stderr}\n` : '') +
+          (stdout ? `Tailwind stdout: ${stdout}` : '')
+      );
     }
 
     // Hash the CSS content and rename file for cache busting
