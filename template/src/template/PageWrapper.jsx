@@ -8,21 +8,25 @@ import WidthToggle, { useWidthMode } from './WidthToggle';
  * replace this with your own layout – the scratch CLI will automatically detect
  * the component and wrap each MDX page with it during the build.
  */
+const widthClasses = {
+  narrow: 'max-w-2xl px-6',
+  medium: 'max-w-4xl px-6',
+  wide: 'max-w-none px-16',
+};
+
 export default function PageWrapper({ children }) {
-  const { isWide, toggle } = useWidthMode();
+  const { widthMode, setWidthMode } = useWidthMode();
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <div
-        className={`prose w-full mx-auto py-8 flex-1 ${
-          isWide ? 'max-w-none px-16' : 'max-w-3xl px-6'
-        }`}
+        className={`prose w-full mx-auto py-8 flex-1 ${widthClasses[widthMode]}`}
       >
         <Header />
         {children}
       </div>
       <Footer />
-      <WidthToggle isWide={isWide} onToggle={toggle} />
+      <WidthToggle widthMode={widthMode} setWidthMode={setWidthMode} />
     </div>
   );
 }
