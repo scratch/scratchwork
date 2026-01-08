@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.2] - 2026-01-08
+
+This release improves the Cloudflare Access authentication experience by automatically detecting and handling expired or missing credentials.
+
+### Improvements
+
+- Cloud commands now automatically detect when Cloudflare Access authentication is required or has expired, prompting for new credentials and retrying the request
+- Added distinct messages for "token expired" vs "server requires authentication" scenarios to help users understand what action is needed
+
 ## [0.4.1] - 2026-01-07
 
 This release fixes a security issue with Cloudflare Access credential storage.
