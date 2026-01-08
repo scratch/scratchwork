@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3] - 2026-01-08
+
+This release adds a medium width option to the page width toggle, giving users three layout choices.
+
+### Improvements
+
+- Page width toggle now offers three options: narrow (2xl), medium (4xl), and wide (full-width), replacing the previous two-state toggle
+
 ## [0.4.2] - 2026-01-08
 
 This release improves the Cloudflare Access authentication experience by automatically detecting and handling expired or missing credentials.
