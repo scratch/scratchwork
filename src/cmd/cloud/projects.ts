@@ -1,8 +1,9 @@
 import log from '../../logger'
-import { requireAuth, loadProjectConfig } from '../../config'
+import { loadProjectConfig } from '../../config'
 import { listProjects, getProject, deleteProject, ApiError } from '../../cloud/api'
 import { normalizeNamespace, formatNamespace } from './namespace'
 import { prompt, select, stripTrailingSlash } from '../../util'
+import { CloudContext } from './context'
 
 // Parse project identifier: "namespace/name" or just "name"
 // Treats "_" and "global" as the global namespace (null)
@@ -31,7 +32,8 @@ export async function promptProjectChoice(
 export async function resolveProject(
   token: string,
   identifier: string,
-  optionNamespace?: string
+  optionNamespace?: string,
+  serverUrl?: string
 ): Promise<{ name: string; namespace: string | null }> {
   const parsed = parseProjectIdentifier(identifier)
 
@@ -46,7 +48,7 @@ export async function resolveProject(
   }
 
   // Otherwise, search for projects with this name
-  const { projects } = await listProjects(token)
+  const { projects } = await listProjects(token, serverUrl)
   const matches = projects.filter((p) => p.name === parsed.name)
 
   if (matches.length === 0) {
@@ -66,10 +68,11 @@ export async function resolveProject(
 export async function resolveProjectOrConfig(
   token: string,
   identifier: string | undefined,
-  optionNamespace?: string
+  optionNamespace?: string,
+  serverUrl?: string
 ): Promise<{ name: string; namespace: string | null }> {
   if (identifier) {
-    return resolveProject(token, identifier, optionNamespace)
+    return resolveProject(token, identifier, optionNamespace, serverUrl)
   }
 
   const config = await loadProjectConfig('.')
@@ -105,11 +108,12 @@ export function formatDateTime(dateString: string): string {
   })
 }
 
-export async function listProjectsCommand(): Promise<void> {
-  const credentials = await requireAuth()
+export async function listProjectsCommand(ctx: CloudContext): Promise<void> {
+  const serverUrl = await ctx.getServerUrl()
+  const credentials = await ctx.requireAuth()
 
   try {
-    const { projects } = await listProjects(credentials.token)
+    const { projects } = await listProjects(credentials.token, serverUrl)
 
     if (projects.length === 0) {
       log.info('No projects found.')
@@ -142,14 +146,15 @@ export interface ProjectInfoOptions {
   namespace?: string
 }
 
-export async function projectInfoCommand(identifier?: string, options: ProjectInfoOptions = {}): Promise<void> {
-  const credentials = await requireAuth()
+export async function projectInfoCommand(ctx: CloudContext, identifier?: string, options: ProjectInfoOptions = {}): Promise<void> {
+  const serverUrl = await ctx.getServerUrl()
+  const credentials = await ctx.requireAuth()
 
   // Resolve project (handles namespace/name format, ambiguity, and config fallback)
-  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace)
+  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace, serverUrl)
 
   try {
-    const { project } = await getProject(credentials.token, resolved.name, resolved.namespace)
+    const { project } = await getProject(credentials.token, resolved.name, resolved.namespace, serverUrl)
 
     log.info('')
     log.info(`Project: ${project.name}`)
@@ -177,18 +182,20 @@ export async function projectInfoCommand(identifier?: string, options: ProjectIn
 
 export interface ProjectDeleteOptions {
   namespace?: string
+  force?: boolean
 }
 
-export async function projectDeleteCommand(identifier?: string, options: ProjectDeleteOptions = {}): Promise<void> {
-  const credentials = await requireAuth()
+export async function projectDeleteCommand(ctx: CloudContext, identifier?: string, options: ProjectDeleteOptions = {}): Promise<void> {
+  const serverUrl = await ctx.getServerUrl()
+  const credentials = await ctx.requireAuth()
 
   // Resolve project (handles namespace/name format, ambiguity, and config fallback)
-  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace)
+  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace, serverUrl)
   const ns = formatNamespace(resolved.namespace)
 
   // Verify project exists (resolveProject already checks this, but getProject gives us 404 handling)
   try {
-    await getProject(credentials.token, resolved.name, resolved.namespace)
+    await getProject(credentials.token, resolved.name, resolved.namespace, serverUrl)
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.status === 404) {
@@ -201,22 +208,23 @@ export async function projectDeleteCommand(identifier?: string, options: Project
     throw error
   }
 
-  // Confirm deletion
-  log.info('')
-  log.info(`This will delete project "${ns}/${resolved.name}" and all its deploys.`)
-  log.info('This action cannot be undone.')
-  log.info('')
+  // Confirm deletion (unless --force)
+  if (!options.force) {
+    log.info('')
+    log.info(`This will delete project "${ns}/${resolved.name}" and all its deploys.`)
+    log.info('This action cannot be undone.')
+    log.info('')
 
-  const answer = await prompt(`Type "${resolved.name}" to confirm: `)
+    const answer = await prompt(`Type "${resolved.name}" to confirm: `)
 
-  if (answer !== resolved.name) {
-    log.error('Confirmation did not match. Deletion cancelled.')
-    process.exit(1)
+    if (answer !== resolved.name) {
+      log.error('Confirmation did not match. Deletion cancelled.')
+      process.exit(1)
+    }
   }
 
   try {
-    await deleteProject(credentials.token, resolved.name, resolved.namespace)
-    log.info('')
+    await deleteProject(credentials.token, resolved.name, resolved.namespace, serverUrl)
     log.info(`Project "${ns}/${resolved.name}" deleted`)
   } catch (error) {
     if (error instanceof ApiError) {

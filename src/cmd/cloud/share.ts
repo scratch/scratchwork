@@ -1,10 +1,10 @@
 import log from '../../logger'
-import { requireAuth } from '../../config'
 import { createShareToken, listShareTokens, revokeShareToken, ApiError } from '../../cloud/api'
 import { shareTokenDurations, type ShareTokenDuration } from '../../cloud/types'
 import { formatNamespace } from './namespace'
 import { resolveProjectOrConfig, formatDateTime } from './projects'
 import { prompt, select, stripTrailingSlash } from '../../util'
+import { CloudContext } from './context'
 
 // Format duration for display
 function formatDuration(duration: ShareTokenDuration): string {
@@ -46,11 +46,13 @@ export interface ShareOptions {
 }
 
 export async function shareCreateCommand(
+  ctx: CloudContext,
   identifier?: string,
   options: ShareOptions = {}
 ): Promise<void> {
-  const credentials = await requireAuth()
-  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace)
+  const serverUrl = await ctx.getServerUrl()
+  const credentials = await ctx.requireAuth()
+  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace, serverUrl)
   const ns = formatNamespace(resolved.namespace)
 
   // Get or prompt for token name
@@ -86,7 +88,8 @@ export async function shareCreateCommand(
       resolved.name,
       tokenName,
       duration,
-      resolved.namespace
+      resolved.namespace,
+      serverUrl
     )
 
     log.info('')
@@ -108,18 +111,21 @@ export async function shareCreateCommand(
 }
 
 export async function shareListCommand(
+  ctx: CloudContext,
   identifier?: string,
-  options: ShareOptions = {}
+  options: { namespace?: string } = {}
 ): Promise<void> {
-  const credentials = await requireAuth()
-  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace)
+  const serverUrl = await ctx.getServerUrl()
+  const credentials = await ctx.requireAuth()
+  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace, serverUrl)
   const ns = formatNamespace(resolved.namespace)
 
   try {
     const { share_tokens } = await listShareTokens(
       credentials.token,
       resolved.name,
-      resolved.namespace
+      resolved.namespace,
+      serverUrl
     )
 
     if (share_tokens.length === 0) {
@@ -164,12 +170,14 @@ export async function shareListCommand(
 }
 
 export async function shareRevokeCommand(
+  ctx: CloudContext,
   tokenId: string,
   identifier?: string,
-  options: ShareOptions = {}
+  options: { namespace?: string } = {}
 ): Promise<void> {
-  const credentials = await requireAuth()
-  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace)
+  const serverUrl = await ctx.getServerUrl()
+  const credentials = await ctx.requireAuth()
+  const resolved = await resolveProjectOrConfig(credentials.token, identifier, options.namespace, serverUrl)
   const ns = formatNamespace(resolved.namespace)
 
   try {
@@ -177,7 +185,8 @@ export async function shareRevokeCommand(
       credentials.token,
       resolved.name,
       tokenId,
-      resolved.namespace
+      resolved.namespace,
+      serverUrl
     )
 
     log.info('')

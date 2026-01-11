@@ -6,12 +6,11 @@ import { normalizeNamespace, formatNamespace, GLOBAL_NAMESPACE } from './namespa
 import { validateProjectName, getEmailDomain } from '../../shared/project'
 import { formatBytes, prompt, select, openBrowser, stripTrailingSlash } from '../../util'
 import {
-  requireAuth,
-  getServerUrl,
   loadProjectConfig,
   saveProjectConfig,
   type ProjectConfig,
 } from '../../config'
+import { CloudContext } from './context'
 import fs from 'fs/promises'
 import path from 'path'
 
@@ -79,11 +78,14 @@ export interface DeployOptions {
   dryRun?: boolean
 }
 
-export async function deployCommand(projectPath: string = '.', options: DeployOptions = {}): Promise<void> {
+export async function deployCommand(ctx: CloudContext, projectPath: string = '.', options: DeployOptions = {}): Promise<void> {
   const resolvedPath = path.resolve(projectPath)
 
+  // Get server URL from context (already resolved from CLI flag → project config → global config)
+  const effectiveServerUrl = await ctx.getServerUrl()
+
   // Check credentials (auto-login if not authenticated)
-  const credentials = await requireAuth()
+  const credentials = await ctx.requireAuth()
 
   // Load project config
   let config = await loadProjectConfig(resolvedPath)
@@ -96,7 +98,7 @@ export async function deployCommand(projectPath: string = '.', options: DeployOp
 
   // If no valid project name from options or config, run interactive setup
   if (!projectName || !validateProjectName(projectName).valid) {
-    const result = await runInteractiveSetup(resolvedPath, credentials, config)
+    const result = await runInteractiveSetup(resolvedPath, credentials, config, effectiveServerUrl)
     projectName = result.name!  // runInteractiveSetup guarantees name is set
     namespace = result.namespace!  // runInteractiveSetup guarantees namespace is set
     config = result
@@ -117,8 +119,8 @@ export async function deployCommand(projectPath: string = '.', options: DeployOp
 
   if (!options.noBuild) {
     log.info('Building project...')
-    const ctx = new BuildContext({ path: resolvedPath, base: basePath })
-    await buildCommand(ctx, { ssg: true }, resolvedPath)
+    const buildCtx = new BuildContext({ path: resolvedPath, base: basePath })
+    await buildCommand(buildCtx, { ssg: true }, resolvedPath)
   }
 
   // Check dist/ exists
@@ -144,8 +146,7 @@ export async function deployCommand(projectPath: string = '.', options: DeployOp
 
   // Dry run - show what would be deployed without uploading
   if (options.dryRun) {
-    const serverUrl = config.server_url || await getServerUrl()
-    const pagesUrl = getPagesUrl(serverUrl)
+    const pagesUrl = getPagesUrl(effectiveServerUrl)
     const urlNamespace = namespace === GLOBAL_NAMESPACE ? '_' : namespace
     const deployUrl = `${pagesUrl}/${urlNamespace}/${projectName}`
     log.info('')
@@ -156,14 +157,14 @@ export async function deployCommand(projectPath: string = '.', options: DeployOp
 
   // Upload (with retry loop for name conflicts)
   while (true) {
-    log.info('Uploading to server...')
+    log.info(`Uploading to ${effectiveServerUrl}...`)
 
     try {
       const result = await deploy(
         credentials.token,
         { name: projectName, namespace, visibility: config.visibility },
         zipData,
-        config.server_url
+        effectiveServerUrl
       )
 
       log.info('')
@@ -245,14 +246,14 @@ export async function deployCommand(projectPath: string = '.', options: DeployOp
 async function runInteractiveSetup(
   resolvedPath: string,
   credentials: { user: { email: string } },
-  existingConfig: ProjectConfig
+  existingConfig: ProjectConfig,
+  serverUrl: string
 ): Promise<ProjectConfig> {
   // Get user's email domain for namespace option
   const userDomain = getEmailDomain(credentials.user.email)
   const dirName = path.basename(resolvedPath)
 
   // Get pages URL for display
-  const serverUrl = await getServerUrl()
   const pagesUrl = getPagesUrl(serverUrl)
 
   log.info('')

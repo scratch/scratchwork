@@ -30,10 +30,11 @@ const DEFAULT_TIMEOUT = 30000 // 30 seconds
 
 /**
  * Handle CF Access authentication issues by prompting for credentials.
+ * @param serverUrl - The server URL to configure CF Access for
  * @param hadCredentials - Whether CF Access credentials were configured before the request
  * Returns true if credentials were set/refreshed and request should be retried.
  */
-async function handleCfAccessAuth(hadCredentials: boolean): Promise<boolean> {
+async function handleCfAccessAuth(serverUrl: string, hadCredentials: boolean): Promise<boolean> {
   if (hadCredentials) {
     log.info('Cloudflare Access token expired. Please update your credentials.')
   } else {
@@ -41,8 +42,10 @@ async function handleCfAccessAuth(hadCredentials: boolean): Promise<boolean> {
   }
 
   // Dynamically import to avoid circular dependencies
+  const { CloudContext } = await import('../cmd/cloud/context')
   const { cfAccessCommand } = await import('../cmd/cloud/auth')
-  await cfAccessCommand()
+  const ctx = new CloudContext({ serverUrl })
+  await cfAccessCommand(ctx)
 
   log.info('Credentials saved. Retrying request...')
   return true
@@ -52,14 +55,15 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
   token?: string,
+  serverUrlOverride?: string,
   timeoutMs: number = DEFAULT_TIMEOUT,
   _isRetry: boolean = false
 ): Promise<T> {
-  const serverUrl = await getServerUrl()
+  const serverUrl = serverUrlOverride || await getServerUrl()
   const url = `${serverUrl}${path}`
 
-  // Include CF Access headers if configured
-  const cfHeaders = await getCfAccessHeaders()
+  // Include CF Access headers if configured (keyed by server URL)
+  const cfHeaders = await getCfAccessHeaders(serverUrl)
   const headers: Record<string, string> = {
     ...(cfHeaders || {}),
     'Content-Type': 'application/json',
@@ -117,9 +121,9 @@ async function request<T>(
 
     // Check for CF Access auth page (HTML response with CF Access indicators)
     if (!_isRetry && isCfAccessAuthPage(response, text)) {
-      await handleCfAccessAuth(cfHeaders !== undefined)
+      await handleCfAccessAuth(serverUrl, cfHeaders !== undefined)
       // Retry the request with new credentials
-      return request<T>(path, options, token, timeoutMs, true)
+      return request<T>(path, options, token, serverUrlOverride, timeoutMs, true)
     }
 
     let body: unknown = text
@@ -145,9 +149,9 @@ async function request<T>(
 
     // Check for CF Access auth page (HTML response instead of expected JSON)
     if (!_isRetry && isCfAccessAuthPage(response, text)) {
-      await handleCfAccessAuth(cfHeaders !== undefined)
+      await handleCfAccessAuth(serverUrl, cfHeaders !== undefined)
       // Retry the request with new credentials
-      return request<T>(path, options, token, timeoutMs, true)
+      return request<T>(path, options, token, serverUrlOverride, timeoutMs, true)
     }
 
     throw new ApiError('Failed to parse JSON', response.status, text)
@@ -155,39 +159,40 @@ async function request<T>(
 }
 
 // Device flow: initiate
-export async function initiateDeviceFlow(): Promise<DeviceFlowResponse> {
+export async function initiateDeviceFlow(serverUrl?: string): Promise<DeviceFlowResponse> {
   return request<DeviceFlowResponse>('/auth/device', {
     method: 'POST',
     body: JSON.stringify({}),
-  })
+  }, undefined, serverUrl)
 }
 
 // Device flow: poll for token
-export async function pollDeviceToken(deviceCode: string): Promise<DeviceTokenResponse> {
+export async function pollDeviceToken(deviceCode: string, serverUrl?: string): Promise<DeviceTokenResponse> {
   return request<DeviceTokenResponse>('/auth/device/token', {
     method: 'POST',
     body: JSON.stringify({ device_code: deviceCode }),
-  })
+  }, undefined, serverUrl)
 }
 
 // Get current user info
-export async function getCurrentUser(token: string): Promise<UserResponse> {
-  return request<UserResponse>('/api/me', {}, token)
+export async function getCurrentUser(token: string, serverUrl?: string): Promise<UserResponse> {
+  return request<UserResponse>('/api/me', {}, token, serverUrl)
 }
 
 // List projects
-export async function listProjects(token: string): Promise<ProjectListResponse> {
-  return request<ProjectListResponse>('/api/projects', {}, token)
+export async function listProjects(token: string, serverUrl?: string): Promise<ProjectListResponse> {
+  return request<ProjectListResponse>('/api/projects', {}, token, serverUrl)
 }
 
 // Get single project
 export async function getProject(
   token: string,
   name: string,
-  namespace?: string | null
+  namespace?: string | null,
+  serverUrl?: string
 ): Promise<ProjectResponse> {
   const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
-  return request<ProjectResponse>(`/api/projects/${encodeURIComponent(name)}${query}`, {}, token)
+  return request<ProjectResponse>(`/api/projects/${encodeURIComponent(name)}${query}`, {}, token, serverUrl)
 }
 
 // Delete project
@@ -195,17 +200,18 @@ export async function deleteProject(
   token: string,
   name: string,
   namespace?: string | null,
+  serverUrlOverride?: string,
   _isRetry: boolean = false
 ): Promise<void> {
-  const serverUrl = await getServerUrl()
+  const serverUrl = serverUrlOverride || await getServerUrl()
   const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
   const url = `${serverUrl}/api/projects/${encodeURIComponent(name)}${query}`
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT)
 
-  // Include CF Access headers if configured
-  const cfHeaders = await getCfAccessHeaders()
+  // Include CF Access headers if configured (keyed by server URL)
+  const cfHeaders = await getCfAccessHeaders(serverUrl)
 
   let response: Response
   try {
@@ -239,8 +245,8 @@ export async function deleteProject(
 
     // Check for CF Access auth page
     if (!_isRetry && isCfAccessAuthPage(response, text)) {
-      await handleCfAccessAuth(cfHeaders !== undefined)
-      return deleteProject(token, name, namespace, true)
+      await handleCfAccessAuth(serverUrl, cfHeaders !== undefined)
+      return deleteProject(token, name, namespace, serverUrlOverride, true)
     }
 
     let body: unknown = text
@@ -257,13 +263,15 @@ export async function deleteProject(
 export async function listDeploys(
   token: string,
   name: string,
-  namespace?: string | null
+  namespace?: string | null,
+  serverUrl?: string
 ): Promise<DeployListResponse> {
   const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
   return request<DeployListResponse>(
     `/api/projects/${encodeURIComponent(name)}/deploys${query}`,
     {},
-    token
+    token,
+    serverUrl
   )
 }
 
@@ -295,8 +303,8 @@ export async function deploy(
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), DEPLOY_TIMEOUT)
 
-  // Include CF Access headers if configured
-  const cfHeaders = await getCfAccessHeaders()
+  // Include CF Access headers if configured (keyed by server URL)
+  const cfHeaders = await getCfAccessHeaders(serverUrl)
 
   let response: Response
   try {
@@ -332,7 +340,7 @@ export async function deploy(
 
     // Check for CF Access auth page
     if (!_isRetry && isCfAccessAuthPage(response, text)) {
-      await handleCfAccessAuth(cfHeaders !== undefined)
+      await handleCfAccessAuth(serverUrl, cfHeaders !== undefined)
       return deploy(token, params, zipData, serverUrlOverride, true)
     }
 
@@ -358,7 +366,8 @@ export async function createShareToken(
   projectName: string,
   name: string,
   duration: ShareTokenDuration,
-  namespace?: string | null
+  namespace?: string | null,
+  serverUrl?: string
 ): Promise<ShareTokenCreateResponse> {
   const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
   return request<ShareTokenCreateResponse>(
@@ -367,7 +376,8 @@ export async function createShareToken(
       method: 'POST',
       body: JSON.stringify({ name, duration }),
     },
-    token
+    token,
+    serverUrl
   )
 }
 
@@ -375,13 +385,15 @@ export async function createShareToken(
 export async function listShareTokens(
   token: string,
   projectName: string,
-  namespace?: string | null
+  namespace?: string | null,
+  serverUrl?: string
 ): Promise<ShareTokenListResponse> {
   const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
   return request<ShareTokenListResponse>(
     `/api/projects/${encodeURIComponent(projectName)}/share-tokens${query}`,
     {},
-    token
+    token,
+    serverUrl
   )
 }
 
@@ -390,12 +402,14 @@ export async function revokeShareToken(
   token: string,
   projectName: string,
   tokenId: string,
-  namespace?: string | null
+  namespace?: string | null,
+  serverUrl?: string
 ): Promise<ShareTokenResponse> {
   const query = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
   return request<ShareTokenResponse>(
     `/api/projects/${encodeURIComponent(projectName)}/share-tokens/${encodeURIComponent(tokenId)}${query}`,
     { method: 'DELETE' },
-    token
+    token,
+    serverUrl
   )
 }
