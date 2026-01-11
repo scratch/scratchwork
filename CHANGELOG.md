@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.4] - 2026-01-11
+
+This release adds support for connecting to multiple Scratch Cloud servers and improves the project deletion workflow.
+
+### Features
+
+- Added global `--server-url` flag to all cloud commands, allowing you to target different Scratch Cloud servers without changing your configuration
+- Server URLs are automatically normalized (adds `https://` and `app.` subdomain when needed)
+- Added `--force` flag to `cloud projects delete` to skip the confirmation prompt
+
+### Improvements
+
+- Credentials and Cloudflare Access tokens are now stored per-server, enabling simultaneous authentication with multiple cloud instances
+- Unified cloud command context handling with a new `CloudContext` class for consistent server URL resolution
+
 ## [0.4.3] - 2026-01-08
 
 This release adds a medium width option to the page width toggle, giving users three layout choices.
