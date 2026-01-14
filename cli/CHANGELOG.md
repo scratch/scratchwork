@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0] - 2026-01-14
+
+This release migrates Scratch to a monorepo structure, laying the groundwork for tighter integration between the CLI and Scratch Cloud server.
+
+### Improvements
+
+- Reorganized repository into a monorepo with dedicated `cli/`, `server/`, and `shared/` packages
+- Shared TypeScript types between CLI and server for better consistency
+- Installation URL simplified to `https://scratch.dev/install.sh`
+
 ## [0.4.7] - 2026-01-14
 
 This release simplifies the CLI authentication flow by replacing the device code polling mechanism with direct browser-based login.
