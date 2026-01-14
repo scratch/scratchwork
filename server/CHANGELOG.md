@@ -2,6 +2,27 @@
 
 All notable changes to the Scratch Server will be documented in this file.
 
+## [0.2.0] - 2026-01-14
+
+Initial release of Scratch Server as part of the monorepo structure. The server is a Cloudflare Worker that powers the Scratch Cloud platform.
+
+### Features
+
+- **Project hosting**: Deploy static MDX sites to the cloud with versioned deploys and instant rollback capability
+- **Owner-based URLs**: Projects are served at `/{owner}/{project}/` paths, with owners identified by user ID, email, or email local part
+- **Dual authentication**: Supports both Google OAuth (via BetterAuth) and Cloudflare Access for flexible deployment options
+- **CLI device flow**: RFC 8628-based device authorization for secure CLI authentication
+- **Privacy controls**: Configurable project visibility (public, private, domain-restricted) with content tokens for secure private content access
+- **Share tokens**: Optional time-limited anonymous share URLs for projects
+- **Access control**: Configure allowed users via email addresses, domains, or public access
+
+### Architecture
+
+- Cloudflare D1 database for user, session, and project metadata
+- Cloudflare R2 storage for deployed static files
+- Domain-based routing with isolated authentication between app and content subdomains
+- Shared TypeScript types between server and CLI via `@scratch/shared` package
+
 ## [0.1.2] - 2026-01-14
 
 This release simplifies CLI authentication by replacing the device code flow with a streamlined browser-based login.
