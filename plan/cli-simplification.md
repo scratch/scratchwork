@@ -48,39 +48,12 @@ scratch whoami
 scratch config
 
 # Configure Cloudflare Access service token for protected servers
-scratch cf-access
+scratch config cf-access
 
 # Build and deploy project to Scratch Cloud
 scratch deploy [path]
 
 
-
-
-
-
-
-
-# =============================================================================
-# Cloud commands: scratch cloud <command>
-# =============================================================================
-
-# Log in to Scratch Cloud (opens browser for OAuth)
-scratch cloud login
-
-# Log out from Scratch Cloud
-scratch cloud logout
-
-# Show current logged-in user
-scratch cloud whoami
-
-# Configure server URL and project settings interactively
-scratch cloud config
-
-# Configure Cloudflare Access service token for protected servers
-scratch cloud cf-access
-
-# Build and deploy project to Scratch Cloud
-scratch cloud deploy [path]
 
 # =============================================================================
 # Cloud project commands: scratch cloud projects <command>
@@ -114,6 +87,9 @@ scratch cloud share revoke <tokenId> [project]
 - Commands in `[brackets]` are optional arguments
 - Commands in `<angle-brackets>` are required arguments
 - Most cloud commands read from `.scratch/project.toml` if no project name specified
+- [path] defaults to .
+- [project] defaults to the project defined in ./.scratch/project.toml if it exists
+
 
 ## Ideas for Simplification
 
