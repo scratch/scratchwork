@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1] - 2026-01-16
+
+This release fixes the CLI login flow when connecting to servers protected by Cloudflare Access.
+
+### Bug Fixes
+
+- Fixed authentication for servers behind Cloudflare Access: the CLI now properly proceeds to browser-based login instead of failing. The browser handles CF Access authentication, then redirects back with the token.
+- When existing service tokens are expired or invalid, the CLI now prompts to either update the token or use browser login instead of failing silently.
+
 ## [0.5.0] - 2026-01-14
 
 This release migrates Scratch to a monorepo structure, laying the groundwork for tighter integration between the CLI and Scratch Cloud server.
