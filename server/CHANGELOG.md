@@ -2,6 +2,18 @@
 
 All notable changes to the Scratch Server will be documented in this file.
 
+## [0.2.1] - 2026-01-18
+
+This release adds support for serving a project on the www subdomain and root domain.
+
+### Features
+
+- **Root domain project hosting**: A project can now be served at both `www.example.com` and `example.com` by setting the `WWW_PROJECT_ID` environment variable. This is useful for hosting a primary marketing site or landing page directly on the root domain.
+
+### Improvements
+
+- Refactored content serving logic into a shared `content-serving.ts` module, reducing code duplication between the pages and www route handlers
+
 ## [0.2.0] - 2026-01-14
 
 Initial release of Scratch Server as part of the monorepo structure. The server is a Cloudflare Worker that powers the Scratch Cloud platform.
