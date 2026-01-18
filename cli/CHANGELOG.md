@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.2] - 2026-01-18
+
+This release simplifies the CLI command structure by removing the `cloud` prefix from server commands and renaming several commands for clarity.
+
+### Breaking Changes
+
+- Removed `cloud` command prefix: `cloud login`, `cloud logout`, `cloud whoami`, `cloud deploy`, `cloud projects`, and `cloud share` are now top-level commands
+- Renamed `cloud deploy` to `publish` for clearer semantics
+- Renamed `checkout` command to `eject` (the `checkout` alias has been removed)
+- Removed command aliases: `view` is no longer an alias for `watch`
+- Removed global config file (`~/.config/scratch/config.toml`) - server selection is now automatic
+
+### Improvements
+
+- Smart server URL resolution: if logged into exactly one server, it's used automatically; if logged into multiple, you're prompted to choose
+- Grouped help output: commands are now organized into Local, Server, and Other categories for easier discovery
+- `projects info` now displays the project ID
+- `watch` command path argument is now optional (defaults to current directory)
+- Better error handling when Cloudflare Access credentials are stale or invalid
+
 ## [0.5.1] - 2026-01-16
 
 This release fixes the CLI login flow when connecting to servers protected by Cloudflare Access.
