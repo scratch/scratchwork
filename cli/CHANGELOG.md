@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3] - 2026-01-19
+
+This release fixes project configuration to always store the server URL.
+
+### Bug Fixes
+
+- Fixed `publish` command to always save the server URL in project config (`.scratch/project.toml`), ensuring projects remember which server they were published to
+
 ## [0.5.2] - 2026-01-18
 
 This release simplifies the CLI command structure by removing the `cloud` prefix from server commands and renaming several commands for clarity.
