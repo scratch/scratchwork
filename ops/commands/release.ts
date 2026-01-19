@@ -59,7 +59,7 @@ export async function runRelease(component: Component, bumpType: BumpType): Prom
       })
       .filter(f => f.length > 0)
 
-    const allowedFiles = [config.changelogPath, config.packageJsonPath]
+    const allowedFiles = [config.changelogPath, config.packageJsonPath, 'bun.lock']
     const disallowedFiles = changedFiles.filter(f => !allowedFiles.includes(f))
 
     if (disallowedFiles.length > 0) {
@@ -230,7 +230,7 @@ Release notes guidelines:
 
   // Stage, commit, and continue with release
   console.log('\n==> Committing changes...')
-  run(`git add ${config.packageJsonPath} ${config.changelogPath}`)
+  run(`git add ${config.packageJsonPath} ${config.changelogPath} bun.lock`)
   run(`git commit -m "Release ${config.name} v${newVersion}"`)
 
   // Push commit
