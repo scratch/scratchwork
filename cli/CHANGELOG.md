@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.4] - 2026-01-20
+
+This release adds checksum files to CLI releases for download verification.
+
+### Improvements
+
+- Release artifacts now include SHA256 checksums for verifying download integrity
+
 ## [0.5.3] - 2026-01-19
 
 This release fixes project configuration to always store the server URL.
