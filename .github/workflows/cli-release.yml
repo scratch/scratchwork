@@ -26,6 +26,19 @@ jobs:
       - name: Build CLI for all platforms
         run: bun ops cli build:all
 
+      - name: Generate checksums
+        run: |
+          cd cli/dist
+          echo '{' > checksums.json
+          for file in scratch-*; do
+            hash=$(sha256sum "$file" | awk '{print $1}')
+            echo "  \"$file\": \"$hash\"," >> checksums.json
+          done
+          # Remove trailing comma and close JSON
+          sed -i '$ s/,$//' checksums.json
+          echo '}' >> checksums.json
+          cat checksums.json
+
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/cli-v}" >> $GITHUB_OUTPUT
@@ -61,3 +74,4 @@ jobs:
             cli/dist/scratch-darwin-x64
             cli/dist/scratch-linux-arm64
             cli/dist/scratch-linux-x64
+            cli/dist/checksums.json
