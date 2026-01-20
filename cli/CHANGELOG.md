@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.5] - 2026-01-20
+
+This release fixes the checksum file format for release artifacts.
+
+### Bug Fixes
+
+- Fixed checksum JSON keys to use platform names (e.g., `darwin-arm64`) instead of full filenames, making verification easier
+
 ## [0.5.4] - 2026-01-20
 
 This release adds checksum files to CLI releases for download verification.
