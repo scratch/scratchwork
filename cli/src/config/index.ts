@@ -45,6 +45,7 @@ export {
   validateServerUrl,
   normalizeServerUrlInput,
   promptServerUrl,
+  promptServerUrlSelection,
   resolveServerUrl,
   // Project name
   deriveProjectName,

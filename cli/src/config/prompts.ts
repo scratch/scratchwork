@@ -334,6 +334,59 @@ export async function resolveServerUrl(serverUrlArg?: string): Promise<string> {
   return selected
 }
 
+/**
+ * Always prompt user to select a server URL.
+ * Shows logged-in servers as options with smart defaults, plus option to enter a new URL.
+ *
+ * - If not logged in: shows DEFAULT_SERVER_URL as default
+ * - If logged into one server: shows that server as default
+ * - If logged into multiple servers: shows all servers, first one as default
+ * - Always includes "other..." option to enter a custom URL
+ *
+ * @returns The selected server URL
+ */
+export async function promptServerUrlSelection(): Promise<string> {
+  const loggedInServers = await getLoggedInServers()
+
+  // Strip https:// for cleaner display
+  const stripProtocol = (url: string) => url.replace(/^https?:\/\//, '')
+
+  const choices: SelectChoice<string>[] = []
+  let defaultValue: string
+
+  if (loggedInServers.length === 0) {
+    // Not logged in - show default server as first option
+    choices.push({
+      name: stripProtocol(DEFAULT_SERVER_URL),
+      value: DEFAULT_SERVER_URL,
+    })
+    defaultValue = DEFAULT_SERVER_URL
+  } else {
+    // Show logged-in servers
+    for (const url of loggedInServers) {
+      choices.push({
+        name: stripProtocol(url),
+        value: url,
+      })
+    }
+    defaultValue = loggedInServers[0]!
+  }
+
+  // Always add option to enter a different URL
+  choices.push({
+    name: 'other...',
+    value: '__other__',
+  })
+
+  const selected = await select('Server:', choices, defaultValue)
+
+  if (selected === '__other__') {
+    return promptServerUrl()
+  }
+
+  return selected
+}
+
 // ============================================================================
 // Re-export constants for convenience
 // ============================================================================

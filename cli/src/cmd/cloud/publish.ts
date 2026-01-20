@@ -10,9 +10,7 @@ import {
   // Prompts
   promptProjectName,
   promptVisibility,
-  promptServerUrl,
-  resolveServerUrl,
-  getLoggedInServers,
+  promptServerUrlSelection,
   type ProjectConfig,
 } from '../../config'
 import { CloudContext } from './context'
@@ -67,8 +65,9 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
   let config = await loadProjectConfig(resolvedPath)
   const configRelPath = '.scratch/project.toml'
 
-  // Determine server URL priority: CLI option (via ctx) → project config → smart resolution
+  // Determine server URL priority: CLI option (via ctx) → project config → always prompt
   let effectiveServerUrl: string
+  let serverUrlWasPrompted = false
   const ctxServerUrl = ctx.getServerUrlIfExplicit()  // Returns URL only if explicitly set via --server
 
   if (ctxServerUrl) {
@@ -78,15 +77,9 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
     // Project config is second priority
     effectiveServerUrl = config.server_url
   } else {
-    // If no config exists at all, run the full config flow
-    if (!config.name) {
-      const result = await runConfigFlow(resolvedPath, config)
-      config = result
-      effectiveServerUrl = result.server_url!
-    } else {
-      // Config exists but no server_url - use smart resolution
-      effectiveServerUrl = await resolveServerUrl()
-    }
+    // No server_url in project config - always prompt
+    effectiveServerUrl = await promptServerUrlSelection()
+    serverUrlWasPrompted = true
   }
 
   // Now create context with resolved server URL
@@ -108,11 +101,23 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
     const result = await runInteractiveSetup(resolvedPath, credentials, config, effectiveServerUrl)
     projectName = result.name!  // runInteractiveSetup guarantees name is set
     config = result
-  } else if (config.name) {
-    // Show config being used
-    log.info(`Using project configuration from ${configRelPath}`)
-    log.info(`  name: ${projectName}`)
-    log.info('')
+  } else {
+    // Valid name exists - save server_url to config if it was prompted
+    if (serverUrlWasPrompted) {
+      log.info('Saving server URL to .scratch/project.toml...')
+      await saveProjectConfig(resolvedPath, {
+        ...config,
+        server_url: effectiveServerUrl,
+      })
+      log.info('')
+    }
+
+    if (config.name) {
+      // Show config being used
+      log.info(`Using project configuration from ${configRelPath}`)
+      log.info(`  name: ${projectName}`)
+      log.info('')
+    }
   }
 
   // Build unless --no-build
@@ -226,57 +231,6 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
       throw error
     }
   }
-}
-
-/**
- * Run the full config flow - prompts for server URL, project name, and visibility
- * Called when no .scratch/project.toml exists
- */
-async function runConfigFlow(
-  resolvedPath: string,
-  existingConfig: ProjectConfig
-): Promise<ProjectConfig> {
-  const dirName = path.basename(resolvedPath)
-
-  log.info('')
-  log.info('Project Setup')
-  log.info('=============')
-  log.info('')
-
-  // 1. Prompt for server URL (from logged-in servers or enter new)
-  const loggedInServers = await getLoggedInServers()
-  let serverUrl: string
-
-  if (loggedInServers.length === 0) {
-    // Not logged in - prompt for server URL
-    serverUrl = await promptServerUrl()
-  } else if (loggedInServers.length === 1) {
-    // Single server - use it
-    serverUrl = loggedInServers[0]!
-    log.info(`Using server: ${serverUrl}`)
-  } else {
-    // Multiple servers - prompt to choose
-    serverUrl = await resolveServerUrl()
-  }
-
-  // 2. Prompt for project name
-  const projectName = await promptProjectName(existingConfig.name, dirName)
-
-  // Create a temporary context to get credentials for visibility prompt
-  const ctx = new CloudContext({ serverUrl })
-  const credentials = await ctx.requireAuth()
-
-  // 3. Prompt for visibility
-  const visibility = await promptVisibility(credentials.user.email, existingConfig.visibility)
-
-  // Save config
-  log.info('')
-  log.info('Saving .scratch/project.toml...')
-  const newConfig: ProjectConfig = { name: projectName, visibility, server_url: serverUrl }
-  await saveProjectConfig(resolvedPath, newConfig)
-  log.info('')
-
-  return newConfig
 }
 
 /**
