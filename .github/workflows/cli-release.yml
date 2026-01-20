@@ -31,8 +31,9 @@ jobs:
           cd cli/dist
           echo '{' > checksums.json
           for file in scratch-*; do
+            platform="${file#scratch-}"
             hash=$(sha256sum "$file" | awk '{print $1}')
-            echo "  \"$file\": \"$hash\"," >> checksums.json
+            echo "  \"$platform\": \"$hash\"," >> checksums.json
           done
           # Remove trailing comma and close JSON
           sed -i '$ s/,$//' checksums.json
