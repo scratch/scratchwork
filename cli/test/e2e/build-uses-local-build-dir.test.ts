@@ -10,8 +10,8 @@ describe("scratch build", () => {
     runCliSync(["create", "sandbox"], tempDir);
     const sandboxDir = path.join(tempDir, "sandbox");
 
-    // Checkout _build/ to get local copies of entry files
-    runCliSync(["checkout", "_build"], sandboxDir);
+    // Eject _build/ to get local copies of entry files
+    runCliSync(["eject", "_build"], sandboxDir);
 
     // Modify entry-client.tsx with a unique marker
     const entryClientPath = path.join(sandboxDir, "_build/entry-client.tsx");

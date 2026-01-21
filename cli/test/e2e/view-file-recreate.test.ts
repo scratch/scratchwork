@@ -4,19 +4,19 @@ import path from "path";
 import { mkTempDir, sleep, scratchPath, getAvailablePort } from "./util";
 import { spawn } from "child_process";
 
-describe("scratch view", () => {
+describe("scratch watch", () => {
   test(
-    "continues running when viewed file is deleted and recreated",
+    "continues running when watched file is deleted and recreated",
     async () => {
       // 1. Create a temp directory with a markdown file
-      const tempDir = await mkTempDir("view-recreate-");
+      const tempDir = await mkTempDir("watch-recreate-");
       const testFile = path.join(tempDir, "test.md");
       await writeFile(testFile, "# Original Content\n\nHello world");
 
-      // 2. Start the view command
+      // 2. Start the watch command
       const port = await getAvailablePort();
-      const viewProc = spawn(scratchPath, [
-        "view",
+      const watchProc = spawn(scratchPath, [
+        "watch",
         testFile,
         "--port",
         String(port),
@@ -28,24 +28,24 @@ describe("scratch view", () => {
 
       // Collect stdout/stderr for debugging
       let output = "";
-      viewProc.stdout?.on("data", (data) => {
+      watchProc.stdout?.on("data", (data) => {
         output += data.toString();
       });
-      viewProc.stderr?.on("data", (data) => {
+      watchProc.stderr?.on("data", (data) => {
         output += data.toString();
       });
 
       // Track if process exits
       let processExited = false;
       let exitCode: number | null = null;
-      viewProc.once("exit", (code) => {
+      watchProc.once("exit", (code) => {
         processExited = true;
         exitCode = code;
       });
 
-      const stopView = () => {
+      const stopWatch = () => {
         try {
-          viewProc.kill("SIGINT");
+          watchProc.kill("SIGINT");
         } catch {}
       };
 
@@ -54,7 +54,7 @@ describe("scratch view", () => {
         let serverReady = false;
         for (let attempt = 0; attempt < 120; attempt++) {
           if (processExited) {
-            throw new Error(`View process exited unexpectedly with code ${exitCode}\nOutput: ${output}`);
+            throw new Error(`Watch process exited unexpectedly with code ${exitCode}\nOutput: ${output}`);
           }
           if (output.includes("Dev server running at")) {
             // Server is running, now wait for the page to be available
@@ -135,8 +135,8 @@ describe("scratch view", () => {
         expect(pageAccessible).toBe(true);
 
       } finally {
-        stopView();
-        await new Promise((resolve) => viewProc.once("exit", resolve));
+        stopWatch();
+        await new Promise((resolve) => watchProc.once("exit", resolve));
         await rm(tempDir, { recursive: true, force: true });
       }
     },

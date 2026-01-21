@@ -20,13 +20,13 @@ function runCliCapture(args: string[], cwd: string) {
   };
 }
 
-describe("checkout command", () => {
+describe("eject command", () => {
   test("exits with error when no path provided", async () => {
-    const tempDir = await mkTempDir("checkout-nopath-");
+    const tempDir = await mkTempDir("eject-nopath-");
     runCliSync(["create", "sandbox"], tempDir);
     const sandboxDir = path.join(tempDir, "sandbox");
 
-    const result = runCliCapture(["checkout"], sandboxDir);
+    const result = runCliCapture(["eject"], sandboxDir);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Please provide a file or directory path");

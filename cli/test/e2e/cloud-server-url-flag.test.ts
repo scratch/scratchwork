@@ -6,21 +6,18 @@ import os from "os";
 import { mkTempDir, scratchPath } from "./util";
 
 /**
- * E2E tests for the --server-url flag on cloud commands.
+ * E2E tests for server URL handling and multi-server credentials.
  *
- * These tests verify that:
- * 1. The --server-url flag is available as a global option on the cloud parent command
- * 2. The CLI correctly parses and passes the flag
- * 3. Help text shows the flag option
+ * These tests verify:
+ * 1. Multi-server credentials storage format
+ * 2. Server URL normalization
+ * 3. Configuration precedence
  *
- * Note: Full integration tests with actual server calls would require
- * a running server instance. These tests focus on CLI parsing behavior.
+ * Note: Server URL is now passed as a positional argument to commands
+ * (e.g., `scratch whoami [server-url]`), not as a --server-url flag.
  */
 
-describe("cloud --server-url flag", () => {
-  /**
-   * Helper that runs CLI and returns output without throwing on errors
-   */
+describe("Server URL as positional argument", () => {
   function runCli(args: string[], cwd: string = process.cwd()): { stdout: string; stderr: string; status: number } {
     const result = spawnSync(scratchPath, args, {
       cwd,
@@ -35,28 +32,16 @@ describe("cloud --server-url flag", () => {
     };
   }
 
-  describe("Help output shows --server-url as global option", () => {
-    test("cloud --help includes --server-url", () => {
-      const result = runCli(["cloud", "--help"]);
-      expect(result.stdout).toContain("--server-url");
-      expect(result.stdout).toContain("Override server URL");
-    });
+  test("whoami accepts server-url as positional argument", () => {
+    const result = runCli(["whoami", "--help"]);
+    expect(result.stdout).toContain("[server-url]");
+    expect(result.stdout).toContain("Server URL");
+  });
 
-    test("--server-url can be used on parent command", () => {
-      // Verify that --server-url on the parent command is parsed without "unknown option" error
-      const result = runCli(["cloud", "--server-url", "http://localhost:9999", "whoami"]);
-      // The flag should be recognized (no "unknown option" error)
-      expect(result.stderr).not.toContain("unknown option");
-      expect(result.stderr).not.toContain("error: unknown option");
-    });
-
-    test("--server-url can be used on subcommands", () => {
-      // Verify that --server-url on the subcommand is also parsed
-      const result = runCli(["cloud", "whoami", "--server-url", "http://localhost:9999"]);
-      // The flag should be recognized (no "unknown option" error)
-      expect(result.stderr).not.toContain("unknown option");
-      expect(result.stderr).not.toContain("error: unknown option");
-    });
+  test("login accepts server-url as positional argument", () => {
+    const result = runCli(["login", "--help"]);
+    expect(result.stdout).toContain("[server-url]");
+    expect(result.stdout).toContain("Server URL");
   });
 });
 
