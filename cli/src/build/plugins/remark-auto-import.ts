@@ -241,7 +241,8 @@ export const createAutoImportPlugin = (
       }
 
       // create import statements for missing components
-      const newImportNodes: MdxjsEsmNode[] = safeToInject.map((name) => {
+      const newImportNodes: MdxjsEsmNode[] = [];
+      for (const name of safeToInject) {
         const absPath = componentMap[name]!; // non-null assertion – guarded above
         let relPath = path.relative(mdxFileDir, absPath).replace(/\\/g, '/');
         if (!relPath.startsWith('.')) {
@@ -256,16 +257,29 @@ export const createAutoImportPlugin = (
         log.debug(
           `  - injecting ${isDefault ? 'default' : 'named'} import from ${relPath}`
         );
-        const estree = parse(stmt, {
-          ecmaVersion: 'latest',
-          sourceType: 'module',
-        });
-        return {
-          type: 'mdxjsEsm',
-          value: stmt,
-          data: { estree },
-        };
-      });
+
+        try {
+          const estree = parse(stmt, {
+            ecmaVersion: 'latest',
+            sourceType: 'module',
+          });
+          newImportNodes.push({
+            type: 'mdxjsEsm',
+            value: stmt,
+            data: { estree },
+          });
+        } catch (parseErr: any) {
+          const filePath = file?.path
+            ? path.relative(process.cwd(), file.path)
+            : 'unknown';
+          const err = new Error(
+            `Failed to generate import for component "${name}" in ${filePath}: ${parseErr.message}\n` +
+              `  Generated statement: ${stmt}\n` +
+              `  This may indicate an invalid component name.`
+          );
+          preprocessingErrors.push(err);
+        }
+      }
 
       // inject missing import statements
       root.children = [...newImportNodes, ...root.children];

@@ -21,8 +21,34 @@ export const renderServerStep: BuildStep = {
     const renderPromises = Object.entries(entries).map(async ([name, entry]) => {
       const modulePath = entry.getArtifactPath('.js', ctx.serverCompiledDir);
       const serverModule = await import(modulePath);
-      const html = await serverModule.render();
-      renderedContent.set(name, html);
+
+      // Validate the module has a render function
+      if (typeof serverModule.render !== 'function') {
+        const exportedKeys = Object.keys(serverModule);
+        const sourcePath = entry.relativePath;
+        throw new Error(
+          `Failed to compile ${sourcePath}: server module is missing render() function.\n` +
+            `  Module exports: ${exportedKeys.length > 0 ? exportedKeys.join(', ') : '(empty)'}\n` +
+            `  This usually means the MDX file has a syntax error that was not reported.\n` +
+            `  Check the file for special characters or invalid JSX syntax.`
+        );
+      }
+
+      try {
+        const html = await serverModule.render();
+        renderedContent.set(name, html);
+      } catch (err: any) {
+        const sourcePath = entry.relativePath;
+        // Enhance React error messages with file context
+        if (err.message?.includes('Element type is invalid')) {
+          throw new Error(
+            `Failed to render ${sourcePath}: ${err.message}\n` +
+              `  This usually means a component in the MDX file could not be resolved.\n` +
+              `  Check for typos in component names or missing imports.`
+          );
+        }
+        throw new Error(`Failed to render ${sourcePath}: ${err.message}`);
+      }
     });
 
     await Promise.all(renderPromises);
