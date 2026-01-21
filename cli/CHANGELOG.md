@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.6] - 2026-01-21
+
+This release improves build error messages and ensures the server URL is always explicitly selected during publish.
+
+### Improvements
+
+- Improved MDX build error messages: errors now include file paths and actionable suggestions when component imports fail or server-side rendering encounters issues
+- The `publish` command now always prompts for server selection when no server URL is stored in project config, making it clearer which server you're deploying to
+- Updated `.gitignore` template to allow `.scratch/project.toml` to be committed to version control, so project settings can be shared with collaborators
+
 ## [0.5.5] - 2026-01-20
 
 This release fixes the checksum file format for release artifacts.
