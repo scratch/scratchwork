@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.7] - 2026-01-21
+
+This release fixes a conflict between the dev and build commands by using separate output directories.
+
+### Bug Fixes
+
+- Fixed `scratch dev` overwriting `scratch build` output: the dev server now outputs to `.scratch/dev/` instead of `dist/`, so running dev no longer clobbers your production build
+- The `clean` command now also removes `.scratch/dev/`
+
 ## [0.5.6] - 2026-01-21
 
 This release improves build error messages and ensures the server URL is always explicitly selected during publish.
