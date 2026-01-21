@@ -74,7 +74,8 @@ describe("Dev command", () => {
     });
 
     // 5. Check the build output for development mode characteristics
-    const distDir = path.join(sandboxDir, "dist");
+    // Dev command outputs to .scratch/dev/ to avoid conflicts with scratch build
+    const distDir = path.join(sandboxDir, ".scratch", "dev");
     const distFiles = await readdir(distDir);
 
     // 5a. Source maps should exist in dev mode

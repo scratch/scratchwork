@@ -171,7 +171,8 @@ program
     withErrorHandling('Clean', async () => {
       await fs.rm(ctx.buildDir, { recursive: true, force: true });
       await fs.rm(ctx.tempDir, { recursive: true, force: true });
-      log.info('Cleaned dist/ and .scratch/cache/');
+      await fs.rm(`${ctx.rootDir}/.scratch/dev`, { recursive: true, force: true });
+      log.info('Cleaned dist/, .scratch/cache/, and .scratch/dev/');
     })
   );
 
@@ -522,8 +523,10 @@ program.hook('preAction', (thisCommand, actionCommand) => {
   opts.path = actionCommand.args[0] || '.';
 
   // Dev command should always run in development mode
+  // Output to .scratch/dev/ so it doesn't conflict with scratch build
   if (actionCommand.name() === 'dev') {
     opts.development = true;
+    opts.outDir = '.scratch/dev';
   }
 
   ctx = new BuildContext(opts);
