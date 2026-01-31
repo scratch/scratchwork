@@ -328,7 +328,7 @@ export async function setupAction(instance: string): Promise<void> {
       {
         name: 'cloudflare-access',
         value: 'cloudflare-access',
-        description: 'Trust Cloudflare Access for authentication',
+        description: 'Use Cloudflare Access for authentication',
       },
     ],
     default: existingAuthMode,
