@@ -262,6 +262,7 @@ const projects = program
 
 projects
   .command('ls', { isDefault: true })
+  .alias('list')
   .description('List all projects')
   .argument('[server-url]', 'Server URL (prompts if logged into multiple servers)')
   .action(
@@ -344,6 +345,7 @@ const tokens = program
 
 tokens
   .command('ls', { isDefault: true })
+  .alias('list')
   .description('List your API tokens')
   .argument('[server-url]', 'Server URL (prompts if logged into multiple servers)')
   .action(
