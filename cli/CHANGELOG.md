@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.9] - 2026-01-31
+
+No CLI changes in this release; version bump only.
+
+## [0.5.8] - 2026-01-31
+
+This release adds API tokens for CI/CD automation, improves project management with rename support, and includes various UX improvements.
+
+### Features
+
+- **API tokens for CI/CD**: New `tokens` command group for creating and managing API tokens that work without interactive login
+  - `scratch tokens create <name>` - Create a new API token (with optional `--expires <days>`)
+  - `scratch tokens ls` - List your API tokens with last-used timestamps
+  - `scratch tokens revoke <name>` - Revoke a token
+  - `scratch tokens use <token>` - Store a token in your credentials file
+  - Tokens can be used via `SCRATCH_TOKEN` environment variable, `.env` file, or credentials file
+  - API tokens now work with servers behind Cloudflare Access
+- **Project rename support**: Projects can now be renamed by changing the name in `.scratch/project.toml` - the CLI tracks project IDs to enable this
+- **Build conflict detection**: The build now detects and reports path/URL conflicts early, before other build errors occur
+
+### Improvements
+
+- Commands renamed to Unix-style conventions: `projects list` → `projects ls`, `projects delete` → `projects rm`, `share list` → `share ls`
+- Added `--no-open` flag to `publish` command to skip opening the browser after deploy
+- Login now shows hints for creating API tokens for CI/CD use
+- Token list shows when each token was last used
+- Better error messages when publishing with an invalid project ID or name conflict
+- Static file handling improvements: `.mdx` files are now renamed to `.md` when copied to the build output
+- Removed rarely-used `--no-src`, `--no-package`, and `--minimal` flags from `scratch create`
+- Removed `--static` flag from build/dev commands (static files are now always copied)
+
+### Bug Fixes
+
+- Fixed publish failing silently when the stored project ID no longer exists on the server
+
 ## [0.5.7] - 2026-01-21
 
 This release fixes a conflict between the dev and build commands by using separate output directories.
