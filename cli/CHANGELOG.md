@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.10] - 2026-01-31
+
+This release standardizes the CLI interface by using a consistent `--server` flag across all server commands.
+
+### Improvements
+
+- Standardized server URL to use `--server <url>` option flag instead of positional `[server-url]` argument for all commands (`login`, `logout`, `whoami`, `projects`, `tokens`, `share`, `cf-access`)
+- Added `--server` flag to share commands (`share create`, `share ls`, `share revoke`) which previously had no server parameter
+- Simplified default template with streamlined content and improved example components
+
 ## [0.5.9] - 2026-01-31
 
 No CLI changes in this release; version bump only.
