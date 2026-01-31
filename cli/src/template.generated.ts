@@ -937,7 +937,7 @@ Scratch server uses [hono](https://hono.dev) for routing and [Better Auth](https
 Additional dependencies can be found in the [Scratch repo](https://github.com/scratch/scratch).
 `, binary: false },
 
-  'pages/example-components/Highlight.tsx': { content: `import React from "react";
+  'pages/components/Highlight.tsx': { content: `import React from "react";
 
 interface HighlightProps {
   children: React.ReactNode;
@@ -952,7 +952,7 @@ export default function Highlight({ children }: HighlightProps): React.ReactElem
 }
 `, binary: false },
 
-  'pages/example-components/Marquis.tsx': { content: `import React from "react";
+  'pages/components/Marquis.tsx': { content: `import React from "react";
 
 interface MarquisProps {
   children: React.ReactNode;
@@ -961,16 +961,17 @@ interface MarquisProps {
 export default function Marquis({ children }: MarquisProps): React.ReactElement {
   return (
     <span className="inline-flex overflow-hidden max-w-32 align-baseline items-end">
-      <span className="inline-block animate-marquis whitespace-nowrap leading-none">
-        {children}
+      <span className="inline-flex animate-marquis whitespace-nowrap leading-none">
+        <span>{children}</span>
+        <span className="mx-4">{children}</span>
       </span>
       <style>{\`
         @keyframes marquis {
-          0% { transform: translateX(100%); }
-          100% { transform: translateX(-100%); }
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
         }
         .animate-marquis {
-          animation: marquis 4s linear infinite;
+          animation: marquis 3s linear infinite;
         }
       \`}</style>
     </span>
@@ -978,7 +979,7 @@ export default function Marquis({ children }: MarquisProps): React.ReactElement 
 }
 `, binary: false },
 
-  'pages/example-components/Counter.tsx': { content: `import React, { useState } from "react";
+  'pages/components/Counter.tsx': { content: `import React, { useState } from "react";
 
 export default function Counter(): React.ReactElement {
   const [count, setCount] = useState<number>(0);
@@ -1005,7 +1006,7 @@ export default function Counter(): React.ReactElement {
 }
 `, binary: false },
 
-  'pages/example-components/HighlightedSnippet.tsx': { content: `import React from "react";
+  'pages/components/HighlightedSnippet.tsx': { content: `import React from "react";
 
 interface HighlightedSnippetProps {
   children: React.ReactNode;
@@ -1022,7 +1023,7 @@ export default function HighlightedSnippet({ children }: HighlightedSnippetProps
 }
 `, binary: false },
 
-  'pages/example-components/TodoList.tsx': { content: `import React, { useState, useEffect } from "react";
+  'pages/components/TodoList.tsx': { content: `import React, { useState, useEffect } from "react";
 
 interface Todo {
   id: number;
@@ -1195,7 +1196,7 @@ export default function TodoList() {
 }
 `, binary: false },
 
-  'pages/example-components/HoverTooltip.tsx': { content: `import React from "react";
+  'pages/components/HoverTooltip.tsx': { content: `import React from "react";
 
 interface HoverTooltipProps {
   children: React.ReactNode;
