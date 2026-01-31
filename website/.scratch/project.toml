@@ -3,6 +3,9 @@
 # This file configures how your project deploys to Scratch Cloud.
 # Run `scratch cloud config` to update these settings interactively.
 
+# Project ID (do not modify)
+id = "8ed7f3ff-077d-49e2-9cda-46ac8841762a"
+
 # Project name
 name = "scratch-dev"
 
