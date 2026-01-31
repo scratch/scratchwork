@@ -2,6 +2,28 @@
 
 All notable changes to the Scratch Server will be documented in this file.
 
+## [0.2.2] - 2026-01-31
+
+This release adds API token support for CI/CD workflows and improves security for private content handling.
+
+### Features
+
+- **API tokens**: Create long-lived tokens for programmatic access without interactive login. Tokens use the `X-Api-Key` header and work in both standard and Cloudflare Access auth modes. Manage tokens via `scratch tokens ls|create|revoke|use` CLI commands.
+- **Project rename support**: Projects can now be renamed by changing the name in `project.toml`. The server tracks projects by ID, so renames are detected and applied during publish.
+
+### Security
+
+- **Non-existent projects redirect to auth**: Previously, non-existent projects returned 404 which allowed attackers to distinguish "doesn't exist" from "private". Now they redirect to auth like private projects do.
+- **Token URL cleanup**: Content tokens and share tokens passed in URLs are now cleaned via server-side redirect after setting cookies. This removes tokens from browser history and prevents leakage via Referer headers.
+- **API tokens isolated from content domain**: API tokens are explicitly rejected on the content domain, preventing malicious user-uploaded JS from using stolen tokens.
+
+### Improvements
+
+- **Runtime environment validation**: Server now validates required environment variables at startup based on auth mode, providing clear error messages for missing configuration.
+- **Additional MIME types**: Added support for `.mdx` and `.sh` files served as `text/plain`.
+- **.mdx to .md redirects**: URLs ending in `.mdx` automatically redirect to `.md` (since the CLI renames `.mdx` files during build).
+- **Bearer token support for content-access endpoint**: Enables CLI-based testing of private content access flows.
+
 ## [0.2.1] - 2026-01-18
 
 This release adds support for serving a project on the www subdomain and root domain.
