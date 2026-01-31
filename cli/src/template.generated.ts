@@ -811,13 +811,13 @@ author: "Scratch"                                               # Meta author
 lang: "en"                                                      # HTML lang attribute
 ---
 
-![Scratch Logo](/scratch-logo.svg)
+![Scratch logo](/scratch-logo.svg)
 
-Scratch is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/).
+Scratch is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/). 
 
-Write in Markdown and embed React components right in your text. Scratch compiles your work into beautiful static websites (like [this one](https://github.com/scratch/scratch.dev)) that can be hosted anywhere.
+Scratch compiles MDX files into beautiful static websites that can be shared publicly or privately with a single command. It's opinionated about everything so that you can focus on writing without worrying about scaffolding, dependencies, formatting or styling. 
 
-Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code.
+Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code. 
 
 
 ## Quick Start
@@ -825,437 +825,169 @@ Scratch was designed for collaborative writing with coding agents like [Claude C
 Scratch requires no configuration so it's easy to get started. First, install:
 
 \`\`\`bash
+# Install Scratch
 curl -fsSL https://scratch.dev/install.sh | bash
+\`\`\`
+or
+
+\`\`\`bash
+# Install Scratch
+curl -fsSL https://scratch.dev/install.md | claude
 \`\`\`
 
 Then create a project and start the dev server:
 
 \`\`\`bash
+# Create a new project
 scratch create
+
+# Start the dev server
 scratch dev
 \`\`\`
 
-Now you're ready to start writing in \`pages/index.mdx\`.
+Now you're ready to start writing in \`pages/index.mdx\`. Use the \`publish\` command to share with specific people, your team, or the world:
+
+\`\`\`bash
+# Publish your project to a Scratch server. 
+# Grant access to specific people, @yourdomain.com, or the world
+scratch publish
+\`\`\`
 
 ## What can you do with Scratch?
 
-Scratch lets you write in Markdown and embed interactive React components, like this counter:
+Scratch turns MDX content into static HTML and Javascript like this:
 
-<Counter />
+<div className="grid grid-cols-[1fr_auto_1fr] items-stretch my-8">
+  <div className="pl-8 mx-8 pb-4 border border-gray-200 rounded-lg shadow-md">
+  
+    \`\`\`mdx
+    
+    ### Markdown and React
+    
+    Here's a counter:
+    
+    <Counter />
+    
+    \`\`\`
+    
+  </div>
+  <div className="text-4xl text-gray-400 flex items-center">→</div>
+  <div className="pl-8 mx-8 pt-4 pb-4 border border-gray-200 rounded-lg shadow-md">
+  
+    ### Markdown and React
+    
+    Here's a counter:
+    
+    <Counter />
+    
+  </div>
+</div> 
 
-Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown, and ask a coding agent for help when it's easier to express yourself with code.
+Scratch makes it easy to express your ideas with code. Here are a few of the ways you can do that:
 
-You can use React components to <Fire>style text</Fire> or embed fully working demos in your product specs:
+### Formatting text
+
+Traditional word processors like Microsoft Word and Google Docs give writers a fixed set of formatting options exposed as buttons in ribbons and drop-down menus. 
+
+In contrast, Markdown pares all of this down to the bare essentials, like \`**bold**\`, \`_italics_\`, and \`[embedded hyperlinks](http://example.org)\`, expressed directly in plain text.
+
+MDX gives us a way to add an essentially infinite variety of formatting options: **use Markdown for the basics and React components for everything else**.
+
+For example, you can use inline components for things like <Highlight>highlighting text</Highlight>, <Marquis>marquis effects</Marquis>, or hover tooltips<HoverTooltip>like this one</HoverTooltip>.
+
+<HighlightedSnippet>
+    Want to draw attention to a snippet or quote? That's easy to do with a custom component.
+</HighlightedSnippet>
+
+Scratch doesn't include any of these components out-of-the-box. Instead, you'll create them as the need arises while you write, effectively building a custom word processor for each document. It's a lot of fun!
+
+### Interactive demos
+
+You can also use React components to embed interactive demos into your prose, like this one:
 
 <TodoList />
 
-Scratch uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography), to render your prose with a clean aesthetic. Code blocks use syntax highlighting by [Shiki](https://shiki.style/).
+This is handy for writing product specs where embedded demos can communicate how a particular feature should work better than written requirements and wireframes can.
 
-\`\`\`python
-def greet(name: str) -> str:
-    return f"Hello, {name}!"
+### Publishing your work
 
-print(greet("World"))
-\`\`\`
+Use the \`scratch publish\` command to share your writing, either privately with your colleagues or publicly with the world.
 
-Scratch also supports GitHub-flavored Markdown features like checklists and tables:
+For now, you can publish your work for free on [scratch.dev](https://scratch.dev). Projects published on scratch.dev must be less than 5MB and will persist for only 30 days.
 
-| Feature | Supported? |
-|---------|-----------|
-| Compiles Markdown, TS, JS & CSS | ✅ |
-| Dev server with HMR | ✅ |
-| Tailwind CSS styling | ✅ |
-| Code syntax highlighting | ✅ |
+You can also [host your own Scratch server](/docs#self-hosting) on Cloudflare and protect it with Cloudflare Access for additional security.
 
-Unlike traditional word processors, Scratch makes it easy to express any idea. If you can describe it to a coding  agent, you can add it to your document:
-
-<BouncingDvdLogo />
-
-Collaborating with AI makes writing more fun. Scratch makes that easy.
-
-## No Boilerplate
-
-Scratch uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with \`scratch dev\`, and start writing.
-
-A simple Scratch project (created with \`scratch create\`) looks like this:
-
-<Files>
-\`\`\`
-my-scratch-project/
-  pages/                 # put markdown pages and components here
-    posts/ (collapsed)
-      post1.md           # accessible at /posts/post1
-      post2.md           # /posts/post2
-      blog.png           # static assets in pages/ or public/
-    index.mdx            # accessible at root path (/)
-    Counter.tsx
-  public/ (collapsed)    # static assets
-    favicon.svg
-  src/ (collapsed)       # global components and css
-    markdown/ (collapsed) # default markdown components
-      index.ts
-      CodeBlock.tsx
-      Heading.tsx
-      Link.tsx
-    template/ (collapsed) # page template components
-      Copyright.jsx
-      Footer.jsx
-      Header.jsx
-      PageWrapper.jsx       # wraps every page
-      ScratchBadge.jsx
-    tailwind.css          # global styles
-  AGENTS.md              # agent context
-  package.json           # dependencies
-  .gitignore
-\`\`\`
-</Files>
-
-
-Use \`scratch build\` to compile this project into a static website, like [this one](https://github.com/scratch/scratch.dev).
-
-Component files and libraries can live anywhere in \`pages/\` and \`src/\`. They are auto-detected by Scratch and don't need to be explicitly imported in your .mdx files as long as the filename matches the component name.
-
-Modify \`src/tailwind.css\` directory to change the styling of your document. Add headers, footers and other site-wide elements by modifying \`src/PageWrapper.jsx\`.
-
-## Commands
-
-Here's a quick list of the Scratch CLI commands. See the [Scratch docs](https://scratch.dev/docs/) for a full rundown.
-
-\`\`\`bash
-# Create a new project
-scratch create [path]     # create project at path (default: current directory)
-
-# Start dev server with hot module reloading
-scratch dev
-
-# Build for production
-scratch build
-
-# Preview production build locally
-scratch preview
-
-# Serve target file/directory on dev server
-scratch watch path
-
-# Remove build artifacts
-scratch clean
-
-# Revert a file to its template version
-scratch checkout path           # revert file/directory to its template version
-
-# Update scratch to latest version
-scratch update
-\`\`\`
 
 ## Acknowledgements
 
-[Bun](https://bun.com/) for lightning-fast builds, development with HMR, native TypeScript support, and a portable executable.
+Scratch is built on the shoulders of giants:
 
-[React](https://react.dev/) and [MDX](https://mdxjs.com/) make it possible to write with Markdown and code. [Tailwind CSS](https://tailwindcss.com/) makes component styling easy.
+Scratch uses [Bun](https://bun.com/) for lightning-fast builds, development with HMR, native typescript support, and bundling as a portable executable.
+
+[React](https://react.dev/) and [MDX](https://mdxjs.com/) make it possible to compile Markdown and code into static websites. [Tailwind CSS](https://tailwindcss.com/) makes them look good, and makes it easy to style custom components.
 
 Content preprocessing relies on [unified](https://unifiedjs.com/), with [remark-gfm](https://github.com/remarkjs/remark-gfm) for GitHub Flavored Markdown and [remark-frontmatter](https://github.com/remarkjs/remark-frontmatter) plus [gray-matter](https://github.com/jonschlinkert/gray-matter) for parsing front matter.
 
-[Shiki](https://shiki.style/) provides beautiful, accurate syntax highlighting with VS Code's grammar engine.
+[Shiki](https://shiki.style/) provides syntax highlighting with VS Code's grammar engine.
 
 [Commander.js](https://github.com/tj/commander.js) scaffolds the CLI.
 
-Additional dependencies: [fast-glob](https://github.com/mrmlnc/fast-glob), [acorn](https://github.com/acornjs/acorn), [@mdx-js/esbuild](https://mdxjs.com/packages/esbuild/), [@shikijs/rehype](https://shiki.style/packages/rehype), [@types/mdast](https://github.com/DefinitelyTyped/DefinitelyTyped), [unist-util-visit](https://github.com/syntax-tree/unist-util-visit), [unist-util-is](https://github.com/syntax-tree/unist-util-is).
+Scratch server uses [hono](https://hono.dev) for routing and [Better Auth](https://better-auth.com) for authentication.
+
+Additional dependencies can be found in the [Scratch repo](https://github.com/scratch/scratch).
 `, binary: false },
 
-  'pages/components/Fire.tsx': { content: `export default function Fire({ children }: { children: React.ReactNode }) {
+  'pages/example-components/Highlight.tsx': { content: `import React from "react";
+
+interface HighlightProps {
+  children: React.ReactNode;
+}
+
+export default function Highlight({ children }: HighlightProps): React.ReactElement {
   return (
-    <span
-      className="font-bold bg-gradient-to-t from-red-600 via-orange-500 to-yellow-400 bg-clip-text text-transparent animate-pulse"
-    >
+    <span className="bg-yellow-200 px-1 rounded">
       {children}
     </span>
   );
 }
 `, binary: false },
 
-  'pages/components/Files.tsx': { content: `import React, { useState } from "react";
+  'pages/example-components/Marquis.tsx': { content: `import React from "react";
 
-// Tree node structure from parsing
-interface TreeNode {
-  id: string;
-  name: string;
-  comment?: string;
-  children: TreeNode[];
-  startCollapsed: boolean;
+interface MarquisProps {
+  children: React.ReactNode;
 }
 
-// Flattened node for rendering
-interface RenderNode {
-  id: string;
-  name: string;
-  comment?: string;
-  depth: number;
-  isLast: boolean;
-  parentIsLast: boolean[];
-  isFolder: boolean;
-  hasChildren: boolean;
-}
-
-function parseTree(text: string): TreeNode[] {
-  const lines = text.split("\\n").filter((line) => line.trim().length > 0);
-  if (lines.length === 0) return [];
-
-  // Parse lines - support both whitespace and dash-prefix for indentation
-  const items = lines.map((line, index) => {
-    const dashMatch = line.match(/^(-+)/);
-    let name: string;
-    let indent: number;
-    let comment: string | undefined;
-
-    if (dashMatch) {
-      name = line.slice(dashMatch[1].length);
-      indent = dashMatch[1].length;
-    } else {
-      name = line.trim();
-      indent = line.length - line.trimStart().length;
-    }
-
-    // Check for # comment
-    const commentMatch = name.match(/\\s*#\\s*(.*)$/);
-    if (commentMatch) {
-      comment = commentMatch[1].trim();
-      name = name.slice(0, commentMatch.index).trim();
-    }
-
-    // Check for (collapsed) suffix
-    const collapsedMatch = name.match(/\\s*\\(collapsed\\)\\s*$/i);
-    const startCollapsed = !!collapsedMatch;
-    if (collapsedMatch) {
-      name = name.slice(0, collapsedMatch.index).trim();
-    }
-
-    return { name, indent, comment, startCollapsed, lineIndex: index };
-  });
-
-  // Normalize indents by subtracting the minimum
-  const baseIndent = Math.min(...items.map((item) => item.indent));
-  items.forEach((item) => (item.indent -= baseIndent));
-
-  // Build tree using a stack
-  const roots: TreeNode[] = [];
-  const stack: { node: TreeNode; indent: number }[] = [];
-
-  for (const { name, indent, comment, startCollapsed, lineIndex } of items) {
-    const node: TreeNode = {
-      id: \`node-\${lineIndex}\`,
-      name,
-      comment,
-      children: [],
-      startCollapsed,
-    };
-
-    // Pop stack until we find the parent (item with smaller indent)
-    while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
-      stack.pop();
-    }
-
-    if (stack.length === 0) {
-      roots.push(node);
-    } else {
-      stack[stack.length - 1].node.children.push(node);
-    }
-
-    stack.push({ node, indent });
-  }
-
-  return roots;
-}
-
-function flattenTree(
-  roots: TreeNode[],
-  collapsedIds: Set<string>
-): RenderNode[] {
-  const result: RenderNode[] = [];
-
-  function traverse(
-    nodes: TreeNode[],
-    depth: number,
-    parentIsLast: boolean[]
-  ): void {
-    nodes.forEach((node, index) => {
-      const isLast = index === nodes.length - 1;
-      const isFolder = node.name.endsWith("/");
-      const hasChildren = node.children.length > 0;
-
-      result.push({
-        id: node.id,
-        name: node.name,
-        comment: node.comment,
-        depth,
-        isLast,
-        parentIsLast: [...parentIsLast],
-        isFolder,
-        hasChildren,
-      });
-
-      // Only traverse children if not collapsed
-      if (hasChildren && !collapsedIds.has(node.id)) {
-        traverse(node.children, depth + 1, [...parentIsLast, isLast]);
-      }
-    });
-  }
-
-  traverse(roots, 0, []);
-  return result;
-}
-
-function getInitialCollapsed(roots: TreeNode[]): Set<string> {
-  const collapsed = new Set<string>();
-
-  function traverse(nodes: TreeNode[]): void {
-    for (const node of nodes) {
-      if (node.startCollapsed) {
-        collapsed.add(node.id);
-      }
-      traverse(node.children);
-    }
-  }
-
-  traverse(roots);
-  return collapsed;
-}
-
-interface FileRowProps {
-  node: RenderNode;
-  isCollapsed: boolean;
-  onToggle: () => void;
-}
-
-function FileRow({ node, isCollapsed, onToggle }: FileRowProps) {
-  const isClickable = node.isFolder;
-  const isDotfile = node.name.startsWith(".");
-
+export default function Marquis({ children }: MarquisProps): React.ReactElement {
   return (
-    <div className="flex items-center h-7 font-mono text-sm">
-      {/* Left side: indent + caret + name */}
-      <div
-        className="flex items-center w-52 flex-shrink-0"
-        style={{ paddingLeft: \`\${node.depth * 1}rem\` }}
-      >
-        {/* Caret for folders */}
-        {isClickable ? (
-          <button
-            onClick={onToggle}
-            className="w-4 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-600 cursor-pointer"
-          >
-            <svg
-              width="8"
-              height="8"
-              viewBox="0 0 8 8"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={\`transition-transform duration-150 \${isCollapsed ? "" : "rotate-90"}\`}
-            >
-              <path d="M2 1L6 4L2 7" />
-            </svg>
-          </button>
-        ) : (
-          <div className="w-4 flex-shrink-0" />
-        )}
-
-        <span
-          className={\`flex items-center \${
-            isDotfile
-              ? "text-gray-400"
-              : node.isFolder
-                ? "text-gray-500 font-bold"
-                : "text-gray-600"
-          } \${isClickable ? "cursor-pointer hover:text-gray-800 select-none" : ""}\`}
-          onClick={isClickable ? onToggle : undefined}
-        >
-          {node.name}
-        </span>
-      </div>
-
-      {/* Right side: comment */}
-      {node.comment && (
-        <span className="text-gray-400 font-normal whitespace-nowrap">
-          {node.comment}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function extractText(children: React.ReactNode): string {
-  if (typeof children === "string") return children;
-  if (typeof children === "number") return String(children);
-  if (!children) return "";
-
-  if (Array.isArray(children)) {
-    return children.map(extractText).join("\\n");
-  }
-
-  if (typeof children === "object" && "props" in children) {
-    const el = children as React.ReactElement;
-    if (el.type === "p" || el.type === "br") {
-      return extractText(el.props.children) + "\\n";
-    }
-    return extractText(el.props.children);
-  }
-
-  return "";
-}
-
-interface FilesProps {
-  content?: string;
-  children?: React.ReactNode;
-}
-
-export default function Files({ content, children }: FilesProps) {
-  const text = content ?? extractText(children);
-  const [tree] = useState(() => parseTree(text));
-  const [collapsedIds, setCollapsedIds] = useState(() =>
-    getInitialCollapsed(tree)
-  );
-
-  const nodes = flattenTree(tree, collapsedIds);
-
-  const toggleCollapse = (id: string) => {
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  return (
-    <div className="not-prose my-6 py-4 px-4 overflow-x-auto">
-      {nodes.map((node) => (
-        <FileRow
-          key={node.id}
-          node={node}
-          isCollapsed={collapsedIds.has(node.id)}
-          onToggle={() => toggleCollapse(node.id)}
-        />
-      ))}
-    </div>
+    <span className="inline-flex overflow-hidden max-w-32 align-baseline items-end">
+      <span className="inline-block animate-marquis whitespace-nowrap leading-none">
+        {children}
+      </span>
+      <style>{\`
+        @keyframes marquis {
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
+        }
+        .animate-marquis {
+          animation: marquis 4s linear infinite;
+        }
+      \`}</style>
+    </span>
   );
 }
 `, binary: false },
 
-  'pages/components/Counter.tsx': { content: `import React, { useState } from 'react';
+  'pages/example-components/Counter.tsx': { content: `import React, { useState } from "react";
 
 export default function Counter(): React.ReactElement {
   const [count, setCount] = useState<number>(0);
 
   return (
-    <div className="flex justify-center items-center gap-3 py-2">
+    <div className="flex justify-left items-center gap-3 py-2">
       <button
         onClick={() => setCount((c) => c - 1)}
-        className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-300 hover:border-gray-400 text-gray-600 transition-colors"
+        className="w-8 h-8 flex items-center justify-center rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
       >
         -
       </button>
@@ -1264,7 +996,7 @@ export default function Counter(): React.ReactElement {
       </span>
       <button
         onClick={() => setCount((c) => c + 1)}
-        className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-300 hover:border-gray-400 text-gray-600 transition-colors"
+        className="w-8 h-8 flex items-center justify-center rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
       >
         +
       </button>
@@ -1273,182 +1005,24 @@ export default function Counter(): React.ReactElement {
 }
 `, binary: false },
 
-  'pages/components/BouncingDvdLogo.tsx': { content: `import React, { useState, useEffect, useRef } from "react";
+  'pages/example-components/HighlightedSnippet.tsx': { content: `import React from "react";
 
-export default function BouncingDvdLogo() {
-  const base = globalThis.__SCRATCH_BASE__ || '';
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [cornerHits, setCornerHits] = useState(0);
-  const [position, setPosition] = useState({ x: 20, y: 20 });
-  const [speedMultiplier, setSpeedMultiplier] = useState(1);
-  const [velocity, setVelocity] = useState({ x: 2 * 1, y: 1.5 * 1 });
-  const [color, setColor] = useState("#8b5cf6");
+interface HighlightedSnippetProps {
+  children: React.ReactNode;
+}
 
-  const toggleSpeed = () => {
-    const newMultiplier = speedMultiplier === 10 ? 1 : 10;
-    setSpeedMultiplier(newMultiplier);
-    setVelocity((v) => ({
-      x: Math.sign(v.x) * 2 * newMultiplier,
-      y: Math.sign(v.y) * 1.5 * newMultiplier,
-    }));
-  };
-
-  const logoWidth = 80;
-  const logoHeight = 40;
-
-  const colors = [
-    "#8b5cf6", // purple
-    "#ec4899", // pink
-    "#f59e0b", // amber
-    "#10b981", // emerald
-    "#3b82f6", // blue
-    "#ef4444", // red
-  ];
-
-  const getRandomColor = () => {
-    const newColor = colors[Math.floor(Math.random() * colors.length)];
-    return newColor === color
-      ? colors[(colors.indexOf(color) + 1) % colors.length]
-      : newColor;
-  };
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const cornerTolerance = 10; // pixels of tolerance for corner detection
-
-    const animate = () => {
-      setPosition((prev) => {
-        const containerWidth = container.clientWidth;
-        const containerHeight = container.clientHeight;
-
-        let newX = prev.x + velocity.x;
-        let newY = prev.y + velocity.y;
-        let hitX = false;
-        let hitY = false;
-
-        // Check horizontal bounds
-        if (newX <= 0) {
-          newX = 0;
-          hitX = true;
-          setVelocity((v) => ({ ...v, x: Math.abs(v.x) }));
-          setColor(getRandomColor());
-        } else if (newX >= containerWidth - logoWidth) {
-          newX = containerWidth - logoWidth;
-          hitX = true;
-          setVelocity((v) => ({ ...v, x: -Math.abs(v.x) }));
-          setColor(getRandomColor());
-        }
-
-        // Check vertical bounds
-        if (newY <= 0) {
-          newY = 0;
-          hitY = true;
-          setVelocity((v) => ({ ...v, y: Math.abs(v.y) }));
-          if (!hitX) setColor(getRandomColor());
-        } else if (newY >= containerHeight - logoHeight) {
-          newY = containerHeight - logoHeight;
-          hitY = true;
-          setVelocity((v) => ({ ...v, y: -Math.abs(v.y) }));
-          if (!hitX) setColor(getRandomColor());
-        }
-
-        // Corner hit - check if near both edges (with tolerance)
-        const nearLeftOrRight =
-          newX <= cornerTolerance ||
-          newX >= containerWidth - logoWidth - cornerTolerance;
-        const nearTopOrBottom =
-          newY <= cornerTolerance ||
-          newY >= containerHeight - logoHeight - cornerTolerance;
-
-        if ((hitX || hitY) && nearLeftOrRight && nearTopOrBottom) {
-          setCornerHits((c) => c + 1);
-        }
-
-        return { x: newX, y: newY };
-      });
-    };
-
-    const intervalId = setInterval(animate, 16);
-    return () => clearInterval(intervalId);
-  }, [velocity]);
-
+export default function HighlightedSnippet({ children }: HighlightedSnippetProps): React.ReactElement {
   return (
-    <div className="not-prose my-6 mx-12">
-      {/* TV outer frame */}
-      <div
-        className="bg-gradient-to-b from-gray-700 via-gray-800 to-gray-900 p-3 rounded-2xl shadow-xl cursor-pointer"
-        onClick={toggleSpeed}
-      >
-        {/* TV screen bezel */}
-        <div className="bg-black p-1 rounded-lg">
-          {/* Screen container */}
-          <div
-            ref={containerRef}
-            className="relative w-full h-48 rounded overflow-hidden"
-            style={{
-              background:
-                "linear-gradient(145deg, #1a1a2e 0%, #0f0f1a 50%, #1a1a2e 100%)",
-            }}
-          >
-            {/* Corner hits counter in center */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="text-white/20 text-4xl font-mono">
-                {cornerHits}
-              </span>
-            </div>
-
-            {/* Bouncing logo */}
-            <div
-              className="absolute"
-              style={{
-                left: position.x,
-                top: position.y,
-                width: logoWidth,
-                height: logoHeight,
-              }}
-            >
-              <div
-                className="transition-colors duration-300"
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  backgroundColor: color,
-                  maskImage: \`url(\${base}/DVD_logo.svg)\`,
-                  maskSize: "contain",
-                  maskRepeat: "no-repeat",
-                  maskPosition: "center",
-                  WebkitMaskImage: \`url(\${base}/DVD_logo.svg)\`,
-                  WebkitMaskSize: "contain",
-                  WebkitMaskRepeat: "no-repeat",
-                  WebkitMaskPosition: "center",
-                }}
-              />
-            </div>
-
-            {/* Screen reflection overlay */}
-            <div
-              className="absolute inset-0 pointer-events-none"
-              style={{
-                background:
-                  "linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%, transparent 100%)",
-              }}
-            />
-          </div>
-        </div>
+    <div className="my-6 px-6 py-4 bg-amber-50 border-l-4 border-amber-400 rounded-r-lg">
+      <div className="text-gray-700 italic">
+        {children}
       </div>
-      {/* Prompt text */}
-      <p className="text-sm text-gray-500 font-mono mt-3 px-4">
-        "Make a component that looks like a TV screen with a bouncing DVD logo.
-        Count the number of times...
-      </p>
     </div>
   );
 }
 `, binary: false },
 
-  'pages/components/TodoList.tsx': { content: `import React, { useState, useEffect } from "react";
+  'pages/example-components/TodoList.tsx': { content: `import React, { useState, useEffect } from "react";
 
 interface Todo {
   id: number;
@@ -1457,6 +1031,13 @@ interface Todo {
 }
 
 const STORAGE_KEY = "scratch-demo-todos";
+
+const DEFAULT_TODOS: Todo[] = [
+  { id: 1, text: "Create scratch project", completed: false },
+  { id: 2, text: "Edit pages/index.mdx", completed: false },
+  { id: 3, text: "Build with \`scratch build\`", completed: false },
+  { id: 4, text: "Publish with \`scratch publish\`", completed: false },
+];
 
 let globalTodos: Todo[] | null = null;
 let listeners: Set<(todos: Todo[]) => void> = new Set();
@@ -1467,7 +1048,7 @@ function getTodos(): Todo[] {
       globalTodos = [];
     } else {
       const stored = localStorage.getItem(STORAGE_KEY);
-      globalTodos = stored ? JSON.parse(stored) : [];
+      globalTodos = stored ? JSON.parse(stored) : DEFAULT_TODOS;
     }
   }
   return globalTodos;
@@ -1522,7 +1103,7 @@ function useTodos() {
   };
 
   const reset = () => {
-    updateTodos([]);
+    updateTodos([...DEFAULT_TODOS]);
   };
 
   return { todos, addTodo, toggleTodo, deleteTodo, reset };
@@ -1539,31 +1120,9 @@ export default function TodoList() {
 
   return (
     <div className="not-prose border border-gray-200 rounded-lg p-4 my-12 mx-2 sm:mx-8 md:mx-16 bg-gray-50">
-      <div className="flex gap-2 mb-4">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="Add a todo..."
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-400"
-        />
-        <button
-          onClick={handleAdd}
-          disabled={!input.trim()}
-          className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-900"
-        >
-          Add
-        </button>
-      </div>
-
-      {todos.length === 0 ? (
-        <p className="text-gray-500 text-center py-4">
-          No todos yet. Add one above!
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {todos.map((todo) => (
+      <h3 className="text-center text-lg font-semibold text-gray-900 mb-4">Todo List Demo</h3>
+      <ul className="space-y-0">
+        {todos.map((todo) => (
             <li
               key={todo.id}
               className="flex items-center gap-3 p-2 rounded-md hover:bg-gray-100"
@@ -1585,7 +1144,7 @@ export default function TodoList() {
               </span>
               <button
                 onClick={() => deleteTodo(todo.id)}
-                className="text-gray-400 hover:text-red-500 transition-colors"
+                className="text-gray-400 hover:text-black transition-colors"
                 aria-label="Delete todo"
               >
                 <svg
@@ -1603,10 +1162,24 @@ export default function TodoList() {
               </button>
             </li>
           ))}
-        </ul>
-      )}
+        <li className="flex items-center gap-3 p-2">
+          <input
+            type="checkbox"
+            disabled
+            className="w-4 h-4 rounded border-gray-300"
+          />
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+            placeholder="Add a todo..."
+            className="flex-1 bg-transparent border-b border-transparent text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-300"
+          />
+        </li>
+      </ul>
 
-      <div className="mt-4 pt-4 border-t border-gray-200 flex justify-between items-center">
+      <div className="mt-4 pt-4 flex justify-between items-center">
         <span className="text-sm text-gray-500">
           {todos.filter((t) => !t.completed).length} remaining
         </span>
@@ -1618,6 +1191,25 @@ export default function TodoList() {
         </button>
       </div>
     </div>
+  );
+}
+`, binary: false },
+
+  'pages/example-components/HoverTooltip.tsx': { content: `import React from "react";
+
+interface HoverTooltipProps {
+  children: React.ReactNode;
+}
+
+export default function HoverTooltip({ children }: HoverTooltipProps): React.ReactElement {
+  return (
+    <span className="relative group cursor-help">
+      <span className="border-b border-dotted border-gray-400">*</span>
+      <span className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-sm bg-gray-800 text-white rounded whitespace-nowrap z-10">
+        {children}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></span>
+      </span>
+    </span>
   );
 }
 `, binary: false },

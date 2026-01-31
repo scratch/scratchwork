@@ -7,13 +7,13 @@ author: "Scratch"                                               # Meta author
 lang: "en"                                                      # HTML lang attribute
 ---
 
-![Scratch Logo](/scratch-logo.svg)
+![Scratch logo](/scratch-logo.svg)
 
-Scratch is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/).
+Scratch is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/). 
 
-Write in Markdown and embed React components right in your text. Scratch compiles your work into beautiful static websites (like [this one](https://github.com/scratch/scratch.dev)) that can be hosted anywhere.
+Scratch compiles MDX files into beautiful static websites that can be shared publicly or privately with a single command. It's opinionated about everything so that you can focus on writing without worrying about scaffolding, dependencies, formatting or styling. 
 
-Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code.
+Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code. 
 
 
 ## Quick Start
@@ -21,138 +21,113 @@ Scratch was designed for collaborative writing with coding agents like [Claude C
 Scratch requires no configuration so it's easy to get started. First, install:
 
 ```bash
+# Install Scratch
 curl -fsSL https://scratch.dev/install.sh | bash
+```
+or
+
+```bash
+# Install Scratch
+curl -fsSL https://scratch.dev/install.md | claude
 ```
 
 Then create a project and start the dev server:
 
 ```bash
+# Create a new project
 scratch create
+
+# Start the dev server
 scratch dev
 ```
 
-Now you're ready to start writing in `pages/index.mdx`.
+Now you're ready to start writing in `pages/index.mdx`. Use the `publish` command to share with specific people, your team, or the world:
+
+```bash
+# Publish your project to a Scratch server. 
+# Grant access to specific people, @yourdomain.com, or the world
+scratch publish
+```
 
 ## What can you do with Scratch?
 
-Scratch lets you write in Markdown and embed interactive React components, like this counter:
+Scratch turns MDX content into static HTML and Javascript like this:
 
-<Counter />
+<div className="grid grid-cols-[1fr_auto_1fr] items-stretch my-8">
+  <div className="pl-8 mx-8 pb-4 border border-gray-200 rounded-lg shadow-md">
+  
+    ```mdx
+    
+    ### Markdown and React
+    
+    Here's a counter:
+    
+    <Counter />
+    
+    ```
+    
+  </div>
+  <div className="text-4xl text-gray-400 flex items-center">→</div>
+  <div className="pl-8 mx-8 pt-4 pb-4 border border-gray-200 rounded-lg shadow-md">
+  
+    ### Markdown and React
+    
+    Here's a counter:
+    
+    <Counter />
+    
+  </div>
+</div> 
 
-Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown, and ask a coding agent for help when it's easier to express yourself with code.
+Scratch makes it easy to express your ideas with code. Here are a few of the ways you can do that:
 
-You can use React components to <Fire>style text</Fire> or embed fully working demos in your product specs:
+### Formatting text
+
+Traditional word processors like Microsoft Word and Google Docs give writers a fixed set of formatting options exposed as buttons in ribbons and drop-down menus. 
+
+In contrast, Markdown pares all of this down to the bare essentials, like `**bold**`, `_italics_`, and `[embedded hyperlinks](http://example.org)`, expressed directly in plain text.
+
+MDX gives us a way to add an essentially infinite variety of formatting options: **use Markdown for the basics and React components for everything else**.
+
+For example, you can use inline components for things like <Highlight>highlighting text</Highlight>, <Marquis>marquis effects</Marquis>, or hover tooltips<HoverTooltip>like this one</HoverTooltip>.
+
+<HighlightedSnippet>
+    Want to draw attention to a snippet or quote? That's easy to do with a custom component.
+</HighlightedSnippet>
+
+Scratch doesn't include any of these components out-of-the-box. Instead, you'll create them as the need arises while you write, effectively building a custom word processor for each document. It's a lot of fun!
+
+### Interactive demos
+
+You can also use React components to embed interactive demos into your prose, like this one:
 
 <TodoList />
 
-Scratch uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography), to render your prose with a clean aesthetic. Code blocks use syntax highlighting by [Shiki](https://shiki.style/).
+This is handy for writing product specs where embedded demos can communicate how a particular feature should work better than written requirements and wireframes can.
 
-```python
-def greet(name: str) -> str:
-    return f"Hello, {name}!"
+### Publishing your work
 
-print(greet("World"))
-```
+Use the `scratch publish` command to share your writing, either privately with your colleagues or publicly with the world.
 
-Scratch also supports GitHub-flavored Markdown features like checklists and tables:
+For now, you can publish your work for free on [scratch.dev](https://scratch.dev). Projects published on scratch.dev must be less than 5MB and will persist for only 30 days.
 
-| Feature | Supported? |
-|---------|-----------|
-| Compiles Markdown, TS, JS & CSS | ✅ |
-| Dev server with HMR | ✅ |
-| Tailwind CSS styling | ✅ |
-| Code syntax highlighting | ✅ |
+You can also [host your own Scratch server](/docs#self-hosting) on Cloudflare and protect it with Cloudflare Access for additional security.
 
-Unlike traditional word processors, Scratch makes it easy to express any idea. If you can describe it to a coding  agent, you can add it to your document:
-
-<BouncingDvdLogo />
-
-Collaborating with AI makes writing more fun. Scratch makes that easy.
-
-## No Boilerplate
-
-Scratch uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing.
-
-A simple Scratch project (created with `scratch create`) looks like this:
-
-<Files>
-```
-my-scratch-project/
-  pages/                 # put markdown pages and components here
-    posts/ (collapsed)
-      post1.md           # accessible at /posts/post1
-      post2.md           # /posts/post2
-      blog.png           # static assets in pages/ or public/
-    index.mdx            # accessible at root path (/)
-    Counter.tsx
-  public/ (collapsed)    # static assets
-    favicon.svg
-  src/ (collapsed)       # global components and css
-    markdown/ (collapsed) # default markdown components
-      index.ts
-      CodeBlock.tsx
-      Heading.tsx
-      Link.tsx
-    template/ (collapsed) # page template components
-      Copyright.jsx
-      Footer.jsx
-      Header.jsx
-      PageWrapper.jsx       # wraps every page
-      ScratchBadge.jsx
-    tailwind.css          # global styles
-  AGENTS.md              # agent context
-  package.json           # dependencies
-  .gitignore
-```
-</Files>
-
-
-Use `scratch build` to compile this project into a static website, like [this one](https://github.com/scratch/scratch.dev).
-
-Component files and libraries can live anywhere in `pages/` and `src/`. They are auto-detected by Scratch and don't need to be explicitly imported in your .mdx files as long as the filename matches the component name.
-
-Modify `src/tailwind.css` directory to change the styling of your document. Add headers, footers and other site-wide elements by modifying `src/PageWrapper.jsx`.
-
-## Commands
-
-Here's a quick list of the Scratch CLI commands. See the [Scratch docs](https://scratch.dev/docs/) for a full rundown.
-
-```bash
-# Create a new project
-scratch create [path]     # create project at path (default: current directory)
-
-# Start dev server with hot module reloading
-scratch dev
-
-# Build for production
-scratch build
-
-# Preview production build locally
-scratch preview
-
-# Serve target file/directory on dev server
-scratch watch path
-
-# Remove build artifacts
-scratch clean
-
-# Revert a file to its template version
-scratch checkout path           # revert file/directory to its template version
-
-# Update scratch to latest version
-scratch update
-```
 
 ## Acknowledgements
 
-[Bun](https://bun.com/) for lightning-fast builds, development with HMR, native TypeScript support, and a portable executable.
+Scratch is built on the shoulders of giants:
 
-[React](https://react.dev/) and [MDX](https://mdxjs.com/) make it possible to write with Markdown and code. [Tailwind CSS](https://tailwindcss.com/) makes component styling easy.
+Scratch uses [Bun](https://bun.com/) for lightning-fast builds, development with HMR, native typescript support, and bundling as a portable executable.
+
+[React](https://react.dev/) and [MDX](https://mdxjs.com/) make it possible to compile Markdown and code into static websites. [Tailwind CSS](https://tailwindcss.com/) makes them look good, and makes it easy to style custom components.
 
 Content preprocessing relies on [unified](https://unifiedjs.com/), with [remark-gfm](https://github.com/remarkjs/remark-gfm) for GitHub Flavored Markdown and [remark-frontmatter](https://github.com/remarkjs/remark-frontmatter) plus [gray-matter](https://github.com/jonschlinkert/gray-matter) for parsing front matter.
 
-[Shiki](https://shiki.style/) provides beautiful, accurate syntax highlighting with VS Code's grammar engine.
+[Shiki](https://shiki.style/) provides syntax highlighting with VS Code's grammar engine.
 
 [Commander.js](https://github.com/tj/commander.js) scaffolds the CLI.
 
-Additional dependencies: [fast-glob](https://github.com/mrmlnc/fast-glob), [acorn](https://github.com/acornjs/acorn), [@mdx-js/esbuild](https://mdxjs.com/packages/esbuild/), [@shikijs/rehype](https://shiki.style/packages/rehype), [@types/mdast](https://github.com/DefinitelyTyped/DefinitelyTyped), [unist-util-visit](https://github.com/syntax-tree/unist-util-visit), [unist-util-is](https://github.com/syntax-tree/unist-util-is).
+Scratch server uses [hono](https://hono.dev) for routing and [Better Auth](https://better-auth.com) for authentication.
+
+Additional dependencies can be found in the [Scratch repo](https://github.com/scratch/scratch).

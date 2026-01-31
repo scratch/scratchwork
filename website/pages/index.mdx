@@ -61,20 +61,35 @@ scratch publish
 
 ## What can you do with Scratch?
 
-Scratch turns Markdown and MDX content like this:
+Scratch turns MDX content into static HTML and Javascript like this:
 
-```mdx
+<div className="grid grid-cols-[1fr_auto_1fr] items-stretch my-8">
+  <div className="pl-8 mx-8 pb-4 border border-gray-200 rounded-lg shadow-md">
+  
+    ```mdx
+    
+    ### Markdown and React
+    
+    Here's a counter:
+    
+    <Counter />
+    
+    ```
+    
+  </div>
+  <div className="text-4xl text-gray-400 flex items-center">→</div>
+  <div className="pl-8 mx-8 pt-4 pb-4 border border-gray-200 rounded-lg shadow-md">
+  
+    ### Markdown and React
+    
+    Here's a counter:
+    
+    <Counter />
+    
+  </div>
+</div> 
 
-### Markdown and React
-
-Here's a counter:
-
-<Counter />
-
-```
-into static websites you can share privately with your colleagues or publicly with the world. 
-
-Scratch makes it easy to express your ideas with code. Here are a few of the ways you can do that.
+Scratch makes it easy to express your ideas with code. Here are a few of the ways you can do that:
 
 ### Formatting text
 
@@ -84,7 +99,7 @@ In contrast, Markdown pares all of this down to the bare essentials, like `**bol
 
 MDX gives us a way to add an essentially infinite variety of formatting options: **use Markdown for the basics and React components for everything else**.
 
-For example, you can use inline components for things like <Highlight>highlighting text</Highlight>,<Marquis>marquis effects</Marquis>, or hover tooltips<HoverTooltip>like this one</HoverTooltip>.
+For example, you can use inline components for things like <Highlight>highlighting text</Highlight>, <Marquis>marquis effects</Marquis>, or hover tooltips<HoverTooltip>like this one</HoverTooltip>.
 
 <HighlightedSnippet>
     Want to draw attention to a snippet or quote? That's easy to do with a custom component.
@@ -98,7 +113,7 @@ You can also use React components to embed interactive demos into your prose, li
 
 <TodoList />
 
-This is particularly handy for writing product specs where embedded demos can communicate what it should feel like to use a particular feature much better than written requirements and wireframes do.
+This is handy for writing product specs where embedded demos can communicate how a particular feature should work better than written requirements and wireframes can.
 
 ### Publishing your work
 
