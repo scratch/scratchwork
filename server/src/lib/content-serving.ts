@@ -12,6 +12,24 @@ import { isShareTokensEnabled, validateShareToken } from './share-tokens'
 import { verifyContentToken } from './content-token'
 import { getAppBaseUrl, useHttps } from './domains'
 
+// Set a token cookie with consistent security options
+function setTokenCookie(
+  c: Context<{ Bindings: Env }>,
+  name: string,
+  value: string,
+  cookiePath: string,
+  maxAge: number
+): void {
+  const isHttps = useHttps(c.env)
+  setCookie(c, name, value, {
+    path: cookiePath,
+    httpOnly: true,
+    secure: isHttps,
+    sameSite: 'Lax',
+    maxAge,
+  })
+}
+
 export interface Project {
   id: string
   name: string
@@ -109,6 +127,8 @@ export function validateFilePath(rawFilePath: string): string | null {
 export interface ContentAuthResult {
   user: { id: string; email: string } | null
   hasAccess: boolean
+  tokenFromUrl?: boolean      // Content token was in URL (not cookie)
+  shareTokenFromUrl?: boolean // Share token was in URL (not cookie)
 }
 
 // Authenticate a content request for a specific project
@@ -120,6 +140,8 @@ export async function authenticateContentRequest(
 ): Promise<ContentAuthResult> {
   const url = new URL(c.req.url)
   let verifiedUser: { id: string; email: string } | null = null
+  let contentTokenFromUrl = false
+  let shareTokenUsedFromUrl = false
 
   if (c.env.AUTH_MODE === 'cloudflare-access') {
     // Cloudflare Access mode: get user from CF JWT
@@ -142,14 +164,8 @@ export async function authenticateContentRequest(
 
         // Set cookie if token came from URL (first visit after auth)
         if (tokenFromUrl) {
-          const isHttps = useHttps(c.env)
-          setCookie(c, contentTokenCookieName, token, {
-            path: cookiePath,
-            httpOnly: true,
-            secure: isHttps,
-            sameSite: 'Lax',
-            maxAge: 60 * 60, // 1 hour (matches token expiry)
-          })
+          contentTokenFromUrl = true
+          setTokenCookie(c, contentTokenCookieName, token, cookiePath, 60 * 60) // 1 hour
         }
       }
     }
@@ -175,22 +191,24 @@ export async function authenticateContentRequest(
       if (shareResult && shareResult.projectId === project.id) {
         hasAccess = true
 
-        // Set cookie so subsequent requests (assets) don't need the token param
-        if (shareTokenFromUrl && !shareTokenFromCookie) {
-          const isHttps = useHttps(c.env)
-          setCookie(c, shareTokenCookieName, shareToken, {
-            path: cookiePath,
-            httpOnly: true,
-            secure: isHttps,
-            sameSite: 'Lax',
-            maxAge: 60 * 60 * 24, // 24 hours (or until token expires/revoked)
-          })
+        // Track if token came from URL (for redirect to clean URL)
+        // Set cookie if not already present (so subsequent requests don't need the param)
+        if (shareTokenFromUrl) {
+          shareTokenUsedFromUrl = true
+          if (!shareTokenFromCookie) {
+            setTokenCookie(c, shareTokenCookieName, shareToken, cookiePath, 60 * 60 * 24) // 24 hours
+          }
         }
       }
     }
   }
 
-  return { user: verifiedUser, hasAccess }
+  return {
+    user: verifiedUser,
+    hasAccess,
+    tokenFromUrl: contentTokenFromUrl,
+    shareTokenFromUrl: shareTokenUsedFromUrl,
+  }
 }
 
 // Options for serving project content
@@ -236,6 +254,15 @@ export async function serveProjectContent(
 
       // Has token but no access (permissions changed? wrong user?)
       return c.text('Not Found', 404)
+    }
+
+    // Redirect to clean URL if token was in URL (cookie has been set)
+    // This removes the token from browser history and prevents leakage via Referer
+    if (authResult.tokenFromUrl || authResult.shareTokenFromUrl) {
+      const cleanUrl = new URL(c.req.url)
+      cleanUrl.searchParams.delete('_ctoken')
+      cleanUrl.searchParams.delete('token')
+      return c.redirect(cleanUrl.toString(), 302)
     }
   }
 

@@ -21,6 +21,7 @@ import { publishCommand } from './cmd/cloud/publish';
 import { configCommand } from './cmd/cloud/config';
 import { listProjectsCommand, projectInfoCommand, projectDeleteCommand } from './cmd/cloud/projects';
 import { shareCreateCommand, shareListCommand, shareRevokeCommand } from './cmd/cloud/share';
+import { listTokensCommand, createTokenCommand, revokeTokenCommand, useTokenCommand } from './cmd/cloud/tokens';
 
 // Context created in preAction hook, used by commands
 let ctx: BuildContext;
@@ -82,9 +83,6 @@ program
   .command('create')
   .description('Create a new Scratch project')
   .argument('[path]', 'Target directory', '.')
-  .option('--no-src', 'Skip src/ template directory')
-  .option('--no-package', 'Skip package.json template')
-  .option('--minimal', 'Minimal mode: skip example content, use simple PageWrapper')
   .action(
     withErrorHandling('Create', async (path, options) => {
       await createCommand(path, options);
@@ -100,7 +98,6 @@ program
   .option('-b, --base <path>', 'Base path for deployment (e.g., /mysite/)')
   .option('--test-base', 'Output to dist/<base>/ for local testing')
   .option('--no-ssg', 'Disable static site generation')
-  .option('--static <mode>', 'Static file mode: public, assets, all', 'assets')
   .option('--strict', 'Do not inject PageWrapper component or missing imports')
   .option('--highlight <mode>', 'Syntax highlighting: off, popular, auto, all', 'auto')
   .action(
@@ -125,7 +122,6 @@ program
   .option('-n, --no-open', "Don't open browser automatically")
   .option('-p, --port <port>', 'Port for dev server', '5173')
   .option('-b, --base <path>', 'Base path for deployment (e.g., /mysite/)')
-  .option('--static <mode>', 'Static file mode: public, assets, all', 'assets')
   .option('--strict', 'Do not inject PageWrapper component or missing imports')
   .option('--highlight <mode>', 'Syntax highlighting: off, popular, auto, all', 'auto')
   .action(
@@ -210,6 +206,7 @@ program
   .option('--name <name>', 'Override project name')
   .option('--visibility <visibility>', 'Override visibility (public, private, @domain, or email list)')
   .option('--no-build', 'Skip build step')
+  .option('--no-open', 'Skip opening browser after deploy')
   .option('--dry-run', 'Show what would be deployed without uploading')
   .action(
     withErrorHandling('Publish', async (projectPath, options) => {
@@ -218,6 +215,7 @@ program
         name: options.name,
         visibility: options.visibility,
         noBuild: options.build === false,
+        noOpen: options.open === false,
         dryRun: options.dryRun === true,
       });
     })
@@ -263,11 +261,11 @@ const projects = program
   .description('Manage projects on a Scratch server');
 
 projects
-  .command('list', { isDefault: true })
+  .command('ls', { isDefault: true })
   .description('List all projects')
   .argument('[server-url]', 'Server URL (prompts if logged into multiple servers)')
   .action(
-    withErrorHandling('Projects list', async (serverUrl) => {
+    withErrorHandling('Projects ls', async (serverUrl) => {
       const ctx = createCloudContext(serverUrl);
       await listProjectsCommand(ctx);
     })
@@ -286,13 +284,13 @@ projects
   );
 
 projects
-  .command('delete')
+  .command('rm')
   .description('Delete a project and all its deploys')
   .argument('[name]', 'Project name (uses .scratch/project.toml if not specified)')
   .argument('[server-url]', 'Server URL (prompts if logged into multiple servers)')
   .option('-f, --force', 'Skip confirmation prompt')
   .action(
-    withErrorHandling('Projects delete', async (name, serverUrl, options) => {
+    withErrorHandling('Projects rm', async (name, serverUrl, options) => {
       const ctx = createCloudContext(serverUrl);
       await projectDeleteCommand(ctx, name, { force: options.force });
     })
@@ -317,11 +315,11 @@ share
   );
 
 share
-  .command('list')
+  .command('ls')
   .description('List share tokens for a project')
   .argument('[project]', 'Project name (uses .scratch/project.toml if not specified)')
   .action(
-    withErrorHandling('Share list', async (project) => {
+    withErrorHandling('Share ls', async (project) => {
       const ctx = createCloudContext();
       await shareListCommand(ctx, project);
     })
@@ -336,6 +334,59 @@ share
     withErrorHandling('Share revoke', async (tokenId, project) => {
       const ctx = createCloudContext();
       await shareRevokeCommand(ctx, tokenId, project);
+    })
+  );
+
+// Tokens subcommand group
+const tokens = program
+  .command('tokens')
+  .description('Manage API tokens for CI/CD and automation');
+
+tokens
+  .command('ls', { isDefault: true })
+  .description('List your API tokens')
+  .argument('[server-url]', 'Server URL (prompts if logged into multiple servers)')
+  .action(
+    withErrorHandling('Tokens ls', async (serverUrl) => {
+      const ctx = createCloudContext(serverUrl);
+      await listTokensCommand(ctx);
+    })
+  );
+
+tokens
+  .command('create')
+  .description('Create a new API token')
+  .argument('<name>', 'Token name (3-40 characters, alphanumeric with hyphens/underscores)')
+  .argument('[server-url]', 'Server URL (prompts if logged into multiple servers)')
+  .option('--expires <days>', 'Days until expiration', parseInt)
+  .action(
+    withErrorHandling('Tokens create', async (name, serverUrl, options) => {
+      const ctx = createCloudContext(serverUrl);
+      await createTokenCommand(ctx, name, { expires: options.expires });
+    })
+  );
+
+tokens
+  .command('revoke')
+  .description('Revoke an API token')
+  .argument('<id-or-name>', 'Token ID or name')
+  .argument('[server-url]', 'Server URL (prompts if logged into multiple servers)')
+  .action(
+    withErrorHandling('Tokens revoke', async (idOrName, serverUrl) => {
+      const ctx = createCloudContext(serverUrl);
+      await revokeTokenCommand(ctx, idOrName);
+    })
+  );
+
+tokens
+  .command('use')
+  .description('Store an API token for CLI authentication')
+  .argument('<token>', 'API token (starts with scratch_)')
+  .option('--server <url>', 'Server URL (prompts if not specified)')
+  .option('--force', 'Replace existing credential without prompting')
+  .action(
+    withErrorHandling('Tokens use', async (token, options) => {
+      await useTokenCommand(token, { server: options.server, force: options.force });
     })
   );
 
@@ -371,7 +422,7 @@ program
 // Commands appear in help in the order listed here
 const COMMAND_GROUPS_CONFIG = [
   { name: 'Local', commands: ['create', 'dev', 'build', 'preview', 'watch', 'clean', 'eject', 'config'] },
-  { name: 'Server', commands: ['publish', 'login', 'logout', 'whoami', 'projects', 'share', 'cf-access'] },
+  { name: 'Server', commands: ['publish', 'login', 'logout', 'whoami', 'projects', 'share', 'tokens', 'cf-access'] },
   { name: 'Other', commands: ['update', 'help'] },
 ] as const;
 
