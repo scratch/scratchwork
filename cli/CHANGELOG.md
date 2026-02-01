@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.13] - 2026-02-01
+
+This release adds a new command for configuring global defaults and improves cache management.
+
+### Features
+
+- Added `scratch set-defaults` command to configure global defaults (server URL and visibility) stored in `~/.config/scratch/config.toml`. Supports both interactive mode and non-interactive mode with `--server` and `--visibility` flags.
+
+### Improvements
+
+- Moved CLI cached node_modules from `~/.scratch/[version]/` to `~/.scratch/cache/[version]/` to isolate cache from other files like credentials
+- Old cache versions are now automatically cleaned up when installing dependencies for a new CLI version, preventing accumulation over time
+
 ## [0.5.12] - 2026-02-01
 
 This release fixes routing issues in the `watch` command when viewing index files.
