@@ -2,6 +2,14 @@
 
 All notable changes to the Scratch Server will be documented in this file.
 
+## [0.2.4] - 2026-02-01
+
+This release completes the removal of the namespace column from the database schema.
+
+### Improvements
+
+- **Database cleanup**: Removed the deprecated `namespace` column from the projects schema and related queries. This finalizes the transition to owner-based project URLs introduced in v0.1.1. Existing databases will have the column ignored; new databases won't create it.
+
 ## [0.2.3] - 2026-02-01
 
 This release focuses on internal code quality improvements and adds comprehensive unit tests without changing user-facing functionality.
