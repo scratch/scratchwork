@@ -2,6 +2,22 @@
 
 All notable changes to the Scratch Server will be documented in this file.
 
+## [0.2.3] - 2026-02-01
+
+This release focuses on internal code quality improvements and adds comprehensive unit tests without changing user-facing functionality.
+
+### Improvements
+
+- **Code simplification**: Consolidated duplicated patterns across API routes, reducing ~350 lines of redundant code. Extracted reusable helpers for cache invalidation, SQL query building, session creation, visibility validation, and URL redirects.
+- **Database schema cleanup**: Migrated to unified `schema.d1.sql` with idempotent `IF NOT EXISTS` statements. Removed fake transaction support from DbClient (D1's single-writer model handles concurrency).
+- **Content serving refactored**: Split large authentication function into focused, single-responsibility helpers for content token and share token authentication.
+- **Share token middleware**: Consolidated feature flag check into middleware instead of repeating in each endpoint.
+- **UI components extracted**: Moved CSS and logo SVG into separate modules for better maintainability.
+
+### Testing
+
+- Added 170+ unit tests across 12 new test files covering cache helpers, API helpers, URL helpers, session creation, redirects, and more.
+
 ## [0.2.2] - 2026-01-31
 
 This release adds API token support for CI/CD workflows and improves security for private content handling.
