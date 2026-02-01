@@ -3,7 +3,7 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
-  "version": "0.5.14",
+  "version": "0.5.15",
   "bin": {
     "scratch": "src/index.ts"
   },

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.15] - 2026-02-01
+
+This release improves the server selection experience when publishing to multiple servers.
+
+### Improvements
+
+- When logged into multiple servers, the `publish` command now always prompts for server selection instead of silently using the global default
+- Server selection prompt now pre-selects the global default server when set, making it faster to confirm
+- Cleaner server URL display in prompts (e.g., `scratch.dev` instead of `https://app.scratch.dev`)
+
 ## [0.5.14] - 2026-02-01
 
 This release fixes the global defaults feature to work correctly with the `publish` command.
