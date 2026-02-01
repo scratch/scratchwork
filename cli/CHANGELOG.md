@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.11] - 2026-02-01
+
+This release adds support for publishing to naked domains and includes internal code cleanup.
+
+### Features
+
+- Added `--www` flag to `publish` command for deploying to naked domains (e.g., `example.com` instead of `pages.example.com/user/project`). When used, the site is built without path prefixes for root-level hosting.
+
+### Improvements
+
+- Removed ~2,100 lines of dead code and consolidated duplicate utilities across the codebase
+- Extracted shared helper functions for browser opening, port fallback, zip creation, and date formatting
+- Simplified template components (TodoList, Marquis animation)
+- Removed unused dependency patch for estree-util-build-jsx
+
 ## [0.5.10] - 2026-01-31
 
 This release standardizes the CLI interface by using a consistent `--server` flag across all server commands.
