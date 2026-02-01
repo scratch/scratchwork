@@ -142,7 +142,7 @@ export async function cleanupContext(): Promise<void> {
   if (ctx.currentProjectName) {
     console.log(`Deleting test project: ${ctx.currentProjectName}...`)
     const result = await runCommand([
-      CLI_BIN, 'projects', 'delete', ctx.currentProjectName, ctx.serverUrl, '--force'
+      CLI_BIN, 'projects', 'delete', ctx.currentProjectName, '--server', ctx.serverUrl, '--force'
     ])
     if (result.exitCode === 0) {
       console.log(`${green}✓${reset} Test project deleted`)

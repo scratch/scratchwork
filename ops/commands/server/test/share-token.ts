@@ -98,7 +98,7 @@ export function shareTokenTests() {
       console.log(`${green}✓${reset} Content served with share cookie only (no URL token)`)
 
       // Cleanup share test project
-      await runCommand([CLI_BIN, 'projects', 'rm', shareTestProjectName, ctx.serverUrl, '--force'])
+      await runCommand([CLI_BIN, 'projects', 'rm', shareTestProjectName, '--server', ctx.serverUrl, '--force'])
       try {
         await rm(shareTestTempDir, { recursive: true, force: true })
       } catch {

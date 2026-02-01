@@ -146,7 +146,7 @@ export function contentTokenTests() {
       console.log(`${green}✓${reset} Other query params preserved, token removed`)
 
       // Cleanup private test project
-      await runCommand([CLI_BIN, 'projects', 'delete', ctx.privateProjectName, ctx.serverUrl, '--force'])
+      await runCommand([CLI_BIN, 'projects', 'delete', ctx.privateProjectName, '--server', ctx.serverUrl, '--force'])
       try {
         await rm(ctx.privateProjectDir, { recursive: true, force: true })
       } catch {

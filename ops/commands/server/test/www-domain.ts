@@ -18,7 +18,7 @@ export function wwwDomainTests() {
 
       // Get project ID using CLI
       const projectInfoResult = await runCommand([
-        CLI_BIN, 'projects', 'info', ctx.currentProjectName, ctx.serverUrl,
+        CLI_BIN, 'projects', 'info', ctx.currentProjectName, '--server', ctx.serverUrl,
       ])
 
       const idMatch = projectInfoResult.stdout.match(/ID:\s+(\S+)/)

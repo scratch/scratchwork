@@ -6,7 +6,6 @@ import { setupAction } from './setup'
 import { deployAction, logsAction } from './deploy'
 import { configCheckAction, configPushAction } from './config'
 import { dbTablesAction, dbQueryAction, dbMigrateAction, dbDropAllAction } from './db'
-import { integrationTestAction } from './test/index'
 import { regenerateEnvAction } from './env'
 import { runRelease, type BumpType } from '../release'
 
@@ -108,11 +107,14 @@ export function registerServerCommands(program: Command): void {
     })
 
   // Test command - integration test against specified instance
+  // Uses dynamic import to avoid loading test files during normal ops invocations
+  // (prevents "Cannot use describe outside test runner" when TEST_INSTANCE is set)
   server
     .command('test')
     .description('Run integration test against an instance')
     .action(async () => {
       const instance = requireInstance(server.opts().instance, 'test')
+      const { integrationTestAction } = await import('./test/index')
       await integrationTestAction(instance)
     })
 

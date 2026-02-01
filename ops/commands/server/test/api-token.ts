@@ -18,7 +18,8 @@ export function apiTokenTests() {
 
       tokenName = `test-token-${Date.now()}`
       const createTokenResult = await runCommand([
-        CLI_BIN, 'tokens', 'create', tokenName, ctx.serverUrl,
+        CLI_BIN, 'tokens', 'create', tokenName,
+        '--server', ctx.serverUrl,
         '--expires', '1',  // 1 day expiry
       ])
 
@@ -35,7 +36,7 @@ export function apiTokenTests() {
 
     test('token appears in list', async () => {
       const ctx = getContext()
-      const listResult = await runCommand([CLI_BIN, 'tokens', 'ls', ctx.serverUrl])
+      const listResult = await runCommand([CLI_BIN, 'tokens', 'ls', '--server', ctx.serverUrl])
       expect(listResult.stdout.includes(tokenName)).toBe(true)
       console.log(`${green}✓${reset} Token appears in list`)
     })
@@ -72,7 +73,7 @@ export function apiTokenTests() {
       console.log(`${green}✓${reset} Deploy with SCRATCH_TOKEN env var succeeded`)
 
       // Cleanup the test project
-      await runCommand([CLI_BIN, 'projects', 'delete', envTestProjectName, ctx.serverUrl, '--force'])
+      await runCommand([CLI_BIN, 'projects', 'delete', envTestProjectName, '--server', ctx.serverUrl, '--force'])
 
       // Cleanup env test dir
       try {
@@ -85,7 +86,7 @@ export function apiTokenTests() {
     test('revoke token', async () => {
       const ctx = getContext()
       const revokeResult = await runCommand([
-        CLI_BIN, 'tokens', 'revoke', tokenName, ctx.serverUrl,
+        CLI_BIN, 'tokens', 'revoke', tokenName, '--server', ctx.serverUrl,
       ])
 
       expect(revokeResult.exitCode).toBe(0)

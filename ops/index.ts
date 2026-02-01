@@ -6,6 +6,7 @@ import { registerCliCommands } from './commands/cli'
 import { registerPrCommand } from './commands/pr'
 import { registerCommitCommand } from './commands/commit'
 import { registerWebsiteCommands } from './commands/website'
+import { registerTestCommand } from './commands/test'
 
 const program = new Command()
 
@@ -16,6 +17,7 @@ program
 
 registerServerCommands(program)
 registerCliCommands(program)
+registerTestCommand(program)
 registerPrCommand(program)
 registerCommitCommand(program)
 registerWebsiteCommands(program)

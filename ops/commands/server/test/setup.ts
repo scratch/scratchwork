@@ -54,11 +54,11 @@ export function setupTests() {
       console.log('Step 5: Logging in with CLI...')
 
       // Check if already logged in
-      const whoamiResult = await runCommand([CLI_BIN, 'whoami', ctx.serverUrl])
+      const whoamiResult = await runCommand([CLI_BIN, 'whoami', '--server', ctx.serverUrl])
       if (whoamiResult.stdout.includes('Not logged in')) {
         console.log('Not logged in. Please complete login in browser...')
         // Use 15 second timeout for test - fail fast if login flow is broken
-        const exitCode = await runCommandInherit([CLI_BIN, 'login', ctx.serverUrl, '--timeout', '0.25'])
+        const exitCode = await runCommandInherit([CLI_BIN, 'login', '--server', ctx.serverUrl, '--timeout', '0.25'])
         expect(exitCode).toBe(0)
       } else {
         console.log(`Already logged in: ${whoamiResult.stdout.trim()}`)
