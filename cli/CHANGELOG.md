@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.12] - 2026-02-01
+
+This release fixes routing issues in the `watch` command when viewing index files.
+
+### Bug Fixes
+
+- Fixed `scratch watch` to open the correct route when watching a single file (e.g., watching `about.md` now opens `/about` instead of `/`)
+- Fixed `scratch watch` to handle `index.md` files without conflicts from the template's `index.mdx`
+
 ## [0.5.11] - 2026-02-01
 
 This release adds support for publishing to naked domains and includes internal code cleanup.
