@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.14] - 2026-02-01
+
+This release fixes the global defaults feature to work correctly with the `publish` command.
+
+### Bug Fixes
+
+- Fixed `publish` command to respect global config defaults for `server_url` and `visibility` set via `scratch set-defaults`
+- Fixed server URL resolution to check global config before falling back to the default server
+- Fixed visibility prompt to use global default when no project-level visibility is configured
+
 ## [0.5.13] - 2026-02-01
 
 This release adds a new command for configuring global defaults and improves cache management.
