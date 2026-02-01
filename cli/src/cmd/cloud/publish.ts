@@ -8,6 +8,7 @@ import {
   loadProjectConfig,
   saveProjectConfig,
   loadGlobalConfig,
+  getLoggedInServers,
   // Prompts
   promptProjectName,
   promptVisibility,
@@ -38,7 +39,11 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
   // Load global config for fallback defaults
   const globalConfig = await loadGlobalConfig()
 
-  // Determine server URL priority: CLI option (via ctx) → project config → global config → prompt
+  // Determine server URL priority:
+  // 1. CLI option (--server flag)
+  // 2. Project config
+  // 3. If logged into multiple servers → prompt (with global default pre-selected)
+  // 4. Global config or prompt
   let effectiveServerUrl: string
   let serverUrlWasPrompted = false
   const ctxServerUrl = ctx.getServerUrlIfExplicit()  // Returns URL only if explicitly set via --server
@@ -49,13 +54,21 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
   } else if (config.server_url) {
     // Project config is second priority
     effectiveServerUrl = config.server_url
-  } else if (globalConfig.server_url) {
-    // Global config is third priority
-    effectiveServerUrl = globalConfig.server_url
   } else {
-    // No server_url anywhere - prompt
-    effectiveServerUrl = await promptServerUrlSelection()
-    serverUrlWasPrompted = true
+    // Check if logged into multiple servers - if so, always prompt
+    const loggedInServers = await getLoggedInServers()
+    if (loggedInServers.length >= 1) {
+      // Multiple servers - prompt with global default pre-selected
+      effectiveServerUrl = await promptServerUrlSelection()
+      serverUrlWasPrompted = true
+    } else if (globalConfig.server_url) {
+      // Single or no servers logged in - use global config
+      effectiveServerUrl = globalConfig.server_url
+    } else {
+      // No global config - prompt
+      effectiveServerUrl = await promptServerUrlSelection()
+      serverUrlWasPrompted = true
+    }
   }
 
   // Now create context with resolved server URL

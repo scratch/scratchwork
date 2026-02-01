@@ -15,6 +15,9 @@ import { loadGlobalConfig } from './global-config'
 // Server URL (User Config)
 // ============================================================================
 
+// Strip https:// for cleaner display
+const stripProtocol = (url: string) => url.replace(/^https?:\/\//, '')
+
 // Common multi-part TLDs where naked domain has 3 parts instead of 2
 const MULTI_PART_TLDS = [
   '.co.uk', '.org.uk', '.gov.uk', '.ac.uk',
@@ -96,6 +99,16 @@ export function normalizeServerUrlInput(url: string): { url: string; modified: b
   }
 
   return { url, modified }
+}
+
+/**
+ * Normalize a server URL's display value, e.g. https://app.scratch.dev -> scratch.dev
+ *
+ * @param url
+ * @returns the display value
+ */
+export function normalizeServerUrlDisplay(url: string): string {
+  return stripProtocol(url).replace(/^app./, '');
 }
 
 /**
@@ -282,9 +295,8 @@ import { getLoggedInServers } from './credentials'
  * Priority:
  * 1. If serverUrlArg is provided (from CLI argument), use it
  * 2. If logged into exactly one server, use it automatically
- * 3. If global config has server_url, use it
- * 4. If logged into multiple servers, prompt user to choose
- * 5. If not logged into any server, use default
+ * 3. If not logged in anywhere, use global config or default
+ * 4. If logged into multiple servers, prompt (with global default pre-selected if set)
  *
  * @param serverUrlArg - Optional server URL from CLI argument
  * @returns The resolved server URL
@@ -309,21 +321,15 @@ export async function resolveServerUrl(serverUrlArg?: string): Promise<string> {
 
   // Check global config for default server
   const globalConfig = await loadGlobalConfig()
-  if (globalConfig.server_url) {
-    return globalConfig.server_url
-  }
 
   if (loggedInServers.length === 0) {
-    // Not logged in anywhere and no global config - use default
-    return DEFAULT_SERVER_URL
+    // Not logged in anywhere - use global config or default
+    return globalConfig.server_url || DEFAULT_SERVER_URL
   }
 
   // Multiple servers - prompt user to choose
-  // Strip https:// for cleaner display
-  const stripProtocol = (url: string) => url.replace(/^https?:\/\//, '')
-
   const choices: SelectChoice<string>[] = loggedInServers.map(url => ({
-    name: stripProtocol(url),
+    name: normalizeServerUrlDisplay(url),
     value: url,
   }))
 
@@ -333,7 +339,12 @@ export async function resolveServerUrl(serverUrlArg?: string): Promise<string> {
     value: '__other__',
   })
 
-  const selected = await select('Select server:', choices, loggedInServers[0]!)
+  // Use global default if set and in logged-in list, otherwise first logged-in server
+  const defaultServer = globalConfig.server_url && loggedInServers.includes(globalConfig.server_url)
+    ? globalConfig.server_url
+    : loggedInServers[0]!
+
+  const selected = await select('Select server:', choices, defaultServer)
 
   if (selected === '__other__') {
     return promptServerUrl()
@@ -348,7 +359,7 @@ export async function resolveServerUrl(serverUrlArg?: string): Promise<string> {
  *
  * - If not logged in: shows global config server_url or DEFAULT_SERVER_URL as default
  * - If logged into one server: shows that server as default
- * - If logged into multiple servers: shows all servers, first one as default
+ * - If logged into multiple servers: shows all servers, global default pre-selected if in list
  * - Always includes "other..." option to enter a custom URL
  *
  * @returns The selected server URL
@@ -357,29 +368,29 @@ export async function promptServerUrlSelection(): Promise<string> {
   const loggedInServers = await getLoggedInServers()
   const globalConfig = await loadGlobalConfig()
 
-  // Strip https:// for cleaner display
-  const stripProtocol = (url: string) => url.replace(/^https?:\/\//, '')
-
   const choices: SelectChoice<string>[] = []
   let defaultValue: string
 
-  if (loggedInServers.length === 0) {
-    // Not logged in - show global config server or default server as first option
-    const serverUrl = globalConfig.server_url || DEFAULT_SERVER_URL
+  for (const url of loggedInServers) {
     choices.push({
-      name: stripProtocol(serverUrl),
-      value: serverUrl,
+      name: normalizeServerUrlDisplay(url),
+      value: url,
     })
-    defaultValue = serverUrl
+  }
+
+  const globalDefault = globalConfig.server_url ||DEFAULT_SERVER_URL;
+
+  if (!loggedInServers.includes(globalDefault)) {
+    choices.unshift({
+      name: normalizeServerUrlDisplay(globalDefault),
+      value: globalDefault
+    })
+  }
+
+  if (loggedInServers.length == 0 || loggedInServers.includes(globalDefault)) {
+    defaultValue = globalDefault;
   } else {
-    // Show logged-in servers
-    for (const url of loggedInServers) {
-      choices.push({
-        name: stripProtocol(url),
-        value: url,
-      })
-    }
-    defaultValue = loggedInServers[0]!
+    defaultValue = loggedInServers[0]!;
   }
 
   // Always add option to enter a different URL
