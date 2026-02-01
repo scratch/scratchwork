@@ -86,7 +86,6 @@ authRoutes.get('/error', (c) => {
 interface Project {
   id: string
   name: string
-  namespace: string
   owner_id: string
   visibility: string
 }
@@ -127,7 +126,7 @@ authRoutes.get('/content-access', async (c) => {
   // Look up project and verify access
   const db = createDbClient(c.env.DB)
   const [project] = (await db`
-    SELECT id, name, namespace, owner_id, visibility
+    SELECT id, name, owner_id, visibility
     FROM projects WHERE id = ${projectId}
   `) as Project[]
 

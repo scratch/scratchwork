@@ -88,12 +88,44 @@ export async function dbQueryAction(instance: string, sql: string): Promise<void
 export async function dbMigrateAction(instance: string): Promise<void> {
   console.log(`Running migrations on ${instance} D1 database...\n`)
 
+  const migrationsDir = 'server/src/db/migrations'
   const schemaPath = 'server/src/db/schema.d1.sql'
+
   if (!existsSync(schemaPath)) {
     console.error(`Error: ${schemaPath} not found`)
     process.exit(1)
   }
 
+  // Run migration files in order (if directory exists)
+  if (existsSync(migrationsDir)) {
+    const files = await Array.fromAsync(new Bun.Glob('*.sql').scan(migrationsDir))
+    const sortedFiles = files.sort()
+
+    if (sortedFiles.length > 0) {
+      console.log(`Running ${sortedFiles.length} migration file(s)...\n`)
+
+      for (const file of sortedFiles) {
+        process.stdout.write(`  ${file}... `)
+        try {
+          await runD1Query(instance, ['--file', `src/db/migrations/${file}`])
+          console.log(`${green}✓${reset}`)
+        } catch (error) {
+          // Ignore errors for already-applied migrations (e.g., column already exists)
+          const msg = error instanceof Error ? error.message : String(error)
+          if (msg.includes('duplicate column') || msg.includes('already exists')) {
+            console.log(`${green}✓${reset} (already applied)`)
+          } else {
+            console.log(`${red}✗${reset}`)
+            console.error(`    ${msg.trim()}`)
+          }
+        }
+      }
+      console.log('')
+    }
+  }
+
+  // Run the schema file to create any missing tables/indexes
+  console.log('Applying schema...')
   try {
     const result = await runD1Query(instance, ['--file', 'src/db/schema.d1.sql'])
     console.log(result)

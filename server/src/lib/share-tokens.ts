@@ -64,20 +64,20 @@ export function generateShareToken(): string {
 export async function validateShareToken(
   db: DbClient,
   token: string
-): Promise<{ projectId: string; namespace: string } | null> {
+): Promise<{ projectId: string } | null> {
   // Quick format check
   if (!token.startsWith(TOKEN_PREFIX)) {
     return null
   }
 
   const result = await db`
-    SELECT st.project_id, p.namespace
+    SELECT st.project_id
     FROM share_tokens st
     JOIN projects p ON st.project_id = p.id
     WHERE st.token = ${token}
       AND st.revoked_at IS NULL
       AND st.expires_at > datetime('now')
-  ` as { project_id: string; namespace: string }[]
+  ` as { project_id: string }[]
 
   if (result.length === 0) {
     return null
@@ -85,6 +85,5 @@ export async function validateShareToken(
 
   return {
     projectId: result[0].project_id,
-    namespace: result[0].namespace,
   }
 }

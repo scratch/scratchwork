@@ -82,14 +82,13 @@ CREATE INDEX IF NOT EXISTS idx_device_code_user ON device_code(user_code);
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    namespace TEXT NOT NULL DEFAULT 'global',
     owner_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
     live_deploy_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'public',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_namespace ON projects(name, namespace);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_owner ON projects(name, owner_id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
 
 -- Deploys
