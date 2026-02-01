@@ -7,6 +7,7 @@ import { formatBytes, openBrowser, stripTrailingSlash } from '../../util'
 import {
   loadProjectConfig,
   saveProjectConfig,
+  loadGlobalConfig,
   // Prompts
   promptProjectName,
   promptVisibility,
@@ -34,7 +35,10 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
   let config = await loadProjectConfig(resolvedPath)
   const configRelPath = '.scratch/project.toml'
 
-  // Determine server URL priority: CLI option (via ctx) → project config → always prompt
+  // Load global config for fallback defaults
+  const globalConfig = await loadGlobalConfig()
+
+  // Determine server URL priority: CLI option (via ctx) → project config → global config → prompt
   let effectiveServerUrl: string
   let serverUrlWasPrompted = false
   const ctxServerUrl = ctx.getServerUrlIfExplicit()  // Returns URL only if explicitly set via --server
@@ -45,8 +49,11 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
   } else if (config.server_url) {
     // Project config is second priority
     effectiveServerUrl = config.server_url
+  } else if (globalConfig.server_url) {
+    // Global config is third priority
+    effectiveServerUrl = globalConfig.server_url
   } else {
-    // No server_url in project config - always prompt
+    // No server_url anywhere - prompt
     effectiveServerUrl = await promptServerUrlSelection()
     serverUrlWasPrompted = true
   }
@@ -62,12 +69,12 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
 
   // Determine project name (CLI option > config > directory name)
   let projectName = options.name || config.name
-  // Visibility: CLI option > config > default to interactive prompt
-  let visibility = options.visibility || config.visibility
+  // Visibility: CLI option > project config > global config > interactive prompt
+  let visibility = options.visibility || config.visibility || globalConfig.visibility
 
   // If no valid project name from options or config, run interactive setup
   if (!projectName || !validateProjectName(projectName).valid) {
-    const result = await runInteractiveSetup(resolvedPath, credentials, config, effectiveServerUrl)
+    const result = await runInteractiveSetup(resolvedPath, credentials, config, effectiveServerUrl, globalConfig.visibility)
     projectName = result.name!  // runInteractiveSetup guarantees name is set
     config = result
   } else {
@@ -281,7 +288,8 @@ async function runInteractiveSetup(
   resolvedPath: string,
   credentials: { user: { email: string } },
   existingConfig: ProjectConfig,
-  serverUrl: string
+  serverUrl: string,
+  globalVisibility?: string
 ): Promise<ProjectConfig> {
   const dirName = path.basename(resolvedPath)
 
@@ -293,8 +301,8 @@ async function runInteractiveSetup(
   // 1. Prompt for project name
   const projectName = await promptProjectName(existingConfig.name, dirName)
 
-  // 2. Prompt for visibility
-  const visibility = await promptVisibility(credentials.user.email, existingConfig.visibility)
+  // 2. Prompt for visibility (project config > global config > prompt default)
+  const visibility = await promptVisibility(credentials.user.email, existingConfig.visibility || globalVisibility)
 
   // Save config
   log.info('')

@@ -9,6 +9,7 @@ import { prompt, select, confirm, type SelectChoice } from '../util'
 import { validateProjectName, getEmailDomain } from '@scratch/shared/project'
 import { validateGroupInput } from '@scratch/shared'
 import { DEFAULT_SERVER_URL } from './paths'
+import { loadGlobalConfig } from './global-config'
 
 // ============================================================================
 // Server URL (User Config)
@@ -281,8 +282,9 @@ import { getLoggedInServers } from './credentials'
  * Priority:
  * 1. If serverUrlArg is provided (from CLI argument), use it
  * 2. If logged into exactly one server, use it automatically
- * 3. If logged into multiple servers, prompt user to choose
- * 4. If not logged into any server, use default
+ * 3. If global config has server_url, use it
+ * 4. If logged into multiple servers, prompt user to choose
+ * 5. If not logged into any server, use default
  *
  * @param serverUrlArg - Optional server URL from CLI argument
  * @returns The resolved server URL
@@ -300,14 +302,20 @@ export async function resolveServerUrl(serverUrlArg?: string): Promise<string> {
   // Check how many servers we're logged into
   const loggedInServers = await getLoggedInServers()
 
-  if (loggedInServers.length === 0) {
-    // Not logged in anywhere - use default
-    return DEFAULT_SERVER_URL
-  }
-
   if (loggedInServers.length === 1) {
     // Logged into exactly one server - use it automatically
     return loggedInServers[0]!
+  }
+
+  // Check global config for default server
+  const globalConfig = await loadGlobalConfig()
+  if (globalConfig.server_url) {
+    return globalConfig.server_url
+  }
+
+  if (loggedInServers.length === 0) {
+    // Not logged in anywhere and no global config - use default
+    return DEFAULT_SERVER_URL
   }
 
   // Multiple servers - prompt user to choose
@@ -338,7 +346,7 @@ export async function resolveServerUrl(serverUrlArg?: string): Promise<string> {
  * Always prompt user to select a server URL.
  * Shows logged-in servers as options with smart defaults, plus option to enter a new URL.
  *
- * - If not logged in: shows DEFAULT_SERVER_URL as default
+ * - If not logged in: shows global config server_url or DEFAULT_SERVER_URL as default
  * - If logged into one server: shows that server as default
  * - If logged into multiple servers: shows all servers, first one as default
  * - Always includes "other..." option to enter a custom URL
@@ -347,6 +355,7 @@ export async function resolveServerUrl(serverUrlArg?: string): Promise<string> {
  */
 export async function promptServerUrlSelection(): Promise<string> {
   const loggedInServers = await getLoggedInServers()
+  const globalConfig = await loadGlobalConfig()
 
   // Strip https:// for cleaner display
   const stripProtocol = (url: string) => url.replace(/^https?:\/\//, '')
@@ -355,12 +364,13 @@ export async function promptServerUrlSelection(): Promise<string> {
   let defaultValue: string
 
   if (loggedInServers.length === 0) {
-    // Not logged in - show default server as first option
+    // Not logged in - show global config server or default server as first option
+    const serverUrl = globalConfig.server_url || DEFAULT_SERVER_URL
     choices.push({
-      name: stripProtocol(DEFAULT_SERVER_URL),
-      value: DEFAULT_SERVER_URL,
+      name: stripProtocol(serverUrl),
+      value: serverUrl,
     })
-    defaultValue = DEFAULT_SERVER_URL
+    defaultValue = serverUrl
   } else {
     // Show logged-in servers
     for (const url of loggedInServers) {
