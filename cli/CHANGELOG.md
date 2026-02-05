@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.16] - 2026-02-05
+
+This release prevents conflicts when running multiple dev servers and fixes a bug with project visibility on first publish.
+
+### Features
+
+- Running `scratch dev` in a project where a dev server is already running now opens the browser to the existing server instead of starting a conflicting second instance. Stale lock files from crashed processes are automatically cleaned up.
+
+### Bug Fixes
+
+- Fixed public project visibility not being applied on first publish when set via interactive setup
+
 ## [0.5.15] - 2026-02-01
 
 This release improves the server selection experience when publishing to multiple servers.
