@@ -36,7 +36,7 @@ export async function generatePackageJson(
 }
 
 /**
- * Create a new Scratch project.
+ * Create a new Scratchwork project.
  */
 export async function createCommand(
   targetPath: string,
@@ -55,9 +55,9 @@ export async function createCommand(
   if (!options.quiet) {
     if (created.length > 0) {
       if (targetPath == '.') {
-        log.info(`Created a new Scratch project:\n`);
+        log.info(`Created a new Scratchwork project:\n`);
       } else {
-        log.info(`Created a new Scratch project in ${targetPath}:\n`);
+        log.info(`Created a new Scratchwork project in ${targetPath}:\n`);
       }
       for (const line of formatFileTree(created)) {
         log.info(`  ${line}`);

@@ -16,7 +16,7 @@ export const apiRoutes = new Hono<{ Bindings: Env }>({ strict: false })
 // 1. Origin validation (defense-in-depth):
 //    - Reject requests with Origin header from untrusted domains
 //    - Same-origin requests have no Origin header, so we allow those
-//    - This protects against malicious JS on pages.scratch.dev making API calls
+//    - This protects against malicious JS on pages.scratchwork.dev making API calls
 //
 // 2. Content-Type validation:
 //    - Require application/json for mutating requests

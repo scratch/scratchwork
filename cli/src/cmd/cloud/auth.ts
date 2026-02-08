@@ -221,9 +221,9 @@ export async function loginCommand(ctxOrServerUrl: CloudContext | string, option
   log.info('  scratch tokens create my-ci-token')
   log.info('')
   log.info('Then use one of:')
-  log.info('  export SCRATCH_TOKEN=scratch_...   # CI environment variable')
-  log.info('  echo "SCRATCH_TOKEN=..." >> .env   # Project .env file')
-  log.info('  scratch tokens use scratch_...     # Store in credentials file')
+  log.info('  export SCRATCHWORK_TOKEN=scratchwork_...   # CI environment variable')
+  log.info('  echo "SCRATCHWORK_TOKEN=..." >> .env       # Project .env file')
+  log.info('  scratch tokens use scratchwork_...         # Store in credentials file')
 
   if (typeof ctxOrServerUrl !== 'string') {
     ctxOrServerUrl.clearCache()

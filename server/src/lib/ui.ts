@@ -62,7 +62,7 @@ export function renderHomePage(user: { email: string; name?: string | null } | n
 </div>`
   }
 
-  return baseHtml('Scratch', content)
+  return baseHtml('Scratchwork', content)
 }
 
 export function renderErrorPage(message: string): string {
@@ -76,7 +76,7 @@ export function renderErrorPage(message: string): string {
   <a href="/" class="text-link">Go home</a>
 </div>`
 
-  return baseHtml('Error - Scratch', content)
+  return baseHtml('Error - Scratchwork', content)
 }
 
 export function renderDevicePage(code: string, userEmail: string, state?: string): string {
@@ -109,7 +109,7 @@ export function renderDevicePage(code: string, userEmail: string, state?: string
   </div>
 </div>`
 
-  return baseHtml('Authorize Device - Scratch', content)
+  return baseHtml('Authorize Device - Scratchwork', content)
 }
 
 export function renderDeviceErrorPage(message: string): string {
@@ -123,7 +123,7 @@ export function renderDeviceErrorPage(message: string): string {
   <a href="/" class="text-link">Go home</a>
 </div>`
 
-  return baseHtml('Error - Scratch', content)
+  return baseHtml('Error - Scratchwork', content)
 }
 
 export function renderDeviceSuccessPage(approved: boolean): string {
@@ -141,6 +141,6 @@ export function renderDeviceSuccessPage(approved: boolean): string {
   </div>
 </div>`
 
-  return baseHtml('Device Authorization - Scratch', content)
+  return baseHtml('Device Authorization - Scratchwork', content)
 }
 

@@ -11,7 +11,7 @@ scratch is a CLI tool for building static MDX-based websites using Bun. Users cr
 Commands are organized into four groups:
 
 **Local Commands:**
-- `create [path]` - Create a new Scratch project
+- `create [path]` - Create a new Scratchwork project
 - `build [path]` - Build the static site
 - `dev [path]` - Development server with hot reload
 - `preview [path]` - Preview the built site
@@ -21,7 +21,7 @@ Commands are organized into four groups:
 - `eject [file]` - Eject file/directory from built-in templates for customization
   - `-l, --list` - List available template files
   - `-f, --force` - Overwrite existing files without confirmation
-- `config [path]` - Configure local project settings (.scratch/project.toml)
+- `config [path]` - Configure local project settings (.scratchwork/project.toml)
 
 **Server Commands:**
 - `login [server-url]` - Log in via OAuth device flow
@@ -35,7 +35,7 @@ Commands are organized into four groups:
   - `--visibility <visibility>` - Override visibility
   - `--no-build` - Skip build step
   - `--dry-run` - Show what would be deployed without uploading
-  - If `.scratch/project.toml` doesn't exist, runs config flow first
+  - If `.scratchwork/project.toml` doesn't exist, runs config flow first
 - `projects ls [server-url]` - List all user's projects
 - `projects info [name] [server-url]` - Show project details
 - `projects rm [name] [server-url]` - Delete project (requires confirmation)
@@ -137,9 +137,9 @@ Templates are embedded directly into the compiled executable for portability.
 - `hasTemplate(templatePath)` - Check if template exists
 - `listTemplateFiles()` - List all template files
 
-**Fallback resolution**: During build, if a required file is missing from the user's project, the embedded template is materialized to `.scratch/cache/embedded-templates/` and used instead.
+**Fallback resolution**: During build, if a required file is missing from the user's project, the embedded template is materialized to `.scratchwork/cache/embedded-templates/` and used instead.
 
-### Build Cache (`.scratch/cache/`)
+### Build Cache (`.scratchwork/cache/`)
 - `client-src/` - Generated TSX entry files
 - `client-compiled/` - Bun.build() output
 - `server-src/` - SSG JSX entries

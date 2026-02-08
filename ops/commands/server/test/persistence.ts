@@ -16,7 +16,7 @@ export function persistenceTests() {
       const ctx = getContext()
       console.log('Step 9: Testing project ID persistence...')
 
-      const projectTomlPath = join(ctx.projectDir, '.scratch', 'project.toml')
+      const projectTomlPath = join(ctx.projectDir, '.scratchwork', 'project.toml')
       projectTomlContent = await readFile(projectTomlPath, 'utf-8')
 
       const projectIdMatch = projectTomlContent.match(/^id\s*=\s*"([^"]+)"/m)
@@ -33,7 +33,7 @@ export function persistenceTests() {
       console.log(`Renaming project from "${ctx.projectName}" to "${newProjectName}"...`)
 
       // Update the name in project.toml (keep the ID)
-      const projectTomlPath = join(ctx.projectDir, '.scratch', 'project.toml')
+      const projectTomlPath = join(ctx.projectDir, '.scratchwork', 'project.toml')
       const updatedTomlContent = projectTomlContent.replace(
         /^name\s*=\s*"[^"]+"/m,
         `name = "${newProjectName}"`
@@ -78,7 +78,7 @@ export function persistenceTests() {
       const ctx = getContext()
       console.log('Testing invalid project ID handling...')
 
-      const projectTomlPath = join(ctx.projectDir, '.scratch', 'project.toml')
+      const projectTomlPath = join(ctx.projectDir, '.scratchwork', 'project.toml')
       const invalidIdTomlContent = projectTomlContent.replace(
         /^id\s*=\s*"[^"]+"/m,
         `id = "invalid-project-id-12345"`

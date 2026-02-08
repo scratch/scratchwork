@@ -65,7 +65,7 @@ export function setupTests() {
       }
 
       // Read credentials for later use
-      const credentialsPath = join(process.env.HOME || '~', '.scratch', 'credentials.json')
+      const credentialsPath = join(process.env.HOME || '~', '.scratchwork', 'credentials.json')
       try {
         const credentials = JSON.parse(await readFile(credentialsPath, 'utf-8'))
         for (const [server, creds] of Object.entries(credentials)) {

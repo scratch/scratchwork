@@ -46,7 +46,7 @@ export class BuildContext {
   constructor(opts: BuildContextInitOptions) {
     this.options = opts;
     this.rootDir = path.resolve(opts.path || '.');
-    this.tempDir = path.resolve(this.rootDir, opts.tempDir || '.scratch/cache');
+    this.tempDir = path.resolve(this.rootDir, opts.tempDir || '.scratchwork/cache');
 
     // Root output directory (always dist/ or custom --out-dir)
     this.outDir = path.resolve(this.rootDir, opts.outDir || 'dist');

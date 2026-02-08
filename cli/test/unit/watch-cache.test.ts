@@ -18,13 +18,13 @@ describe("watch cache", () => {
   });
 
   describe("CACHE_DIR", () => {
-    test("is under ~/.scratch/cache/", () => {
+    test("is under ~/.scratchwork/cache/", () => {
       const homeDir = os.homedir();
-      expect(CACHE_DIR).toBe(path.join(homeDir, ".scratch", "cache"));
+      expect(CACHE_DIR).toBe(path.join(homeDir, ".scratchwork", "cache"));
     });
 
-    test("ends with /cache to isolate from other .scratch files", () => {
-      expect(CACHE_DIR.endsWith(path.join(".scratch", "cache"))).toBe(true);
+    test("ends with /cache to isolate from other .scratchwork files", () => {
+      expect(CACHE_DIR.endsWith(path.join(".scratchwork", "cache"))).toBe(true);
     });
   });
 

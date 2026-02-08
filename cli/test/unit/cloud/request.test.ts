@@ -36,20 +36,20 @@ describe("Request Header Construction", () => {
 
   describe("API Key", () => {
     test("includes X-Api-Key header when apiKey provided", () => {
-      const apiKey = "scratch_test_key_12345"
+      const apiKey = "scratchwork_test_key_12345"
       const headers: Record<string, string> = {}
 
       if (apiKey) {
         headers["X-Api-Key"] = apiKey
       }
 
-      expect(headers["X-Api-Key"]).toBe("scratch_test_key_12345")
+      expect(headers["X-Api-Key"]).toBe("scratchwork_test_key_12345")
     })
 
     test("apiKey takes priority over environment token", () => {
       // When both apiKey and env token are present, apiKey should win
-      const apiKey = "scratch_explicit_key"
-      const envToken = "scratch_env_key"
+      const apiKey = "scratchwork_explicit_key"
+      const envToken = "scratchwork_env_key"
       const headers: Record<string, string> = {}
 
       // Simulating buildHeaders priority logic
@@ -59,7 +59,7 @@ describe("Request Header Construction", () => {
         headers["X-Api-Key"] = envToken
       }
 
-      expect(headers["X-Api-Key"]).toBe("scratch_explicit_key")
+      expect(headers["X-Api-Key"]).toBe("scratchwork_explicit_key")
     })
 
     test("omits X-Api-Key header when no apiKey", () => {

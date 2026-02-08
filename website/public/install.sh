@@ -1,10 +1,10 @@
 #!/bin/bash
 set -eu
 
-# Scratch Installation Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/scratch/scratch/main/install.sh | sh
+# Scratchwork Installation Script
+# Usage: curl -fsSL https://raw.githubusercontent.com/scratchwork/scratchwork/main/install.sh | sh
 
-REPO="scratch/scratch"
+REPO="scratchwork/scratchwork"
 INSTALL_DIR="$HOME/.local/bin"
 BINARY_NAME="scratch"
 
@@ -135,7 +135,7 @@ add_to_path() {
     echo "fish_add_path $INSTALL_DIR" >> "$shell_profile"
   else
     echo "" >> "$shell_profile"
-    echo "# Scratch" >> "$shell_profile"
+    echo "# Scratchwork" >> "$shell_profile"
     echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$shell_profile"
   fi
 
@@ -143,7 +143,7 @@ add_to_path() {
 }
 
 main() {
-  info "Installing Scratch..."
+  info "Installing Scratchwork..."
 
   # Detect platform
   local os=$(detect_os)
@@ -199,7 +199,7 @@ main() {
   # Add to PATH
   add_to_path
 
-  info "Scratch installed successfully!"
+  info "Scratchwork installed successfully!"
   echo ""
   echo "  Location: $INSTALL_DIR/$BINARY_NAME"
   echo "  Version:  $version"

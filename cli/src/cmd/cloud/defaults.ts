@@ -18,7 +18,7 @@ import {
   PATHS,
   type GlobalConfig,
 } from '../../config'
-import { validateGroupInput } from '@scratch/shared'
+import { validateGroupInput } from '@scratchwork/shared'
 import { select, type SelectChoice } from '../../util'
 
 interface DefaultsOptions {

@@ -1,6 +1,6 @@
 # Ops CLI Skill
 
-The ops CLI (`bun ops`) manages server deployments, database operations, and CLI builds for the Scratch monorepo.
+The ops CLI (`bun ops`) manages server deployments, database operations, and CLI builds for the Scratchwork monorepo.
 
 ## Command Structure
 
@@ -81,7 +81,7 @@ Each instance has configuration files in `server/`:
 - `server/.${instance}.vars` - Environment variables (e.g., `.prod.vars`, `.staging.vars`)
 - `server/wrangler.${instance}.toml` - Generated wrangler config
 
-Resource naming convention: `${instance}-scratch-server`, `${instance}-scratch-db`, `${instance}-scratch-files`
+Resource naming convention: `${instance}-scratchwork-server`, `${instance}-scratchwork-db`, `${instance}-scratchwork-files`
 
 ## Deploy vs Config Push
 

@@ -39,7 +39,7 @@ describe('createSessionForUser', () => {
     await createSessionForUser(mockDb, 'user-123')
 
     // User agent is the 5th value (sessionId, userId, token, expiresAt, userAgent)
-    expect(insertedValues[4]).toBe('scratch-cli')
+    expect(insertedValues[4]).toBe('scratchwork-cli')
   })
 
   test('uses provided user agent when given', async () => {
@@ -51,8 +51,8 @@ describe('createSessionForUser', () => {
   test('uses null when user agent is explicitly null', async () => {
     await createSessionForUser(mockDb, 'user-123', null)
 
-    // null should be passed through but our helper defaults to 'scratch-cli' for null
-    expect(insertedValues[4]).toBe('scratch-cli')
+    // null should be passed through but our helper defaults to 'scratchwork-cli' for null
+    expect(insertedValues[4]).toBe('scratchwork-cli')
   })
 
   test('sets expiration to approximately 30 days in the future', async () => {

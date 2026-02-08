@@ -6,14 +6,14 @@ import { escapeTomlString } from './toml'
 import type { GlobalConfig } from './types'
 
 const GLOBAL_CONFIG_HEADER = [
-  '# Scratch Global Configuration',
+  '# Scratchwork Global Configuration',
   '#',
   '# Default settings that apply to all projects.',
   '# Run `scratch set-defaults` to update these settings interactively.',
 ]
 
 /**
- * Load global config from ~/.config/scratch/config.toml
+ * Load global config from ~/.config/scratchwork/config.toml
  * Returns empty object if file doesn't exist
  */
 export async function loadGlobalConfig(): Promise<GlobalConfig> {
@@ -37,7 +37,7 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
 }
 
 /**
- * Save global config to ~/.config/scratch/config.toml
+ * Save global config to ~/.config/scratchwork/config.toml
  */
 export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
   // Ensure config directory exists

@@ -83,8 +83,8 @@ describe("Multi-server credentials storage", () => {
     originalHome = process.env.HOME || os.homedir();
     process.env.HOME = tempDir;
 
-    // Create .scratch directory
-    await fs.mkdir(path.join(tempDir, ".scratch"), { recursive: true });
+    // Create .scratchwork directory
+    await fs.mkdir(path.join(tempDir, ".scratchwork"), { recursive: true });
   });
 
   afterAll(async () => {
@@ -94,10 +94,10 @@ describe("Multi-server credentials storage", () => {
 
   test("credentials file supports multiple servers", async () => {
     // Simulate the multi-server credentials format
-    const credentialsPath = path.join(tempDir, ".scratch", "credentials.json");
+    const credentialsPath = path.join(tempDir, ".scratchwork", "credentials.json");
 
     const multiServerCredentials = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "prod-token-123",
         user: {
           id: "user-1",
@@ -105,7 +105,7 @@ describe("Multi-server credentials storage", () => {
           name: "Production User",
         },
       },
-      "https://staging.scratch.dev": {
+      "https://staging.scratchwork.dev": {
         token: "staging-token-456",
         user: {
           id: "user-2",
@@ -121,22 +121,22 @@ describe("Multi-server credentials storage", () => {
     const content = await fs.readFile(credentialsPath, "utf-8");
     const parsed = JSON.parse(content);
 
-    expect(parsed["https://app.scratch.dev"]).toBeDefined();
-    expect(parsed["https://staging.scratch.dev"]).toBeDefined();
-    expect(parsed["https://app.scratch.dev"].token).toBe("prod-token-123");
-    expect(parsed["https://staging.scratch.dev"].token).toBe("staging-token-456");
+    expect(parsed["https://app.scratchwork.dev"]).toBeDefined();
+    expect(parsed["https://staging.scratchwork.dev"]).toBeDefined();
+    expect(parsed["https://app.scratchwork.dev"].token).toBe("prod-token-123");
+    expect(parsed["https://staging.scratchwork.dev"].token).toBe("staging-token-456");
   });
 
   test("cf-access credentials file supports multiple servers", async () => {
     // Simulate the multi-server CF Access credentials format
-    const cfAccessPath = path.join(tempDir, ".scratch", "cf-access.json");
+    const cfAccessPath = path.join(tempDir, ".scratchwork", "cf-access.json");
 
     const multiServerCfAccess = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         client_id: "prod-client-id",
         client_secret: "prod-client-secret",
       },
-      "https://staging.scratch.dev": {
+      "https://staging.scratchwork.dev": {
         client_id: "staging-client-id",
         client_secret: "staging-client-secret",
       },
@@ -148,18 +148,18 @@ describe("Multi-server credentials storage", () => {
     const content = await fs.readFile(cfAccessPath, "utf-8");
     const parsed = JSON.parse(content);
 
-    expect(parsed["https://app.scratch.dev"]).toBeDefined();
-    expect(parsed["https://staging.scratch.dev"]).toBeDefined();
-    expect(parsed["https://app.scratch.dev"].client_id).toBe("prod-client-id");
-    expect(parsed["https://staging.scratch.dev"].client_id).toBe("staging-client-id");
+    expect(parsed["https://app.scratchwork.dev"]).toBeDefined();
+    expect(parsed["https://staging.scratchwork.dev"]).toBeDefined();
+    expect(parsed["https://app.scratchwork.dev"].client_id).toBe("prod-client-id");
+    expect(parsed["https://staging.scratchwork.dev"].client_id).toBe("staging-client-id");
   });
 
   test("credentials are keyed by normalized server URL", async () => {
     // Test that URLs are normalized (lowercase, no trailing slash)
     const normalized = (url: string) => url.replace(/\/+$/, "").toLowerCase();
 
-    expect(normalized("https://APP.SCRATCH.DEV/")).toBe("https://app.scratch.dev");
-    expect(normalized("https://staging.scratch.dev/")).toBe("https://staging.scratch.dev");
+    expect(normalized("https://APP.SCRATCHWORK.DEV/")).toBe("https://app.scratchwork.dev");
+    expect(normalized("https://staging.scratchwork.dev/")).toBe("https://staging.scratchwork.dev");
     expect(normalized("http://LOCALHOST:8788/")).toBe("http://localhost:8788");
   });
 });
@@ -169,8 +169,8 @@ describe("Server URL normalization", () => {
   const { normalizeServerUrl } = require("../../src/cmd/cloud/context");
 
   test("adds https:// if no protocol specified", () => {
-    const result = normalizeServerUrl("app.scratch.dev");
-    expect(result.url).toBe("https://app.scratch.dev");
+    const result = normalizeServerUrl("app.scratchwork.dev");
+    expect(result.url).toBe("https://app.scratchwork.dev");
     expect(result.modified).toBe(false); // Only modified if app. was added
   });
 
@@ -187,14 +187,14 @@ describe("Server URL normalization", () => {
   });
 
   test("adds app. subdomain to naked domains with https", () => {
-    const result = normalizeServerUrl("https://scratch.dev");
-    expect(result.url).toBe("https://app.scratch.dev");
+    const result = normalizeServerUrl("https://scratchwork.dev");
+    expect(result.url).toBe("https://app.scratchwork.dev");
     expect(result.modified).toBe(true);
   });
 
   test("does not modify URLs with existing subdomain", () => {
-    const result = normalizeServerUrl("staging.scratch.dev");
-    expect(result.url).toBe("https://staging.scratch.dev");
+    const result = normalizeServerUrl("staging.scratchwork.dev");
+    expect(result.url).toBe("https://staging.scratchwork.dev");
     expect(result.modified).toBe(false);
   });
 
@@ -205,8 +205,8 @@ describe("Server URL normalization", () => {
   });
 
   test("does not modify app. subdomain URLs", () => {
-    const result = normalizeServerUrl("app.scratch.dev");
-    expect(result.url).toBe("https://app.scratch.dev");
+    const result = normalizeServerUrl("app.scratchwork.dev");
+    expect(result.url).toBe("https://app.scratchwork.dev");
     expect(result.modified).toBe(false);
   });
 
@@ -240,7 +240,7 @@ describe("Server URL configuration precedence", () => {
 
     // Create config directories
     await fs.mkdir(path.join(tempDir, ".config", "scratch"), { recursive: true });
-    await fs.mkdir(path.join(tempDir, ".scratch"), { recursive: true });
+    await fs.mkdir(path.join(tempDir, ".scratchwork"), { recursive: true });
   });
 
   afterAll(async () => {
@@ -251,33 +251,33 @@ describe("Server URL configuration precedence", () => {
   test("global config stores server_url", async () => {
     const configPath = path.join(tempDir, ".config", "scratch", "config.toml");
 
-    const configContent = `# Scratch Cloud Global Configuration
-server_url = "https://custom.scratch.dev"
+    const configContent = `# Scratchwork Cloud Global Configuration
+server_url = "https://custom.scratchwork.dev"
 namespace = "acme.com"
 `;
 
     await fs.writeFile(configPath, configContent);
 
     const content = await fs.readFile(configPath, "utf-8");
-    expect(content).toContain('server_url = "https://custom.scratch.dev"');
+    expect(content).toContain('server_url = "https://custom.scratchwork.dev"');
   });
 
   test("project config can override server_url", async () => {
     const projectDir = path.join(tempDir, "test-project");
-    const configPath = path.join(projectDir, ".scratch", "project.toml");
+    const configPath = path.join(projectDir, ".scratchwork", "project.toml");
 
-    await fs.mkdir(path.join(projectDir, ".scratch"), { recursive: true });
+    await fs.mkdir(path.join(projectDir, ".scratchwork"), { recursive: true });
 
-    const configContent = `# Scratch Cloud Project Configuration
+    const configContent = `# Scratchwork Cloud Project Configuration
 name = "test-project"
 namespace = "acme.com"
-server_url = "https://project-specific.scratch.dev"
+server_url = "https://project-specific.scratchwork.dev"
 `;
 
     await fs.writeFile(configPath, configContent);
 
     const content = await fs.readFile(configPath, "utf-8");
-    expect(content).toContain('server_url = "https://project-specific.scratch.dev"');
+    expect(content).toContain('server_url = "https://project-specific.scratchwork.dev"');
   });
 
   test("documents precedence: CLI flag > project config > global config", () => {
@@ -291,32 +291,32 @@ server_url = "https://project-specific.scratch.dev"
       return cliFlag || projectConfig || globalConfig || defaultUrl;
     }
 
-    const defaultUrl = "https://app.scratch.dev";
+    const defaultUrl = "https://app.scratchwork.dev";
 
     // CLI flag takes highest precedence
     expect(
       getEffectiveServerUrl(
-        "https://cli.scratch.dev",
-        "https://project.scratch.dev",
-        "https://global.scratch.dev",
+        "https://cli.scratchwork.dev",
+        "https://project.scratchwork.dev",
+        "https://global.scratchwork.dev",
         defaultUrl
       )
-    ).toBe("https://cli.scratch.dev");
+    ).toBe("https://cli.scratchwork.dev");
 
     // Project config next
     expect(
       getEffectiveServerUrl(
         undefined,
-        "https://project.scratch.dev",
-        "https://global.scratch.dev",
+        "https://project.scratchwork.dev",
+        "https://global.scratchwork.dev",
         defaultUrl
       )
-    ).toBe("https://project.scratch.dev");
+    ).toBe("https://project.scratchwork.dev");
 
     // Global config next
     expect(
-      getEffectiveServerUrl(undefined, undefined, "https://global.scratch.dev", defaultUrl)
-    ).toBe("https://global.scratch.dev");
+      getEffectiveServerUrl(undefined, undefined, "https://global.scratchwork.dev", defaultUrl)
+    ).toBe("https://global.scratchwork.dev");
 
     // Default as fallback
     expect(getEffectiveServerUrl(undefined, undefined, undefined, defaultUrl)).toBe(defaultUrl);

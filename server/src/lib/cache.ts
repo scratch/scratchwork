@@ -3,7 +3,7 @@
 import type { Env } from '../env'
 import type { AuthResult } from './api-helpers'
 import { getContentBaseUrl } from './domains'
-import { getEmailLocalPart, isSingleDomainAllowedUsers } from '@scratch/shared/project'
+import { getEmailLocalPart, isSingleDomainAllowedUsers } from '@scratchwork/shared/project'
 
 /**
  * Options for building cache base URLs.

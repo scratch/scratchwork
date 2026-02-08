@@ -11,7 +11,7 @@ const scratchPath = path.resolve(import.meta.dir, "../../../dist/scratch");
 /**
  * Tests for the `scratch set-defaults` command.
  *
- * This command configures global set-defaults stored in ~/.config/scratch/config.toml:
+ * This command configures global set-defaults stored in ~/.config/scratchwork/config.toml:
  * - server_url: Default server for all projects
  * - visibility: Default visibility for new projects
  */
@@ -28,7 +28,7 @@ describe("scratch set-defaults command", () => {
     process.env.HOME = tempDir;
 
     // Set up config directory path
-    configDir = path.join(tempDir, ".config", "scratch");
+    configDir = path.join(tempDir, ".config", "scratchwork");
     configPath = path.join(configDir, "config.toml");
   });
 
@@ -76,25 +76,25 @@ describe("scratch set-defaults command", () => {
     test("creates config file with both values", async () => {
       const result = runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "private",
       ]);
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain("Global defaults saved");
-      expect(result.stdout).toContain("server:     https://app.scratch.dev");
+      expect(result.stdout).toContain("server:     https://app.scratchwork.dev");
       expect(result.stdout).toContain("visibility: private");
 
       // Verify file was created
       const content = await fs.readFile(configPath, "utf-8");
-      expect(content).toContain('server_url = "https://app.scratch.dev"');
+      expect(content).toContain('server_url = "https://app.scratchwork.dev"');
       expect(content).toContain('visibility = "private"');
     });
 
     test("accepts public visibility", async () => {
       const result = runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "public",
       ]);
 
@@ -106,7 +106,7 @@ describe("scratch set-defaults command", () => {
     test("accepts domain visibility", async () => {
       const result = runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "@acme.com",
       ]);
 
@@ -118,7 +118,7 @@ describe("scratch set-defaults command", () => {
     test("accepts email visibility", async () => {
       const result = runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "alice@example.com",
       ]);
 
@@ -130,7 +130,7 @@ describe("scratch set-defaults command", () => {
     test("accepts comma-separated visibility list", async () => {
       const result = runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "alice@example.com,@partner.com",
       ]);
 
@@ -142,14 +142,14 @@ describe("scratch set-defaults command", () => {
     test("normalizes naked domain to app subdomain", async () => {
       const result = runCli([
         "set-defaults",
-        "--server", "https://scratch.dev",
+        "--server", "https://scratchwork.dev",
         "--visibility", "private",
       ]);
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("Using https://app.scratch.dev");
+      expect(result.stdout).toContain("Using https://app.scratchwork.dev");
       const content = await fs.readFile(configPath, "utf-8");
-      expect(content).toContain('server_url = "https://app.scratch.dev"');
+      expect(content).toContain('server_url = "https://app.scratchwork.dev"');
     });
 
     test("accepts localhost URLs", async () => {
@@ -169,7 +169,7 @@ describe("scratch set-defaults command", () => {
     test("rejects invalid visibility", () => {
       const result = runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "invalid",
       ]);
 
@@ -204,12 +204,12 @@ describe("scratch set-defaults command", () => {
     test("includes header comments", async () => {
       runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "private",
       ]);
 
       const content = await fs.readFile(configPath, "utf-8");
-      expect(content).toContain("# Scratch Global Configuration");
+      expect(content).toContain("# Scratchwork Global Configuration");
       expect(content).toContain("# Default settings that apply to all projects");
       expect(content).toContain("# Run `scratch set-defaults` to update");
     });
@@ -217,7 +217,7 @@ describe("scratch set-defaults command", () => {
     test("includes field comments", async () => {
       runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "private",
       ]);
 
@@ -233,7 +233,7 @@ describe("scratch set-defaults command", () => {
 
       runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "private",
       ]);
 
@@ -244,19 +244,19 @@ describe("scratch set-defaults command", () => {
     test("overwrites existing config", async () => {
       // Create initial config
       await fs.mkdir(configDir, { recursive: true });
-      await fs.writeFile(configPath, 'server_url = "https://old.scratch.dev"\nvisibility = "public"\n');
+      await fs.writeFile(configPath, 'server_url = "https://old.scratchwork.dev"\nvisibility = "public"\n');
 
       // Update with new values
       runCli([
         "set-defaults",
-        "--server", "https://new.scratch.dev",
+        "--server", "https://new.scratchwork.dev",
         "--visibility", "private",
       ]);
 
       const content = await fs.readFile(configPath, "utf-8");
-      expect(content).toContain('server_url = "https://new.scratch.dev"');
+      expect(content).toContain('server_url = "https://new.scratchwork.dev"');
       expect(content).toContain('visibility = "private"');
-      expect(content).not.toContain("old.scratch.dev");
+      expect(content).not.toContain("old.scratchwork.dev");
       expect(content).not.toContain('"public"');
     });
   });
@@ -266,7 +266,7 @@ describe("scratch set-defaults command", () => {
       // Email addresses with special chars that need escaping
       const result = runCli([
         "set-defaults",
-        "--server", "https://app.scratch.dev",
+        "--server", "https://app.scratchwork.dev",
         "--visibility", "user+tag@example.com",
       ]);
 
@@ -289,7 +289,7 @@ describe("global config module (via CLI)", () => {
     tempDir = await mkTempDir("global-config-test-");
     originalHome = process.env.HOME || os.homedir();
     process.env.HOME = tempDir;
-    configPath = path.join(tempDir, ".config", "scratch", "config.toml");
+    configPath = path.join(tempDir, ".config", "scratchwork", "config.toml");
   });
 
   afterEach(async () => {
@@ -319,7 +319,7 @@ describe("global config module (via CLI)", () => {
     // Run set-defaults command
     const result = runCli([
       "set-defaults",
-      "--server", "https://app.scratch.dev",
+      "--server", "https://app.scratchwork.dev",
       "--visibility", "private",
     ]);
 
@@ -331,7 +331,7 @@ describe("global config module (via CLI)", () => {
 
     // Verify content
     const content = await fs.readFile(configPath, "utf-8");
-    expect(content).toContain('server_url = "https://app.scratch.dev"');
+    expect(content).toContain('server_url = "https://app.scratchwork.dev"');
     expect(content).toContain('visibility = "private"');
   });
 
@@ -339,7 +339,7 @@ describe("global config module (via CLI)", () => {
     // Run set-defaults with both fields
     runCli([
       "set-defaults",
-      "--server", "https://app.scratch.dev",
+      "--server", "https://app.scratchwork.dev",
       "--visibility", "public",
     ]);
 
@@ -353,23 +353,23 @@ describe("global config module (via CLI)", () => {
     // Create initial config
     runCli([
       "set-defaults",
-      "--server", "https://old.scratch.dev",
+      "--server", "https://old.scratchwork.dev",
       "--visibility", "private",
     ]);
 
     // Update values
     runCli([
       "set-defaults",
-      "--server", "https://new.scratch.dev",
+      "--server", "https://new.scratchwork.dev",
       "--visibility", "public",
     ]);
 
     // Verify updated content
     const content = await fs.readFile(configPath, "utf-8");
-    expect(content).toContain('server_url = "https://new.scratch.dev"');
+    expect(content).toContain('server_url = "https://new.scratchwork.dev"');
     expect(content).toContain('visibility = "public"');
     // Should still have header
-    expect(content).toContain("# Scratch Global Configuration");
+    expect(content).toContain("# Scratchwork Global Configuration");
   });
 });
 
@@ -386,37 +386,37 @@ describe("config precedence with global set-defaults", () => {
       return cliFlag || projectConfig || globalConfig || defaultValue;
     }
 
-    const defaultUrl = "https://app.scratch.dev";
+    const defaultUrl = "https://app.scratchwork.dev";
 
     // CLI flag takes highest precedence
     expect(
       getEffectiveValue(
-        "https://cli.scratch.dev",
-        "https://project.scratch.dev",
-        "https://global.scratch.dev",
+        "https://cli.scratchwork.dev",
+        "https://project.scratchwork.dev",
+        "https://global.scratchwork.dev",
         defaultUrl
       )
-    ).toBe("https://cli.scratch.dev");
+    ).toBe("https://cli.scratchwork.dev");
 
     // Project config next
     expect(
       getEffectiveValue(
         undefined,
-        "https://project.scratch.dev",
-        "https://global.scratch.dev",
+        "https://project.scratchwork.dev",
+        "https://global.scratchwork.dev",
         defaultUrl
       )
-    ).toBe("https://project.scratch.dev");
+    ).toBe("https://project.scratchwork.dev");
 
     // Global config next
     expect(
       getEffectiveValue(
         undefined,
         undefined,
-        "https://global.scratch.dev",
+        "https://global.scratchwork.dev",
         defaultUrl
       )
-    ).toBe("https://global.scratch.dev");
+    ).toBe("https://global.scratchwork.dev");
 
     // Default as fallback
     expect(

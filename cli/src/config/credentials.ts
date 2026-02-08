@@ -11,7 +11,7 @@ export function normalizeServerUrl(url: string): string {
 }
 
 /**
- * Load all credentials from ~/.scratch/credentials.json
+ * Load all credentials from ~/.scratchwork/credentials.json
  * Returns empty object if file doesn't exist or is invalid
  */
 async function loadCredentialsFile(): Promise<CredentialsFile> {
@@ -19,7 +19,7 @@ async function loadCredentialsFile(): Promise<CredentialsFile> {
 }
 
 /**
- * Save all credentials to ~/.scratch/credentials.json
+ * Save all credentials to ~/.scratchwork/credentials.json
  * Permissions: 0o600 (owner read/write only)
  */
 async function saveCredentialsFile(credentials: CredentialsFile): Promise<void> {
@@ -41,7 +41,7 @@ function isValidCredentialEntry(entry: unknown): entry is CredentialEntry {
 }
 
 /**
- * Save auth credentials for a specific server to ~/.scratch/credentials.json
+ * Save auth credentials for a specific server to ~/.scratchwork/credentials.json
  * Merges with existing credentials for other servers.
  */
 export async function saveCredentials(entry: CredentialEntry, serverUrl: string): Promise<void> {
@@ -52,7 +52,7 @@ export async function saveCredentials(entry: CredentialEntry, serverUrl: string)
 }
 
 /**
- * Load auth credentials for a specific server from ~/.scratch/credentials.json
+ * Load auth credentials for a specific server from ~/.scratchwork/credentials.json
  * Returns null if no credentials exist for that server
  */
 export async function loadCredentials(serverUrl: string): Promise<Credentials | null> {

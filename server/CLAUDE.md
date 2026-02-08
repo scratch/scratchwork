@@ -1,6 +1,6 @@
 # Server Agent Notes
 
-Cloudflare Worker serving the Scratch API and content delivery.
+Cloudflare Worker serving the Scratchwork API and content delivery.
 
 ## Security Model
 

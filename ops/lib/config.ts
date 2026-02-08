@@ -232,9 +232,9 @@ export const CONFIG_ONLY_VARS = [
 // Get resource names derived from instance
 export function getInstanceResourceNames(instance: string) {
   return {
-    workerName: `${instance}-scratch-server`,
-    bucketName: `${instance}-scratch-files`,
-    dbName: `${instance}-scratch-db`,
+    workerName: `${instance}-scratchwork-server`,
+    bucketName: `${instance}-scratchwork-files`,
+    dbName: `${instance}-scratchwork-db`,
   }
 }
 

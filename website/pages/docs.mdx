@@ -1,38 +1,38 @@
 ---
 # Basic metadata
-title: "Scratch - Documentation"
-description: "Complete documentation for Scratch - the zero-config MDX static site builder"
+title: "Scratchwork - Documentation"
+description: "Complete documentation for Scratchwork - the zero-config MDX static site builder"
 keywords: ["MDX", "static site", "React", "Bun", "markdown", "documentation"]
 author: "Pete Koomen"
 robots: "index, follow"
 lang: "en"
-canonical: "https://scratch.dev/docs/"
+canonical: "https://scratchwork.dev/docs/"
 
 # Open Graph (social sharing)
-image: "https://scratch.dev/scratch-social.png"
-url: "https://scratch.dev/docs/"
+image: "https://scratchwork.dev/scratchwork-social.png"
+url: "https://scratchwork.dev/docs/"
 type: "website"
-siteName: "Scratch"
+siteName: "Scratchwork"
 locale: "en_US"
-siteUrl: "https://scratch.dev"
+siteUrl: "https://scratchwork.dev"
 ---
 
 # Documentation
 
 <DocsSidebar />
 
-Scratch is two executable programs that can be used together to create and publish static websites with Markdown and React:
+Scratchwork is two executable programs that can be used together to create and publish static websites with Markdown and React:
 
-The [Scratch CLI](#scratch-cli) is a command line utility for scaffolding, building, and publishing [Scratch projects](#scratch-projects) as static websites.
+The [Scratchwork CLI](#scratch-cli) is a command line utility for scaffolding, building, and publishing [Scratchwork projects](#scratch-projects) as static websites.
 
-The [Scratch server](#scratch-server) is a server for serving static websites built with the Scratch CLI. There's a public server hosted on [scratch.dev](https://scratch.dev) and you can host your own on Cloudflare.
+The [Scratchwork server](#scratch-server) is a server for serving static websites built with the Scratchwork CLI. There's a public server hosted on [scratchwork.dev](https://scratchwork.dev) and you can host your own on Cloudflare.
 
 ## Quick Start
 
 Install:
 
 ```bash
-curl -fsSL https://scratch.dev/install.sh | bash
+curl -fsSL https://scratchwork.dev/install.sh | bash
 ```
 
 Create a project and start the dev server:
@@ -51,9 +51,9 @@ scratch publish
 
 That's it. Your site is live.
 
-## Scratch Projects
+## Scratchwork Projects
 
-Scratch uses a simple project structure to avoid the need for boilerplate and configuration:
+Scratchwork uses a simple project structure to avoid the need for boilerplate and configuration:
 
 <Files>
 ```
@@ -77,7 +77,7 @@ my-site/
       Header.jsx
       Footer.jsx
     tailwind.css           # Global styles
-  .scratch/ (collapsed)    # Project config
+  .scratchwork/ (collapsed)    # Project config
     project.toml           # Server and publish settings
   package.json             # Dependencies
 ```
@@ -95,7 +95,7 @@ Markdown files in `pages/` become pages on your site:
 
 Use `.md` for plain Markdown or `.mdx` to include React components.
 
-Scratch uses [mdx](https://mdxjs.com/) to translate markdown elements into React components. You can customize the default components used in this translation by adding new ones to `src/markdown/`
+Scratchwork uses [mdx](https://mdxjs.com/) to translate markdown elements into React components. You can customize the default components used in this translation by adding new ones to `src/markdown/`
 
 ### Components
 
@@ -109,7 +109,7 @@ Here's a counter: <Counter />
 
 ### The `PageWrapper` component
 
-The page wrapper component (`your-project/src/template/PageWrapper.tsx`) is used in Scratch's html template to wrap your pages. It is the only component that the [build process](#build-pipeline) expects to exist. 
+The page wrapper component (`your-project/src/template/PageWrapper.tsx`) is used in Scratchwork's html template to wrap your pages. It is the only component that the [build process](#build-pipeline) expects to exist.
 
 You can modify this component to change the look and feel of your site.
 
@@ -121,7 +121,7 @@ Put static content like images in the `public/` directory. These files will be c
 ![Logo](/logo.png)
 ```
 
-Static files can also live in `pages/` next to your content. Scratch will automatically translate relative file system paths like this...
+Static files can also live in `pages/` next to your content. Scratchwork will automatically translate relative file system paths like this...
 
 ```mdx
 ![Diagram](./diagram.png)
@@ -131,7 +131,7 @@ Static files can also live in `pages/` next to your content. Scratch will automa
 
 ### Styling
 
-Scratch uses Tailwind CSS. Edit `src/tailwind.css` to change the styling of your pages:
+Scratchwork uses Tailwind CSS. Edit `src/tailwind.css` to change the styling of your pages:
 
 Markdown components are styled with [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography).
 
@@ -160,20 +160,20 @@ For social sharing: `url`, `type`, `siteName`, `locale`, `twitterCard`, `twitter
 
 For articles: `publishDate`, `modifiedDate`, `tags`.
 
-## Scratch CLI
+## Scratchwork CLI
 
 ### Overview
 
-The CLI builds your project and publishes it to a Scratch server. Install it with:
+The CLI builds your project and publishes it to a Scratchwork server. Install it with:
 
 ```bash
-curl -fsSL https://scratch.dev/install.sh | bash
+curl -fsSL https://scratchwork.dev/install.sh | bash
 ```
 
 or
 
 ```bash
-curl -fsSL https://scratch.dev/install.md | claude
+curl -fsSL https://scratchwork.dev/install.md | claude
 ```
 
 Update to the latest version:
@@ -249,7 +249,7 @@ Remove build artifacts:
 scratch clean
 ```
 
-Deletes `dist/`, `.scratch/cache/`, and `.scratch/dev/`.
+Deletes `dist/`, `.scratchwork/cache/`, and `.scratchwork/dev/`.
 
 #### scratch eject
 
@@ -284,18 +284,18 @@ Options:
 
 Project names must be 3-63 characters, lowercase letters/numbers/hyphens, starting with a letter. Reserved names: `api`, `auth`, `admin`, `www`, `app`, `help`, `support`, `static`, `assets`, `cdn`, `files`, `upload`, `download`.
 
-For more on servers and URLs, see [Scratch Server](#scratch-server).
+For more on servers and URLs, see [Scratchwork Server](#scratch-server).
 
 #### scratch login
 
-Log in to a Scratch server:
+Log in to a Scratchwork server:
 
 ```bash
-scratch login                     # Default: app.scratch.dev
+scratch login                     # Default: app.scratchwork.dev
 scratch login https://my-server.com
 ```
 
-The CLI shows a verification code and opens your browser. Sign in and approve the device. Credentials are saved to `~/.scratch/credentials.json`.
+The CLI shows a verification code and opens your browser. Sign in and approve the device. Credentials are saved to `~/.scratchwork/credentials.json`.
 
 You can be logged in to multiple servers at once. Each server has its own entry in the credentials file.
 
@@ -319,7 +319,7 @@ Configure project settings interactively:
 scratch config
 ```
 
-Updates `.scratch/project.toml` with server URL, project name, and visibility.
+Updates `.scratchwork/project.toml` with server URL, project name, and visibility.
 
 #### scratch whoami
 
@@ -405,26 +405,26 @@ scratch tokens revoke <token-id>
 
 **Store a token for CLI use:**
 ```bash
-scratch tokens use scratch_abc123...
+scratch tokens use scratchwork_abc123...
 ```
 
 **Using API tokens:**
 
 ```bash
 # Option 1: Environment variable (recommended for CI/CD)
-export SCRATCH_TOKEN=scratch_...
+export SCRATCHWORK_TOKEN=scratchwork_...
 scratch publish
 
 # Option 2: Project .env file
-echo "SCRATCH_TOKEN=scratch_..." >> .env
+echo "SCRATCHWORK_TOKEN=scratchwork_..." >> .env
 scratch publish
 
 # Option 3: Store in credentials file
-scratch tokens use scratch_...
+scratch tokens use scratchwork_...
 scratch publish
 ```
 
-Token resolution priority: `SCRATCH_TOKEN` env var → `.env` file → `~/.scratch/credentials.json`
+Token resolution priority: `SCRATCHWORK_TOKEN` env var → `.env` file → `~/.scratchwork/credentials.json`
 
 **With Cloudflare Access:** API tokens work with servers behind Cloudflare Access. First configure CF Access credentials with `scratch cf-access`, then use your API token normally. The CLI sends both the CF Access service token (to pass the network layer) and your API token (to authenticate).
 
@@ -461,7 +461,7 @@ scratch build --highlight all       # All languages
 scratch build --highlight off       # Disable
 ```
 
-**Build cache** lives in `.scratch/cache/`. Clear it with `scratch clean`.
+**Build cache** lives in `.scratchwork/cache/`. Clear it with `scratch clean`.
 
 ### scratch watch
 
@@ -476,41 +476,41 @@ Options:
 - `-p, --port <port>` — Server port (default: 5173)
 - `-n, --no-open` — Don't open browser
 
-## Scratch Server
+## Scratchwork Server
 
 ### Overview
 
-A Scratch server lets you share your work with others. Publish privately to share with specific people or your team, or make it public for anyone to see.
+A Scratchwork server lets you share your work with others. Publish privately to share with specific people or your team, or make it public for anyone to see.
 
-The server runs on Cloudflare (Workers, D1, and R2). You can use the hosted version on scratch.dev or run your own.
+The server runs on Cloudflare (Workers, D1, and R2). You can use the hosted version on scratchwork.dev or run your own.
 
-### scratch.dev
+### scratchwork.dev
 
-We host a public Scratch server instance on [scratch.dev](https://scratch.dev) Anyone can publish public or private projects for free while Scratch is in Preview.
+We host a public Scratchwork server instance on [scratchwork.dev](https://scratchwork.dev) Anyone can publish public or private projects for free while Scratchwork is in Preview.
 
-**Note:** Projects on scratch.dev expire after 30 days during the Preview period.
+**Note:** Projects on scratchwork.dev expire after 30 days during the Preview period.
 
 When you publish, your site is available at either of the following:
 
 ```
-https://pages.scratch.dev/<your-email>/<project-name>/
-https://pages.scratch.dev/<your-user-id>/<project-name>/
+https://pages.scratchwork.dev/<your-email>/<project-name>/
+https://pages.scratchwork.dev/<your-user-id>/<project-name>/
 ```
 
 For example, if you're `pete@example.com` and your project is `my-blog`:
 
 ```
-https://pages.scratch.dev/pete@example.com/my-blog/
-https://pages.scratch.dev/abc123/my-blog/
+https://pages.scratchwork.dev/pete@example.com/my-blog/
+https://pages.scratchwork.dev/abc123/my-blog/
 ```
 
-Self-hosted Scratch servers that are restricted to accounts on @example.com support simpler routing:
+Self-hosted Scratchwork servers that are restricted to accounts on @example.com support simpler routing:
 
 ```
 https://pages.mydomain.com/pete/my-blog/
 ```
 
-**Preview warning:** Scratch is in preview. Don't use it for anything sensitive or critical. The code is open source—if you need more security, self-host behind Cloudflare Access.
+**Preview warning:** Scratchwork is in preview. Don't use it for anything sensitive or critical. The code is open source--if you need more security, self-host behind Cloudflare Access.
 
 ### Visibility
 
@@ -532,7 +532,7 @@ scratch publish --visibility @mycompany.com
 scratch publish --visibility "alice@x.com,bob@y.com"
 ```
 
-Or in `.scratch/project.toml`:
+Or in `.scratchwork/project.toml`:
 
 ```toml
 [project]
@@ -544,7 +544,7 @@ When someone without an access token visits your project, they'll be prompted to
 
 ### Self-Hosting
 
-Run your own Scratch server when you need:
+Run your own Scratchwork server when you need:
 - Enterprise SSO via Cloudflare Access
 - Data on your own infrastructure
 - Custom domains
@@ -554,7 +554,7 @@ Self-hosting is also useful for a personal website or a shared space where colle
 
 #### Setting up Cloudflare
 
-A Scratch server needs:
+A Scratchwork server needs:
 - **Cloudflare Workers** — Runs the server code
 - **D1** — SQLite database
 - **R2** — File storage
@@ -563,8 +563,8 @@ A Scratch server needs:
 
 1. Clone the repo:
 ```bash
-git clone https://github.com/scratch/scratch
-cd scratch
+git clone https://github.com/scratchwork/scratchwork
+cd scratchwork
 ```
 
 2. Run the setup wizard:
@@ -592,7 +592,7 @@ CF_ACCESS_AUD=<application-aud>
 
 **Domain configuration:**
 
-Scratch uses two subdomains:
+Scratchwork uses two subdomains:
 - **App subdomain** (`app.example.com`) — API, login, dashboard
 - **Content subdomain** (`pages.example.com`) — Published sites
 
@@ -601,25 +601,25 @@ This separation prevents malicious uploaded JavaScript from stealing app session
 #### Deploying Your Server
 
 ```bash
-# Run any needed migrations on your Scratch Server database
+# Run any needed migrations on your Scratchwork Server database
 bun ops server -i <server-name> db migrate
 
-# Deploy the scratch server
+# Deploy the scratchwork server
 bun ops server -i <server-name> deploy
 ```
 
 #### Publishing to www and root domain
 
-You can configure your Scratch server to serve a specific project on the root domain and `www` subdomain:
+You can configure your Scratchwork server to serve a specific project on the root domain and `www` subdomain:
 
-1. Deploy a Scratch server without setting this value
+1. Deploy a Scratchwork server without setting this value
 2. Publish your project to this server. Note the project ID in the server's response.
 3. Update `WWW_PROJECT_ID` in `server/.<your-server-name>.vars` with this value.
 4. Run `bun ops server -i <server-name> config push` to update your server's Cloudflare Secrets config
 
 ### Security
 
-Scratch separates the app and content subdomains for security. The app handles authentication and API requests. Content serves user-uploaded files.
+Scratchwork separates the app and content subdomains for security. The app handles authentication and API requests. Content serves user-uploaded files.
 
 This is important because published sites can include JavaScript. If session cookies were shared across subdomains, a malicious site could make authenticated API requests. App session cookies are scoped to the app subdomain so that client-side JavaScript code on `pages.` can't access it.
 
@@ -631,17 +631,17 @@ If it does and the project has a restricted visibility setting, the user will be
 
 If the URL does not map to a project, the user will be redirected to authenticate and will be served a `404` error if they do.
 
-**Preview warning:** Scratch is new and hasn't been audited. Don't rely on local authentication for sensitive content. If you need stronger security, self-host behind Cloudflare Access.
+**Preview warning:** Scratchwork is new and hasn't been audited. Don't rely on local authentication for sensitive content. If you need stronger security, self-host behind Cloudflare Access.
 
 ### API Reference
 
 The server has a REST API. Authenticate with a Bearer token:
 
 ```bash
-curl -H "Authorization: Bearer <token>" https://app.scratch.dev/api/me
+curl -H "Authorization: Bearer <token>" https://app.scratchwork.dev/api/me
 ```
 
-Get your token from `~/.scratch/credentials.json` after running `scratch login`.
+Get your token from `~/.scratchwork/credentials.json` after running `scratch login`.
 
 #### Endpoints
 
@@ -667,7 +667,7 @@ Get your token from `~/.scratch/credentials.json` after running `scratch login`.
 curl -X POST -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"name": "my-project"}' \
-  https://app.scratch.dev/api/projects
+  https://app.scratchwork.dev/api/projects
 ```
 
 **PATCH /api/projects/:name** — Update project
@@ -676,7 +676,7 @@ curl -X POST -H "Authorization: Bearer <token>" \
 curl -X PATCH -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"visibility": "private"}' \
-  https://app.scratch.dev/api/projects/my-blog
+  https://app.scratchwork.dev/api/projects/my-blog
 ```
 
 **DELETE /api/projects/:name** — Delete project
@@ -687,7 +687,7 @@ curl -X PATCH -H "Authorization: Bearer <token>" \
 curl -X POST -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/zip" \
   --data-binary @dist.zip \
-  "https://app.scratch.dev/api/projects/my-blog/deploy?visibility=public"
+  "https://app.scratchwork.dev/api/projects/my-blog/deploy?visibility=public"
 ```
 
 **GET /api/projects/:name/share-tokens** — List share tokens
@@ -698,7 +698,7 @@ curl -X POST -H "Authorization: Bearer <token>" \
 curl -X POST -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"name": "Client review", "duration": "1w"}' \
-  https://app.scratch.dev/api/projects/my-blog/share-tokens
+  https://app.scratchwork.dev/api/projects/my-blog/share-tokens
 ```
 
 **DELETE /api/projects/:name/share-tokens/:id** — Revoke share token
@@ -720,7 +720,7 @@ curl -X POST -H "Authorization: Bearer <token>" \
 
 ## Troubleshooting
 
-If you run into an issue with Scratch, point your favorite coding agent at [our repo](https://github.com/scratch/scratch) and ask it to figure out what's going on. Feel free to open an issue with a markdown plan for fixing the problem. If your plan makes sense we'll implement it.
+If you run into an issue with Scratchwork, point your favorite coding agent at [our repo](https://github.com/scratchwork/scratchwork) and ask it to figure out what's going on. Feel free to open an issue with a markdown plan for fixing the problem. If your plan makes sense we'll implement it.
 
 ## Feedback
 

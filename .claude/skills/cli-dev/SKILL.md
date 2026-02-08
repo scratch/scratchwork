@@ -1,6 +1,6 @@
 # CLI Development Skill
 
-Patterns for developing the Scratch CLI.
+Patterns for developing the Scratchwork CLI.
 
 ## File Locations
 

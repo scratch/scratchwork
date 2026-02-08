@@ -1,5 +1,5 @@
 /**
- * HTTP request utilities for the Scratch Cloud API.
+ * HTTP request utilities for the Scratchwork Cloud API.
  * Handles authentication headers, CF Access tokens, timeouts, and error handling.
  */
 
@@ -133,13 +133,14 @@ export async function shouldRetryCfAccess(
 }
 
 /**
- * Get the API token from environment variable (SCRATCH_TOKEN).
+ * Get the API token from environment variable (SCRATCHWORK_TOKEN).
+ * Falls back to SCRATCH_TOKEN for backward compatibility.
  * Returns null if not set.
  */
 function getEnvToken(): string | null {
   // Bun auto-loads .env from cwd into process.env at startup
   // This covers both explicit env vars and .env file values
-  return process.env.SCRATCH_TOKEN ?? null
+  return process.env.SCRATCHWORK_TOKEN ?? process.env.SCRATCH_TOKEN ?? null
 }
 
 /**
@@ -147,9 +148,9 @@ function getEnvToken(): string | null {
  *
  * Authentication priority:
  * 1. apiKey parameter (explicit X-Api-Key, bypasses credential lookup)
- * 2. SCRATCH_TOKEN env var (always uses X-Api-Key header)
+ * 2. SCRATCHWORK_TOKEN env var (always uses X-Api-Key header)
  * 3. Token passed as parameter (uses header based on credential type)
- * 4. Stored credentials from ~/.scratch/credentials.json
+ * 4. Stored credentials from ~/.scratchwork/credentials.json
  */
 async function buildHeaders(
   serverUrl: string,

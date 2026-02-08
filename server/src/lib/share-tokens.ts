@@ -3,7 +3,7 @@
 
 import type { Env } from '../env'
 import type { DbClient } from '../db/client'
-import { SHARE_TOKEN_DURATION_SECONDS, type ShareTokenDuration } from '@scratch/shared/api'
+import { SHARE_TOKEN_DURATION_SECONDS, type ShareTokenDuration } from '@scratchwork/shared/api'
 
 // Token prefix for identification
 const TOKEN_PREFIX = 'shr_'

@@ -42,7 +42,7 @@ export async function resolveProject(
   return promptProjectChoice(matches)
 }
 
-// Resolve project from argument or .scratch/project.toml
+// Resolve project from argument or .scratchwork/project.toml
 export async function resolveProjectOrConfig(
   token: string,
   identifier: string | undefined,
@@ -54,7 +54,7 @@ export async function resolveProjectOrConfig(
 
   const config = await loadProjectConfig('.')
   if (!config.name) {
-    log.error('No project specified and no .scratch/project.toml found')
+    log.error('No project specified and no .scratchwork/project.toml found')
     log.error('Run this command from a project directory or specify a project name')
     process.exit(1)
   }

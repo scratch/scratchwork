@@ -1,4 +1,4 @@
-import { parseGroup, matchesGroup } from '@scratch/shared'
+import { parseGroup, matchesGroup } from '@scratchwork/shared'
 import type { Env } from '../env'
 
 export function isUserAllowed(email: string, env: Env): boolean {

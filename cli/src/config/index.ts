@@ -1,9 +1,9 @@
-// Unified config library for Scratch
+// Unified config library for Scratchwork
 //
 // Storage locations:
-// - ~/.scratch/credentials.json - Auth credentials (0o600)
-// - ~/.scratch/cf-access.json - CF Access service tokens (0o600)
-// - .scratch/project.toml - Project config (0o644)
+// - ~/.scratchwork/credentials.json - Auth credentials (0o600)
+// - ~/.scratchwork/cf-access.json - CF Access service tokens (0o600)
+// - .scratchwork/project.toml - Project config (0o644)
 
 // Types
 export type { Credentials, CredentialEntry, CredentialsFile, ProjectConfig, GlobalConfig, CfAccessEntry, CfAccessFile } from './types'

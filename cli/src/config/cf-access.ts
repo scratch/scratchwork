@@ -9,7 +9,7 @@ export interface CfAccessHeaders {
 }
 
 /**
- * Load all CF Access credentials from ~/.scratch/cf-access.json
+ * Load all CF Access credentials from ~/.scratchwork/cf-access.json
  * Returns empty object if file doesn't exist or is invalid
  */
 async function loadCfAccessFile(): Promise<CfAccessFile> {
@@ -17,7 +17,7 @@ async function loadCfAccessFile(): Promise<CfAccessFile> {
 }
 
 /**
- * Save all CF Access credentials to ~/.scratch/cf-access.json
+ * Save all CF Access credentials to ~/.scratchwork/cf-access.json
  * Permissions: 0o600 (owner read/write only)
  */
 async function saveCfAccessFile(cfAccess: CfAccessFile): Promise<void> {

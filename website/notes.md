@@ -10,7 +10,7 @@ Existing documentation Structure
   ### pages/
   ### src/
   ### public/
-  ### .scratch/s
+  ### .scratchwork/
   ### package.json
 
 ## Writing Content
@@ -113,7 +113,7 @@ Proposed documentation structure
 
 ## Concepts
 
-## Scratch CLI
+## Scratchwork CLI
   ### Overview
   ### Creating and building your project
     #### scratch create
@@ -126,10 +126,10 @@ Proposed documentation structure
   ### Publishing your project
     #### scratch publish
       - should document naming your project
-      - should refer the reader to the scratch login section for more info on selecting a scratch server
+      - should refer the reader to the scratch login section for more info on selecting a Scratchwork server
       - should document 
     #### scratch login
-      - should document how the user can specify a scratch server url
+      - should document how the user can specify a Scratchwork server url
       - should document where credentials are stored and how it works 
         to be logged in to more than one server at the same time
     #### scratch logout
@@ -141,7 +141,7 @@ Proposed documentation structure
       - should document share|ls|revoke
     #### scratch cf-access
 
-  ### Scratch build pipeline
+  ### Scratchwork build pipeline
     #### Build Steps
     #### Build Cache
 
@@ -149,14 +149,14 @@ Proposed documentation structure
     - this is a handy feature for viewing markdown files locally
 
 
-## Scratch Server
+## Scratchwork Server
   ### Overview
     - server gives authors a way to share their work with others, either privately with friends and colleagues or publicly with the world.
     - currently runs on cloudflare and can optionally be protected by Cloudflare Access. (maybe this is actually called zero trust now?)
-  ### scratch.dev
-    - document that right now anyone can publish to scratch.dev for free, and that projects will only stay published for 30 days while scratch is in Preview.
-    - document how routing works on scratch.dev. That is, when you publish a project what the URLs at which it will be available
-    - security warning: scratch is in preview and should not be relied upon yet to serve anything sensitive or important. Refer users to the source code and remind them that they can host their own scratch server behind Cloudflare Access if they want additional security
+  ### scratchwork.dev
+    - document that right now anyone can publish to scratchwork.dev for free, and that projects will only stay published for 30 days while Scratchwork is in Preview.
+    - document how routing works on scratchwork.dev. That is, when you publish a project what the URLs at which it will be available
+    - security warning: Scratchwork is in preview and should not be relied upon yet to serve anything sensitive or important. Refer users to the source code and remind them that they can host their own Scratchwork server behind Cloudflare Access if they want additional security
   ### Self-hosting
     - Explain why self-hosting is useful. User can use the server for their own personal website, or as a shared space for colleagues to share writing privately with each other.
     #### Setting up Cloudflare
@@ -167,7 +167,7 @@ Proposed documentation structure
     #### publishing to `www` and the root domain
   ### Security
     - describe the approach we've taken to securing the server
-    - warn the user that scratch is in preview and that users should not assume it is secure.
+    - warn the user that Scratchwork is in preview and that users should not assume it is secure.
     - users who want to publish sensitive content should consider self hosting behind Cloudflare Access (or Zero Trust?) to do this
   ### API Reference
     #### Authentication

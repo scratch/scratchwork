@@ -2,20 +2,20 @@ import { Hono } from 'hono'
 import type { Env } from '../../../env'
 import { createDbClient } from '../../../db/client'
 import { generateId } from '../../../lib/id'
-import { buildProjectUrls } from '@scratch/shared/project'
+import { buildProjectUrls } from '@scratchwork/shared/project'
 import { getAuthenticatedUser, getProjectForUser } from '../../../lib/api-helpers'
 import {
   shareTokenCreateRequestSchema,
   type ShareToken,
   type ShareTokenDuration,
-} from '@scratch/shared/api'
+} from '@scratchwork/shared/api'
 import {
   isShareTokensEnabled,
   sanitizeTokenName,
   calculateExpiry,
   generateShareToken,
 } from '../../../lib/share-tokens'
-import { ErrorCodes } from '@scratch/shared/api'
+import { ErrorCodes } from '@scratchwork/shared/api'
 import { getContentDomain } from '../../../lib/domains'
 
 // Database row type for share tokens - used for query results

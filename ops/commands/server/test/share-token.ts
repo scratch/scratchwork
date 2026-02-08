@@ -21,7 +21,7 @@ export function shareTokenTests() {
 
       // Create another private project for share token test
       const shareTestProjectName = generateRandomProjectName()
-      const shareTestTempDir = join(tmpdir(), `scratch-${ctx.instance}-share-${Date.now()}`)
+      const shareTestTempDir = join(tmpdir(), `scratchwork-${ctx.instance}-share-${Date.now()}`)
 
       const createExitCode = await runCommandInherit([CLI_BIN, 'create', shareTestTempDir])
       expect(createExitCode).toBe(0)

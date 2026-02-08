@@ -6,8 +6,8 @@
 
 import log from '../logger'
 import { prompt, select, confirm, type SelectChoice } from '../util'
-import { validateProjectName, getEmailDomain } from '@scratch/shared/project'
-import { validateGroupInput } from '@scratch/shared'
+import { validateProjectName, getEmailDomain } from '@scratchwork/shared/project'
+import { validateGroupInput } from '@scratchwork/shared'
 import { DEFAULT_SERVER_URL } from './paths'
 import { loadGlobalConfig } from './global-config'
 
@@ -28,7 +28,7 @@ const MULTI_PART_TLDS = [
 
 /**
  * Check if a hostname is a naked domain (no subdomain).
- * e.g., "scratch.dev" is naked, "app.scratch.dev" is not.
+ * e.g., "scratchwork.dev" is naked, "app.scratchwork.dev" is not.
  * Handles multi-part TLDs like .co.uk
  */
 function isNakedDomain(hostname: string): boolean {
@@ -102,7 +102,7 @@ export function normalizeServerUrlInput(url: string): { url: string; modified: b
 }
 
 /**
- * Normalize a server URL's display value, e.g. https://app.scratch.dev -> scratch.dev
+ * Normalize a server URL's display value, e.g. https://app.scratchwork.dev -> scratchwork.dev
  *
  * @param url
  * @returns the display value

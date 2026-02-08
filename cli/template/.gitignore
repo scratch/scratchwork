@@ -1,6 +1,6 @@
-# scratch build cache (but allow project.toml to be committed)
-.scratch/*
-!.scratch/project.toml
+# scratchwork build cache (but allow project.toml to be committed)
+.scratchwork/*
+!.scratchwork/project.toml
 
 # dependencies (bun install)
 node_modules

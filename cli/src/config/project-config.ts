@@ -6,14 +6,14 @@ import { escapeTomlString } from './toml'
 import type { ProjectConfig } from './types'
 
 const PROJECT_CONFIG_HEADER = [
-  '# Scratch Cloud Project Configuration',
+  '# Scratchwork Cloud Project Configuration',
   '#',
-  '# This file configures how your project deploys to Scratch Cloud.',
+  '# This file configures how your project deploys to Scratchwork Cloud.',
   '# Run `scratch cloud config` to update these settings interactively.',
 ]
 
 /**
- * Load project config from .scratch/project.toml
+ * Load project config from .scratchwork/project.toml
  * Returns empty object if file doesn't exist
  */
 export async function loadProjectConfig(projectPath: string): Promise<ProjectConfig> {
@@ -43,10 +43,10 @@ export async function loadProjectConfig(projectPath: string): Promise<ProjectCon
 }
 
 /**
- * Save project config to .scratch/project.toml
+ * Save project config to .scratchwork/project.toml
  */
 export async function saveProjectConfig(projectPath: string, config: ProjectConfig): Promise<void> {
-  const scratchDir = join(projectPath, '.scratch')
+  const scratchDir = join(projectPath, '.scratchwork')
   const configPath = join(scratchDir, 'project.toml')
 
   // Ensure .scratch directory exists

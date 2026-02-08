@@ -32,7 +32,7 @@ export function isProcessRunning(pid: number): boolean {
  * Get the lock file path for a project.
  */
 export function getLockFilePath(rootDir: string): string {
-  return path.join(rootDir, '.scratch', 'dev.lock');
+  return path.join(rootDir, '.scratchwork', 'dev.lock');
 }
 
 /**

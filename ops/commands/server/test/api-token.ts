@@ -26,7 +26,7 @@ export function apiTokenTests() {
       expect(createTokenResult.exitCode).toBe(0)
 
       // Extract the token from output (it should be on a line by itself after "Created API token:")
-      const tokenMatch = createTokenResult.stdout.match(/scratch_[a-zA-Z0-9]+/)
+      const tokenMatch = createTokenResult.stdout.match(/scratchwork_[a-zA-Z0-9]+/)
       expect(tokenMatch).toBeTruthy()
 
       apiToken = tokenMatch![0]
@@ -53,24 +53,24 @@ export function apiTokenTests() {
       console.log(`${green}✓${reset} API token authenticated as ${apiUser.user.email}`)
     })
 
-    test('deploy using SCRATCH_TOKEN env var', async () => {
+    test('deploy using SCRATCHWORK_TOKEN env var', async () => {
       const ctx = getContext()
       // Create a simple temp project for env var test
-      const envTestDir = join(tmpdir(), `scratch-env-test-${Date.now()}`)
+      const envTestDir = join(tmpdir(), `scratchwork-env-test-${Date.now()}`)
       await runCommand([CLI_BIN, 'create', envTestDir])
       const envTestProjectName = generateRandomProjectName()
 
-      // Deploy with SCRATCH_TOKEN env var (simulate CI environment)
+      // Deploy with SCRATCHWORK_TOKEN env var (simulate CI environment)
       const envDeployResult = await runCommand([
         CLI_BIN, 'publish', envTestDir,
         '--server', ctx.serverUrl,
         '--name', envTestProjectName,
         '--visibility', 'public',
         '--no-open',
-      ], { env: { ...process.env, SCRATCH_TOKEN: ctx.apiKeyToken } })
+      ], { env: { ...process.env, SCRATCHWORK_TOKEN: ctx.apiKeyToken } })
 
       expect(envDeployResult.exitCode).toBe(0)
-      console.log(`${green}✓${reset} Deploy with SCRATCH_TOKEN env var succeeded`)
+      console.log(`${green}✓${reset} Deploy with SCRATCHWORK_TOKEN env var succeeded`)
 
       // Cleanup the test project
       await runCommand([CLI_BIN, 'projects', 'delete', envTestProjectName, '--server', ctx.serverUrl, '--force'])
@@ -106,7 +106,7 @@ export function apiTokenTests() {
     test('invalid token is rejected', async () => {
       const ctx = getContext()
       const invalidResponse = await fetch(`${ctx.serverUrl}/api/me`, {
-        headers: { 'X-Api-Key': 'scratch_invalid_token_12345' },
+        headers: { 'X-Api-Key': 'scratchwork_invalid_token_12345' },
       })
 
       expect(invalidResponse.status).toBe(401)

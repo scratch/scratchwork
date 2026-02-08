@@ -1,12 +1,12 @@
 # AGENTS.md
 
-This is a **scratch** project - a static site built from MDX files using the scratch CLI.
+This is a **Scratchwork** project - a static site built from MDX files using the scratch CLI.
 
-> **Note:** This is the Scratch documentation website (dogfooding). It's a Scratch project that gets published to scratch.dev. For contributing to the Scratch CLI/server codebase, see the root `CLAUDE.md`. This file documents how to work with this site as a Scratch project.
+> **Note:** This is the Scratchwork documentation website (dogfooding). It's a Scratchwork project that gets published to scratchwork.dev. For contributing to the Scratchwork CLI/server codebase, see the root `CLAUDE.md`. This file documents how to work with this site as a Scratchwork project.
 
-## What is scratch?
+## What is Scratchwork?
 
-scratch is a CLI tool that compiles MDX (Markdown + JSX) files into a static website. It uses Bun as the build tool and bundler, React for rendering, and Tailwind CSS for styling.
+Scratchwork is a CLI tool that compiles MDX (Markdown + JSX) files into a static website. It uses Bun as the build tool and bundler, React for rendering, and Tailwind CSS for styling.
 
 ## CLI Commands
 
@@ -177,7 +177,7 @@ export default function PageWrapper({ children }) {
 }
 ```
 
-The default template includes Header, Footer, ScratchBadge, and Copyright components in `src/template/`. Customize these to change your site's layout.
+The default template includes Header, Footer, ScratchworkBadge, and Copyright components in `src/template/`. Customize these to change your site's layout.
 
 ### Markdown Components
 
@@ -206,11 +206,11 @@ export default function MyComponent() {
 }
 ```
 
-See `src/template/ScratchBadge.jsx` for a working example.
+See `src/template/ScratchworkBadge.jsx` for a working example.
 
 ## Theming
 
-Scratch uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography) for markdown styling. The `prose` class is applied via PageWrapper.
+Scratchwork uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography) for markdown styling. The `prose` class is applied via PageWrapper.
 
 ### Customizing Typography
 
@@ -276,4 +276,4 @@ Use `not-prose` class to exclude elements from typography styling.
 These are generated and should be in `.gitignore`:
 
 - `dist/` - Build output
-- `.scratch/` - Build cache and project config
+- `.scratchwork/` - Build cache and project config

@@ -19,8 +19,8 @@ describe("CF Access Migration", () => {
   describe("Old config format detection", () => {
     test("identifies config with CF Access credentials", () => {
       const content = `
-# Scratch Cloud Global Configuration
-server_url = "https://app.scratch.dev"
+# Scratchwork Cloud Global Configuration
+server_url = "https://app.scratchwork.dev"
 namespace = "acme.com"
 
 # Cloudflare Access service token
@@ -37,8 +37,8 @@ cf_access_client_secret = "secret456"
 
     test("identifies config without CF Access credentials", () => {
       const content = `
-# Scratch Cloud Global Configuration
-server_url = "https://app.scratch.dev"
+# Scratchwork Cloud Global Configuration
+server_url = "https://app.scratchwork.dev"
 namespace = "acme.com"
 `;
 
@@ -93,7 +93,7 @@ namespace = "acme.com"
 
     test("removes CF Access client ID line", () => {
       const original = `
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 cf_access_client_id = "abc123"
 namespace = "acme.com"
 `;
@@ -105,7 +105,7 @@ namespace = "acme.com"
 
     test("removes CF Access client secret line", () => {
       const original = `
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 cf_access_client_secret = "secret123"
 `;
       const cleaned = cleanConfigContent(original);
@@ -115,7 +115,7 @@ cf_access_client_secret = "secret123"
 
     test("removes Cloudflare Access comments", () => {
       const original = `
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 
 # Cloudflare Access service token
 cf_access_client_id = "abc123"
@@ -128,8 +128,8 @@ cf_access_client_secret = "secret123"
 
     test("preserves other config values", () => {
       const original = `
-# Scratch Cloud Global Configuration
-server_url = "https://custom.scratch.dev"
+# Scratchwork Cloud Global Configuration
+server_url = "https://custom.scratchwork.dev"
 
 # Default namespace for new projects
 namespace = "acme.com"
@@ -139,9 +139,9 @@ cf_access_client_id = "abc123"
 cf_access_client_secret = "secret123"
 `;
       const cleaned = cleanConfigContent(original);
-      expect(cleaned).toContain('server_url = "https://custom.scratch.dev"');
+      expect(cleaned).toContain('server_url = "https://custom.scratchwork.dev"');
       expect(cleaned).toContain('namespace = "acme.com"');
-      expect(cleaned).toContain('# Scratch Cloud Global Configuration');
+      expect(cleaned).toContain('# Scratchwork Cloud Global Configuration');
       expect(cleaned).toContain('# Default namespace for new projects');
     });
   });
@@ -188,14 +188,14 @@ cf_access_client_secret = "secret123"
       await fs.mkdir(secretsDir, { recursive: true });
 
       // Write old-style config with CF Access credentials
-      const oldConfig = `# Scratch Cloud Global Configuration
+      const oldConfig = `# Scratchwork Cloud Global Configuration
 #
-# These are your default settings for all Scratch projects.
+# These are your default settings for all Scratchwork projects.
 # Run \`scratch cloud config\` from a non-project directory to update.
-# Project-specific settings in .scratch/project.toml override these.
+# Project-specific settings in .scratchwork/project.toml override these.
 
 # Default server URL
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 
 # Default namespace for new projects
 namespace = "acme.com"
@@ -254,8 +254,8 @@ describe("Backwards Compatibility", () => {
   describe("Config without CF Access", () => {
     test("config without CF Access is unaffected by migration", () => {
       const content = `
-# Scratch Cloud Global Configuration
-server_url = "https://app.scratch.dev"
+# Scratchwork Cloud Global Configuration
+server_url = "https://app.scratchwork.dev"
 namespace = "acme.com"
 `;
 
@@ -280,7 +280,7 @@ namespace = "acme.com"
   describe("Partial CF Access credentials", () => {
     test("only client ID is not migrated", () => {
       const content = `
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 cf_access_client_id = "only-id"
 `;
 
@@ -294,7 +294,7 @@ cf_access_client_id = "only-id"
 
     test("only client secret is not migrated", () => {
       const content = `
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 cf_access_client_secret = "only-secret"
 `;
 

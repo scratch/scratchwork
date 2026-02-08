@@ -1,5 +1,5 @@
 {
-  "name": "scratch-server",
+  "name": "scratchwork-server",
   "version": "0.2.4",
   "type": "module",
   "private": true,
@@ -8,7 +8,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@scratch/shared": "workspace:*",
+    "@scratchwork/shared": "workspace:*",
     "better-auth": "^1.0.0",
     "hono": "^4.6.0",
     "jose": "^5.9.6",

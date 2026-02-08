@@ -1,6 +1,6 @@
 import log from '../../logger'
 import { createShareToken, listShareTokens, revokeShareToken, ApiError } from '../../cloud/api'
-import { shareTokenDurations, type ShareTokenDuration } from '@scratch/shared/api'
+import { shareTokenDurations, type ShareTokenDuration } from '@scratchwork/shared/api'
 import { resolveProjectOrConfig, formatDateTime } from './projects'
 import { prompt, select, stripTrailingSlash } from '../../util'
 import { CloudContext } from './context'

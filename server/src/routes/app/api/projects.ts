@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Env } from '../../../env'
 import { createDbClient } from '../../../db/client'
 import { generateId } from '../../../lib/id'
-import { validateProjectName } from '@scratch/shared/project'
+import { validateProjectName } from '@scratchwork/shared/project'
 import { getAuthenticatedUser, formatProject, buildProjectDetailsQuery, parseAndValidateVisibility, type ProjectRow } from '../../../lib/api-helpers'
 import { invalidateProjectCache } from '../../../lib/cache'
 

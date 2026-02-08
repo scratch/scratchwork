@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="./template/public/scratch-logo.svg" alt="Scratch" height="120" />
+  <img src="./template/public/scratchwork-logo.svg" alt="Scratchwork" height="120" />
 </p>
 
-Scratch compiles Markdown and React into beautiful static websites that can be hosted anywhere.
+Scratchwork compiles Markdown and React into beautiful static websites that can be hosted anywhere.
 
 ## Quick Start
 
 ```bash
 # Install scratch
-curl -fsSL https://scratch.dev/install.sh | bash
+curl -fsSL https://scratchwork.dev/install.sh | bash
 
 # Create a new project
 scratch create
@@ -17,15 +17,15 @@ scratch create
 scratch dev
 ```
 
-## What can you do with Scratch?
+## What can you do with Scratchwork?
 
-Scratch lets you write in Markdown and embed interactive React components directly in your content.
+Scratchwork lets you write in Markdown and embed interactive React components directly in your content.
 
-Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown, and ask a coding agent for help when it's easier to express yourself with code.
+Scratchwork was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown, and ask a coding agent for help when it's easier to express yourself with code.
 
-Scratch uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography) to render your prose with a clean aesthetic. Code blocks use syntax highlighting by [Shiki](https://shiki.style/).
+Scratchwork uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography) to render your prose with a clean aesthetic. Code blocks use syntax highlighting by [Shiki](https://shiki.style/).
 
-Scratch also supports GitHub-flavored Markdown features like checklists and tables:
+Scratchwork also supports GitHub-flavored Markdown features like checklists and tables:
 
 | Feature | Supported? |
 |---------|-----------|
@@ -34,13 +34,13 @@ Scratch also supports GitHub-flavored Markdown features like checklists and tabl
 | Tailwind CSS styling | ✅ |
 | Code syntax highlighting | ✅ |
 
-Collaborating with AI makes writing more fun. Scratch makes that easy.
+Collaborating with AI makes writing more fun. Scratchwork makes that easy.
 
 ## No Boilerplate
 
-Scratch uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing.
+Scratchwork uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing.
 
-A simple Scratch project (created with `scratch create`) looks like this:
+A simple Scratchwork project (created with `scratch create`) looks like this:
 
 ```
 my-scratch-project/
@@ -60,9 +60,9 @@ my-scratch-project/
 └── .gitignore
 ```
 
-Use `scratch build` to compile this project into a static website, like [scratch.dev](https://scratch.dev).
+Use `scratch build` to compile this project into a static website, like [scratchwork.dev](https://scratchwork.dev).
 
-Component files and libraries can live anywhere in `pages/` and `src/`. They are auto-detected by Scratch and don't need to be explicitly imported in your .mdx files as long as the filename matches the component name.
+Component files and libraries can live anywhere in `pages/` and `src/`. They are auto-detected by Scratchwork and don't need to be explicitly imported in your .mdx files as long as the filename matches the component name.
 
 Modify `src/tailwind.css` to change the styling of your document. Add headers, footers and other site-wide elements by modifying `src/PageWrapper.jsx`.
 

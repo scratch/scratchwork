@@ -1,7 +1,7 @@
 // Visibility checking utilities for project access control
 // Works with the Group type from shared/group.ts
 
-import { parseGroup, matchesGroup, groupContains, type Group } from '@scratch/shared'
+import { parseGroup, matchesGroup, groupContains, type Group } from '@scratchwork/shared'
 import type { Env } from '../env'
 
 /**

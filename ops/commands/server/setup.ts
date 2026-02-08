@@ -156,9 +156,9 @@ async function createR2Bucket(bucketName: string, accountId?: string): Promise<v
 export async function setupAction(instance: string): Promise<void> {
   console.log(`Setting up Cloudflare resources for instance: ${instance}\n`)
 
-  const workerName = `${instance}-scratch-server`
-  const filesBucketName = `${instance}-scratch-files`
-  const dbName = `${instance}-scratch-db`
+  const workerName = `${instance}-scratchwork-server`
+  const filesBucketName = `${instance}-scratchwork-files`
+  const dbName = `${instance}-scratchwork-db`
 
   const varsPath = getInstanceVarsPath(instance)
   const wranglerPath = getInstanceWranglerPath(instance)

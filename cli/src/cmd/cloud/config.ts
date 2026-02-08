@@ -1,7 +1,7 @@
 /**
  * Local project configuration command.
  *
- * Configures .scratch/project.toml with:
+ * Configures .scratchwork/project.toml with:
  * - server_url: Which server to publish to
  * - name: Project name
  * - visibility: Who can access the project
@@ -37,7 +37,7 @@ export async function configCommand(projectPath?: string): Promise<void> {
 
   if (!hasPages) {
     log.error(`No pages/ directory found at ${resolvedPath}`)
-    log.error('Run this command from a Scratch project directory.')
+    log.error('Run this command from a Scratchwork project directory.')
     log.error('')
     log.error('To create a new project: scratch create')
     process.exit(1)
@@ -91,7 +91,7 @@ export async function configCommand(projectPath?: string): Promise<void> {
   await saveProjectConfig(resolvedPath, newConfig)
 
   log.info('')
-  log.info('Project configuration saved to .scratch/project.toml')
+  log.info('Project configuration saved to .scratchwork/project.toml')
   log.info('')
   log.info(`  server:     ${serverUrl}`)
   log.info(`  name:       ${projectName}`)

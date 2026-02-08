@@ -19,7 +19,7 @@ export async function buildCommand(ctx: BuildContext, options: BuildOptions = {}
   try {
     // Note: "Building..." message is printed AFTER dependencies step
     // to avoid duplicate output when build restarts in subprocess
-    log.info('Building Scratch project in', projectPath || '.');
+    log.info('Building Scratchwork project in', projectPath || '.');
     log.debug(`Building with Bun${ssg ? ' (SSG)' : ''}...`);
 
     const state = await runBuildPipeline(ctx, options);

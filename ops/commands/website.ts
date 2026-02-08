@@ -19,7 +19,7 @@ async function runScratchCommand(cmd: string, args: string[] = []): Promise<void
 export function registerWebsiteCommands(program: Command): void {
   const website = program
     .command('website')
-    .description('Website (https://scratch.dev) commands')
+    .description('Website (https://scratchwork.dev) commands')
 
   website
     .command('publish')

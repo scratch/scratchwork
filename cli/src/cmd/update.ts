@@ -124,7 +124,7 @@ export async function updateCommand(): Promise<void> {
   const checksumsAsset = release.assets.find(a => a.name === 'checksums.json');
 
   // Download to temp directory
-  const tempDir = path.join(process.env.HOME || '/tmp', '.local', 'scratch-downloads');
+  const tempDir = path.join(process.env.HOME || '/tmp', '.local', 'scratchwork-downloads');
   await fs.mkdir(tempDir, { recursive: true });
 
   const tempBinaryPath = path.join(tempDir, binaryName);

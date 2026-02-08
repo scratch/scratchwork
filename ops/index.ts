@@ -12,7 +12,7 @@ const program = new Command()
 
 program
   .name('ops')
-  .description('Scratch ops CLI')
+  .description('Scratchwork ops CLI')
   .version('1.0.0')
 
 registerServerCommands(program)

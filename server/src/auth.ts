@@ -74,7 +74,7 @@ export function createAuth(env: Env) {
       // doesn't support field-level schema customization the same way deviceAuthorization does.
       // Using defaults simplifies configuration and avoids potential mapping bugs.
       apiKey({
-        defaultPrefix: 'scratch_',
+        defaultPrefix: 'scratchwork_',
         defaultKeyLength: 32,
         enableMetadata: true,
         // Allow API keys to work with getSession() for seamless authentication

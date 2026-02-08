@@ -1,5 +1,5 @@
 {
-  "name": "@scratch/shared",
+  "name": "@scratchwork/shared",
   "type": "module",
   "private": true,
   "exports": {

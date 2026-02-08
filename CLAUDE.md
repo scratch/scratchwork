@@ -20,11 +20,11 @@ scratch/
 │   └── schema.d1.sql # Database schema (D1/SQLite)
 ├── shared/           # Types shared between server and client
 ├── ops/              # CLI for dev operations
-├── website/          # Scratch documentation site (itself a Scratch project)
+├── website/          # Scratchwork documentation site (itself a Scratchwork project)
 └── plan/             # Implementation plans
 ```
 
-**Note:** The `website/` directory is a Scratch project (dogfooding) that gets published to scratch.dev. It has its own `CLAUDE.md` documenting how to work with it as a Scratch site. For contributing to the Scratch CLI/server codebase, refer to this document.
+**Note:** The `website/` directory is a Scratchwork project (dogfooding) that gets published to scratchwork.dev. It has its own `CLAUDE.md` documenting how to work with it as a Scratchwork site. For contributing to the Scratchwork CLI/server codebase, refer to this document.
 
 ## CLI Overview
 
@@ -143,7 +143,7 @@ The CLI uses RFC 8628 device authorization:
 2. CLI displays user_code, opens browser to /device?user_code=...
 3. User logs in (if needed) and approves the device
 4. CLI polls POST /auth/device/token until approved
-5. CLI receives Bearer token, stores in ~/.scratch/credentials.json
+5. CLI receives Bearer token, stores in ~/.scratchwork/credentials.json
 ```
 
 The Bearer token is used for all subsequent API requests.
@@ -161,19 +161,19 @@ For CI/CD and automation, users can create API tokens:
 scratch tokens create my-ci-token --expires 90
 
 # Option 1: Use via environment variable (CI/CD)
-export SCRATCH_TOKEN=scratch_...
+export SCRATCHWORK_TOKEN=scratchwork_...
 scratch publish
 
 # Option 2: Store in .env file (project-specific)
-echo "SCRATCH_TOKEN=scratch_..." >> .env
+echo "SCRATCHWORK_TOKEN=scratchwork_..." >> .env
 scratch publish
 
 # Option 3: Store in credentials file (user-specific)
-scratch tokens use scratch_...
+scratch tokens use scratchwork_...
 scratch publish
 ```
 
-Token resolution priority: `SCRATCH_TOKEN` (env var or .env) > `~/.scratch/credentials.json`
+Token resolution priority: `SCRATCHWORK_TOKEN` (env var or .env) > `~/.scratchwork/credentials.json`
 
 API tokens are:
 - Hashed in the database (only shown once at creation)
@@ -199,8 +199,8 @@ We strive to offload as much of the authentication logic to Better Auth as possi
 
 Import paths:
 ```typescript
-import { ... } from '@scratch/shared'           // visibility + API types
-import { ... } from '@scratch/shared/project'   // project validation
-import { ... } from '@scratch/shared/api'       // API response types only
-import { ... } from '@scratch/shared/visibility' // visibility only
+import { ... } from '@scratchwork/shared'           // visibility + API types
+import { ... } from '@scratchwork/shared/project'   // project validation
+import { ... } from '@scratchwork/shared/api'       // API response types only
+import { ... } from '@scratchwork/shared/visibility' // visibility only
 ```

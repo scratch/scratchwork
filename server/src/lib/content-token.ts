@@ -10,7 +10,7 @@
 import { SignJWT, jwtVerify } from 'jose'
 
 const ALG = 'HS256'
-const ISSUER = 'scratch'
+const ISSUER = 'scratchwork'
 const AUDIENCE = 'content'
 const EXPIRY = '1h'
 

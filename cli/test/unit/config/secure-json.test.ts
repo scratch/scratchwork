@@ -262,7 +262,7 @@ describe('loadSecureJsonFile and saveSecureJsonFile roundtrip', () => {
   test('data survives save and load roundtrip', async () => {
     const filePath = path.join(tempDir, 'roundtrip.json')
     const originalData = {
-      'https://app.scratch.dev': {
+      'https://app.scratchwork.dev': {
         token: 'test-token',
         user: { id: 'user-123', email: 'test@example.com', name: 'Test User' },
       },

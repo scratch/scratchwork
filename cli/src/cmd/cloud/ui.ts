@@ -41,7 +41,7 @@ export function renderSuccessPage(): string {
   </div>
 </div>`
 
-  return baseHtml('Authentication Successful - Scratch', content)
+  return baseHtml('Authentication Successful - Scratchwork', content)
 }
 
 export function renderErrorPage(message: string): string {
@@ -55,5 +55,5 @@ export function renderErrorPage(message: string): string {
   <p class="text-muted text-sm">Please close this window and try again.</p>
 </div>`
 
-  return baseHtml('Authentication Failed - Scratch', content)
+  return baseHtml('Authentication Failed - Scratchwork', content)
 }

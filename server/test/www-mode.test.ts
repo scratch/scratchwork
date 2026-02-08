@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
-import { buildProjectUrls } from '@scratch/shared/project'
-import { deployCreateQuerySchema } from '@scratch/shared'
+import { buildProjectUrls } from '@scratchwork/shared/project'
+import { deployCreateQuerySchema } from '@scratchwork/shared'
 
 /**
  * Tests for the --www flag feature in deploys.
@@ -164,22 +164,22 @@ describe('buildProjectUrls with www mode', () => {
 
   test('includes www URL when wwwDomain is provided', () => {
     const urls = buildProjectUrls({
-      pagesDomain: 'pages.scratch.dev',
+      pagesDomain: 'pages.scratchwork.dev',
       projectName: 'my-app',
       ownerId: 'user123',
       ownerEmail: 'pete@example.com',
       allowedUsers: '*',
-      wwwDomain: 'scratch.dev',
+      wwwDomain: 'scratchwork.dev',
     })
 
-    expect(urls.primary).toBe('https://pages.scratch.dev/pete@example.com/my-app/')
-    expect(urls.byId).toBe('https://pages.scratch.dev/user123/my-app/')
-    expect(urls.www).toBe('https://scratch.dev/')
+    expect(urls.primary).toBe('https://pages.scratchwork.dev/pete@example.com/my-app/')
+    expect(urls.byId).toBe('https://pages.scratchwork.dev/user123/my-app/')
+    expect(urls.www).toBe('https://scratchwork.dev/')
   })
 
   test('does not include www URL when wwwDomain is undefined', () => {
     const urls = buildProjectUrls({
-      pagesDomain: 'pages.scratch.dev',
+      pagesDomain: 'pages.scratchwork.dev',
       projectName: 'my-app',
       ownerId: 'user123',
       ownerEmail: 'pete@example.com',
@@ -187,8 +187,8 @@ describe('buildProjectUrls with www mode', () => {
       wwwDomain: undefined,
     })
 
-    expect(urls.primary).toBe('https://pages.scratch.dev/pete@example.com/my-app/')
-    expect(urls.byId).toBe('https://pages.scratch.dev/user123/my-app/')
+    expect(urls.primary).toBe('https://pages.scratchwork.dev/pete@example.com/my-app/')
+    expect(urls.byId).toBe('https://pages.scratchwork.dev/user123/my-app/')
     expect(urls.www).toBeUndefined()
   })
 })

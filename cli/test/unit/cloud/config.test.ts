@@ -34,29 +34,29 @@ function parseSimpleToml(content: string): Record<string, string> {
 describe("Global Config TOML", () => {
   test("parses config with server_url", () => {
     const content = `
-# Scratch Cloud Global Configuration
-server_url = "https://custom.scratch.dev"
+# Scratchwork Cloud Global Configuration
+server_url = "https://custom.scratchwork.dev"
 `;
     const parsed = parseSimpleToml(content);
-    expect(parsed.server_url).toBe("https://custom.scratch.dev");
+    expect(parsed.server_url).toBe("https://custom.scratchwork.dev");
   });
 
   test("parses config with cf_access fields", () => {
     const content = `
-# Scratch Cloud Global Configuration
-server_url = "https://custom.scratch.dev"
+# Scratchwork Cloud Global Configuration
+server_url = "https://custom.scratchwork.dev"
 cf_access_client_id = "my-client-id"
 cf_access_client_secret = "my-client-secret"
 `;
     const parsed = parseSimpleToml(content);
-    expect(parsed.server_url).toBe("https://custom.scratch.dev");
+    expect(parsed.server_url).toBe("https://custom.scratchwork.dev");
     expect(parsed.cf_access_client_id).toBe("my-client-id");
     expect(parsed.cf_access_client_secret).toBe("my-client-secret");
   });
 
   test("parses config without cf_access fields (undefined)", () => {
     const content = `
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 `;
     const parsed = parseSimpleToml(content);
     expect(parsed.cf_access_client_id).toBeUndefined();
@@ -66,10 +66,10 @@ server_url = "https://app.scratch.dev"
   test("parses config with comments and whitespace", () => {
     const content = `
 # This is a comment
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 `;
     const parsed = parseSimpleToml(content);
-    expect(parsed.server_url).toBe("https://app.scratch.dev");
+    expect(parsed.server_url).toBe("https://app.scratchwork.dev");
   });
 
   test("handles empty config", () => {
@@ -86,12 +86,12 @@ describe("Project Config TOML", () => {
   test("parses config with all fields", () => {
     const content = `
 name = "my-project"
-server_url = "https://custom.scratch.dev"
+server_url = "https://custom.scratchwork.dev"
 visibility = "public"
 `;
     const parsed = parseSimpleToml(content);
     expect(parsed.name).toBe("my-project");
-    expect(parsed.server_url).toBe("https://custom.scratch.dev");
+    expect(parsed.server_url).toBe("https://custom.scratchwork.dev");
     expect(parsed.visibility).toBe("public");
   });
 
@@ -128,29 +128,29 @@ describe("Global Config TOML Generation", () => {
   // Helper to generate TOML (matches the NEW pattern in user-config.ts)
   // NOTE: CF Access credentials are now stored in secrets.json, NOT in config.toml
   function generateGlobalConfigToml(config: { server_url?: string }): string {
-    const DEFAULT_SERVER_URL = 'https://app.scratch.dev';
+    const DEFAULT_SERVER_URL = 'https://app.scratchwork.dev';
     const escapeTomlString = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
     const lines = [
-      '# Scratch Cloud Global Configuration',
+      '# Scratchwork Cloud Global Configuration',
       '#',
-      '# These are your default settings for all Scratch projects.',
+      '# These are your default settings for all Scratchwork projects.',
       '# Run `scratch cloud config` from a non-project directory to update.',
-      '# Project-specific settings in .scratch/project.toml override these.',
+      '# Project-specific settings in .scratchwork/project.toml override these.',
       '',
       '# Default server URL',
       `server_url = "${escapeTomlString(config.server_url || DEFAULT_SERVER_URL)}"`,
     ];
 
     // NOTE: CF Access credentials are no longer stored in config.toml
-    // They are now stored in ~/.scratch/secrets.json for security
+    // They are now stored in ~/.scratchwork/secrets.json for security
 
     return lines.join('\n') + '\n';
   }
 
   test("generates config without cf_access credentials (moved to secrets)", () => {
     const toml = generateGlobalConfigToml({
-      server_url: "https://app.scratch.dev"
+      server_url: "https://app.scratchwork.dev"
     });
     // CF Access credentials should NOT be in config.toml anymore
     expect(toml).not.toContain('cf_access_client_id');
@@ -159,14 +159,14 @@ describe("Global Config TOML Generation", () => {
 
   test("includes server_url", () => {
     const toml = generateGlobalConfigToml({
-      server_url: "https://custom.scratch.dev"
+      server_url: "https://custom.scratchwork.dev"
     });
-    expect(toml).toContain('server_url = "https://custom.scratch.dev"');
+    expect(toml).toContain('server_url = "https://custom.scratchwork.dev"');
   });
 });
 
 describe("Secrets JSON Format", () => {
-  // CF Access credentials are now stored as JSON in ~/.scratch/secrets.json
+  // CF Access credentials are now stored as JSON in ~/.scratchwork/secrets.json
   function generateSecretsJson(secrets: { cf_access_client_id?: string; cf_access_client_secret?: string }): string {
     return JSON.stringify(secrets, null, 2) + '\n';
   }
@@ -220,8 +220,8 @@ describe("TOML String Escaping", () => {
 
 describe("Validation", () => {
   // Import validators from shared
-  const { validateProjectName } = require('@scratch/shared/project');
-  const { validateGroupInput } = require('@scratch/shared');
+  const { validateProjectName } = require('@scratchwork/shared/project');
+  const { validateGroupInput } = require('@scratchwork/shared');
 
   describe("Project Name Validation", () => {
     test("accepts valid project names", () => {
@@ -296,7 +296,7 @@ describe("Server URL Validation", () => {
   }
 
   test("accepts valid HTTPS URLs", () => {
-    expect(validateServerUrl("https://app.scratch.dev")).toBeNull();
+    expect(validateServerUrl("https://app.scratchwork.dev")).toBeNull();
     expect(validateServerUrl("https://custom.example.com")).toBeNull();
   });
 
@@ -320,7 +320,7 @@ describe("Config File Operations", () => {
     const projectDir = path.join(tempDir, "project-dir-test");
     await fs.mkdir(projectDir, { recursive: true });
 
-    const scratchDir = path.join(projectDir, ".scratch");
+    const scratchDir = path.join(projectDir, ".scratchwork");
     const configPath = path.join(scratchDir, "project.toml");
 
     // Simulate saveProjectConfig behavior
@@ -336,7 +336,7 @@ describe("Config File Operations", () => {
 
   test("overwrites existing config", async () => {
     const projectDir = path.join(tempDir, "project-overwrite-test");
-    const scratchDir = path.join(projectDir, ".scratch");
+    const scratchDir = path.join(projectDir, ".scratchwork");
     const configPath = path.join(scratchDir, "project.toml");
 
     await fs.mkdir(scratchDir, { recursive: true });
@@ -353,7 +353,7 @@ describe("Config File Operations", () => {
     const projectDir = path.join(tempDir, "project-missing-test");
     await fs.mkdir(projectDir, { recursive: true });
 
-    const configPath = path.join(projectDir, ".scratch", "project.toml");
+    const configPath = path.join(projectDir, ".scratchwork", "project.toml");
 
     try {
       await fs.readFile(configPath, "utf-8");
@@ -368,27 +368,27 @@ describe("Config Precedence", () => {
   // Test that project config fields take precedence over global config
 
   test("project server_url overrides global when set", () => {
-    const globalConfig = { server_url: "https://global.scratch.dev" };
-    const projectConfig = { server_url: "https://project.scratch.dev" };
+    const globalConfig = { server_url: "https://global.scratchwork.dev" };
+    const projectConfig = { server_url: "https://project.scratchwork.dev" };
 
     const effectiveUrl = projectConfig.server_url || globalConfig.server_url;
-    expect(effectiveUrl).toBe("https://project.scratch.dev");
+    expect(effectiveUrl).toBe("https://project.scratchwork.dev");
   });
 
   test("falls back to global when project server_url not set", () => {
-    const globalConfig = { server_url: "https://global.scratch.dev" };
+    const globalConfig = { server_url: "https://global.scratchwork.dev" };
     const projectConfig = { server_url: undefined };
 
     const effectiveUrl = projectConfig.server_url || globalConfig.server_url;
-    expect(effectiveUrl).toBe("https://global.scratch.dev");
+    expect(effectiveUrl).toBe("https://global.scratchwork.dev");
   });
 
   test("falls back to default when neither set", () => {
     const globalConfig = { server_url: undefined };
     const projectConfig = { server_url: undefined };
-    const defaultUrl = "https://app.scratch.dev";
+    const defaultUrl = "https://app.scratchwork.dev";
 
     const effectiveUrl = projectConfig.server_url || globalConfig.server_url || defaultUrl;
-    expect(effectiveUrl).toBe("https://app.scratch.dev");
+    expect(effectiveUrl).toBe("https://app.scratchwork.dev");
   });
 });

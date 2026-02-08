@@ -11,7 +11,7 @@ const SESSION_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000
  *
  * @param db - Database client
  * @param userId - User ID to create session for
- * @param userAgent - Optional user agent string (defaults to 'scratch-cli')
+ * @param userAgent - Optional user agent string (defaults to 'scratchwork-cli')
  * @returns The session token (to be sent to the client)
  */
 export async function createSessionForUser(
@@ -30,7 +30,7 @@ export async function createSessionForUser(
       ${userId},
       ${sessionToken},
       ${expiresAt.toISOString()},
-      ${userAgent ?? 'scratch-cli'},
+      ${userAgent ?? 'scratchwork-cli'},
       datetime('now'),
       datetime('now')
     )

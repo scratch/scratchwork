@@ -51,25 +51,25 @@ describe("PATHS", () => {
     expect(PATHS.projectConfig).toBeDefined();
   });
 
-  test("secrets paths are in ~/.scratch/", () => {
-    expect(PATHS.secretsDir).toContain(".scratch");
-    expect(PATHS.credentials).toContain(".scratch");
-    expect(PATHS.secrets).toContain(".scratch");
+  test("secrets paths are in ~/.scratchwork/", () => {
+    expect(PATHS.secretsDir).toContain(".scratchwork");
+    expect(PATHS.credentials).toContain(".scratchwork");
+    expect(PATHS.secrets).toContain(".scratchwork");
   });
 
-  test("config paths are in ~/.config/scratch/", () => {
+  test("config paths are in ~/.config/scratchwork/", () => {
     expect(PATHS.configDir).toContain(".config");
     expect(PATHS.userConfig).toContain(".config");
   });
 
   test("project config is a relative path", () => {
-    expect(PATHS.projectConfig).toBe(".scratch/project.toml");
+    expect(PATHS.projectConfig).toBe(".scratchwork/project.toml");
   });
 });
 
 describe("DEFAULT_SERVER_URL", () => {
   test("is the production URL", () => {
-    expect(DEFAULT_SERVER_URL).toBe("https://app.scratch.dev");
+    expect(DEFAULT_SERVER_URL).toBe("https://app.scratchwork.dev");
   });
 });
 
@@ -138,24 +138,24 @@ describe("Server URL utilities", () => {
   });
 
   describe("getServerUrl", () => {
-    const originalEnv = process.env.SCRATCH_SERVER_URL;
+    const originalEnv = process.env.SCRATCHWORK_SERVER_URL;
 
     afterEach(() => {
       if (originalEnv === undefined) {
-        delete process.env.SCRATCH_SERVER_URL;
+        delete process.env.SCRATCHWORK_SERVER_URL;
       } else {
-        process.env.SCRATCH_SERVER_URL = originalEnv;
+        process.env.SCRATCHWORK_SERVER_URL = originalEnv;
       }
     });
 
     test("returns default URL when env var not set", async () => {
-      delete process.env.SCRATCH_SERVER_URL;
+      delete process.env.SCRATCHWORK_SERVER_URL;
       const url = await getServerUrl();
       expect(url).toBe(DEFAULT_SERVER_URL);
     });
 
     test("returns env var when set", async () => {
-      process.env.SCRATCH_SERVER_URL = "https://custom.example.com";
+      process.env.SCRATCHWORK_SERVER_URL = "https://custom.example.com";
       const url = await getServerUrl();
       expect(url).toBe("https://custom.example.com");
     });
@@ -180,14 +180,14 @@ describe("Credentials", () => {
           email: "test@example.com",
           name: "Test User",
         },
-        server: "https://app.scratch.dev",
+        server: "https://app.scratchwork.dev",
       };
 
       expect(credentials.token).toBe("test-token");
       expect(credentials.user.id).toBe("user-123");
       expect(credentials.user.email).toBe("test@example.com");
       expect(credentials.user.name).toBe("Test User");
-      expect(credentials.server).toBe("https://app.scratch.dev");
+      expect(credentials.server).toBe("https://app.scratchwork.dev");
     });
 
     test("credentials can have null name", () => {
@@ -198,7 +198,7 @@ describe("Credentials", () => {
           email: "test@example.com",
           name: null,
         },
-        server: "https://app.scratch.dev",
+        server: "https://app.scratchwork.dev",
       };
 
       expect(credentials.user.name).toBeNull();
@@ -214,7 +214,7 @@ describe("Credentials", () => {
           email: "test@example.com",
           name: null,
         },
-        server: "https://app.scratch.dev",
+        server: "https://app.scratchwork.dev",
       };
 
       // Required field checks
@@ -230,7 +230,7 @@ describe("Credentials", () => {
           email: "test@example.com",
           name: null,
         },
-        server: "https://app.scratch.dev",
+        server: "https://app.scratchwork.dev",
       };
 
       const isValid = (invalidCredentials as any).token && typeof (invalidCredentials as any).token === "string";
@@ -244,7 +244,7 @@ describe("Credentials", () => {
           email: "test@example.com",
           name: null,
         },
-        server: "https://app.scratch.dev",
+        server: "https://app.scratchwork.dev",
       };
 
       const isValid = (invalidCredentials as any).user?.id && typeof (invalidCredentials as any).user.id === "string";
@@ -258,7 +258,7 @@ describe("Credentials", () => {
           id: "user-123",
           name: null,
         },
-        server: "https://app.scratch.dev",
+        server: "https://app.scratchwork.dev",
       };
 
       const isValid = (invalidCredentials as any).user?.email && typeof (invalidCredentials as any).user.email === "string";
@@ -275,17 +275,17 @@ describe("Project Config", () => {
   beforeEach(async () => {
     counter++;
     projectDir = path.join(tempDir, `project-${Date.now()}-${counter}-${Math.random().toString(36).slice(2)}`);
-    configPath = path.join(projectDir, ".scratch", "project.toml");
+    configPath = path.join(projectDir, ".scratchwork", "project.toml");
     await fs.mkdir(projectDir, { recursive: true });
   });
 
   describe("saveProjectConfig", () => {
-    test("creates .scratch directory if needed", async () => {
+    test("creates .scratchwork directory if needed", async () => {
       await saveProjectConfig(projectDir, {
         name: "test-project",
       });
 
-      const scratchDir = path.join(projectDir, ".scratch");
+      const scratchDir = path.join(projectDir, ".scratchwork");
       const exists = await fs.exists(scratchDir);
       expect(exists).toBe(true);
     });
@@ -293,13 +293,13 @@ describe("Project Config", () => {
     test("writes config file with correct content", async () => {
       await saveProjectConfig(projectDir, {
         name: "test-project",
-        server_url: "https://custom.scratch.dev",
+        server_url: "https://custom.scratchwork.dev",
         visibility: "public",
       });
 
       const content = await fs.readFile(configPath, "utf-8");
       expect(content).toContain('name = "test-project"');
-      expect(content).toContain('server_url = "https://custom.scratch.dev"');
+      expect(content).toContain('server_url = "https://custom.scratchwork.dev"');
       expect(content).toContain('visibility = "public"');
     });
 
@@ -320,7 +320,7 @@ describe("Project Config", () => {
       });
 
       const content = await fs.readFile(configPath, "utf-8");
-      expect(content).toContain("# Scratch Cloud Project Configuration");
+      expect(content).toContain("# Scratchwork Cloud Project Configuration");
     });
   });
 
@@ -336,14 +336,14 @@ describe("Project Config", () => {
         configPath,
         `
 name = "test-project"
-server_url = "https://custom.scratch.dev"
+server_url = "https://custom.scratchwork.dev"
 visibility = "public"
 `
       );
 
       const config = await loadProjectConfig(projectDir);
       expect(config.name).toBe("test-project");
-      expect(config.server_url).toBe("https://custom.scratch.dev");
+      expect(config.server_url).toBe("https://custom.scratchwork.dev");
       expect(config.visibility).toBe("public");
     });
   });
@@ -392,8 +392,8 @@ describe("Migration", () => {
   describe("CF Access migration logic", () => {
     test("detects CF Access fields in old config format", () => {
       const oldConfig = `
-# Scratch Cloud Global Configuration
-server_url = "https://app.scratch.dev"
+# Scratchwork Cloud Global Configuration
+server_url = "https://app.scratchwork.dev"
 namespace = "acme.com"
 cf_access_client_id = "my-client-id"
 cf_access_client_secret = "my-client-secret"
@@ -409,7 +409,7 @@ cf_access_client_secret = "my-client-secret"
 
     test("extracts CF Access credentials from old config", () => {
       const oldConfig = `
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 cf_access_client_id = "my-client-id"
 cf_access_client_secret = "my-client-secret"
 `;
@@ -424,8 +424,8 @@ cf_access_client_secret = "my-client-secret"
 
     test("removes CF Access fields from migrated config", () => {
       const lines = [
-        '# Scratch Cloud Global Configuration',
-        'server_url = "https://app.scratch.dev"',
+        '# Scratchwork Cloud Global Configuration',
+        'server_url = "https://app.scratchwork.dev"',
         '# Cloudflare Access service token',
         'cf_access_client_id = "my-client-id"',
         'cf_access_client_secret = "my-client-secret"',

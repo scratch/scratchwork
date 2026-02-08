@@ -8,7 +8,7 @@ export interface CfAccessEntry {
 
 /**
  * CF Access credentials file structure - keyed by normalized server URL
- * Stored in ~/.scratch/cf-access.json (0o600)
+ * Stored in ~/.scratchwork/cf-access.json (0o600)
  */
 export interface CfAccessFile {
   [serverUrl: string]: CfAccessEntry
@@ -37,7 +37,7 @@ export interface CredentialEntry {
 
 /**
  * Full credentials file structure - keyed by normalized server URL
- * Stored in ~/.scratch/credentials.json (0o600)
+ * Stored in ~/.scratchwork/credentials.json (0o600)
  */
 export interface CredentialsFile {
   [serverUrl: string]: CredentialEntry
@@ -52,7 +52,7 @@ export interface Credentials extends CredentialEntry {
 
 /**
  * Project config - can be checked into version control
- * Stored in .scratch/project.toml (0o644)
+ * Stored in .scratchwork/project.toml (0o644)
  */
 export interface ProjectConfig {
   id?: string  // Project ID from server (do not modify)
@@ -63,7 +63,7 @@ export interface ProjectConfig {
 
 /**
  * Global user config - applies to all projects
- * Stored in ~/.config/scratch/config.toml (0o644)
+ * Stored in ~/.config/scratchwork/config.toml (0o644)
  */
 export interface GlobalConfig {
   server_url?: string

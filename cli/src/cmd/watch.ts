@@ -9,7 +9,7 @@ import { VERSION } from '../version';
 import { bunInstall } from '../util';
 import log from '../logger';
 
-export const CACHE_DIR = path.join(os.homedir(), '.scratch', 'cache');
+export const CACHE_DIR = path.join(os.homedir(), '.scratchwork', 'cache');
 
 interface WatchOptions {
   port?: number;
@@ -34,7 +34,7 @@ export async function watchCommand(
   log.info(`Rendering ${isDirectory ? 'directory' : 'file'} ${filePath}`);
 
   // Create temp directory
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scratch-watch-'));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scratchwork-watch-'));
   const tempPagesDir = path.join(tempDir, 'pages');
 
   // Cleanup function
@@ -62,8 +62,8 @@ export async function watchCommand(
     log.debug(`Created temp project in ${tempDir}`);
 
     // 2. Set up cached node_modules
-    // Structure: ~/.scratch/cache/[version]/node_modules/
-    // Symlink temp/node_modules → ~/.scratch/cache/[version]/node_modules/
+    // Structure: ~/.scratchwork/cache/[version]/node_modules/
+    // Symlink temp/node_modules → ~/.scratchwork/cache/[version]/node_modules/
     const cacheVersionDir = path.join(CACHE_DIR, VERSION);
     const nodeModulesCache = path.join(cacheVersionDir, 'node_modules');
     await fs.mkdir(nodeModulesCache, { recursive: true });

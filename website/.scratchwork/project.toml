@@ -1,6 +1,6 @@
-# Scratch Cloud Project Configuration
+# Scratchwork Cloud Project Configuration
 #
-# This file configures how your project deploys to Scratch Cloud.
+# This file configures how your project deploys to Scratchwork Cloud.
 # Run `scratch cloud config` to update these settings interactively.
 
 # Project ID (do not modify)
@@ -10,7 +10,7 @@ id = "8ed7f3ff-077d-49e2-9cda-46ac8841762a"
 name = "scratch-dev"
 
 # Server URL (overrides global default)
-server_url = "https://app.scratch.dev"
+server_url = "https://app.scratchwork.dev"
 
 # Visibility
 visibility = "public"

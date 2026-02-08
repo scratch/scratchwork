@@ -46,7 +46,7 @@ describe('ui-logo.ts', () => {
     expect(LOGO_SVG).toContain('viewBox="0 0 1000 360"')
     // Has logo class
     expect(LOGO_SVG).toContain('class="logo"')
-    // Contains the "Scratch" text
-    expect(LOGO_SVG).toContain('Scratch</text>')
+    // Contains the "Scratchwork" text
+    expect(LOGO_SVG).toContain('Scratchwork</text>')
   })
 })

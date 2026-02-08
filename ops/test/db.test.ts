@@ -19,9 +19,9 @@ describe('runD1Query', () => {
 
     // Mock getInstanceResourceNames to return test resource names
     getInstanceResourceNamesSpy = spyOn(configModule, 'getInstanceResourceNames').mockReturnValue({
-      workerName: 'test-scratch-server',
-      bucketName: 'test-scratch-files',
-      dbName: 'test-scratch-db',
+      workerName: 'test-scratchwork-server',
+      bucketName: 'test-scratchwork-files',
+      dbName: 'test-scratchwork-db',
     })
   })
 
@@ -61,7 +61,7 @@ describe('runD1Query', () => {
     await runD1Query('test', ['--command', 'SELECT * FROM users'])
 
     expect(capturedArgs).toEqual([
-      'bunx', 'wrangler', 'd1', 'execute', 'test-scratch-db',
+      'bunx', 'wrangler', 'd1', 'execute', 'test-scratchwork-db',
       '-c', 'wrangler.test.toml', '--remote',
       '--command', 'SELECT * FROM users',
     ])

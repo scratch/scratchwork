@@ -173,15 +173,15 @@ describe('buildProjectUrls', () => {
 
   test('www URL uses https for non-localhost wwwDomain', () => {
     const urls = buildProjectUrls({
-      pagesDomain: 'pages.scratch.dev',
+      pagesDomain: 'pages.scratchwork.dev',
       projectName: 'my-app',
       ownerId: 'user123',
       ownerEmail: 'pete@company.com',
       allowedUsers: '*',
-      wwwDomain: 'scratch.dev',
+      wwwDomain: 'scratchwork.dev',
     })
 
-    expect(urls.www).toBe('https://scratch.dev/')
+    expect(urls.www).toBe('https://scratchwork.dev/')
   })
 })
 

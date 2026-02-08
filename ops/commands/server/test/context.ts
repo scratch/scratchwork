@@ -84,7 +84,7 @@ export async function initializeContext(instance: string): Promise<TestContext> 
   const serverUrl = `https://${appDomain}`
 
   const projectName = generateRandomProjectName()
-  const tempDir = join(tmpdir(), `scratch-${instance}-test-${Date.now()}`)
+  const tempDir = join(tmpdir(), `scratchwork-${instance}-test-${Date.now()}`)
 
   console.log(`Running integration test against ${instance}...\n`)
   console.log(`App domain: ${appDomain}`)

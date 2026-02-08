@@ -1,33 +1,33 @@
 ---
 # Page metadata
-title: "Scratch Page"                                           # Page title and og:title
+title: "Scratchwork Page"                                           # Page title and og:title
 description: "A CLI for building static MDX websites with Bun"  # Meta description and og:description
 keywords: ["MDX", "static site", "React", "Bun", "markdown"]    # Meta keywords
-author: "Scratch"                                               # Meta author
+author: "Scratchwork"                                               # Meta author
 lang: "en"                                                      # HTML lang attribute
 ---
 
-![Scratch logo](/scratch-logo.svg)
+![Scratchwork logo](/scratchwork-logo.svg)
 
-Scratch is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/). 
+Scratchwork is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/).
 
-Scratch compiles MDX files into beautiful static websites that can be shared publicly or privately with a single command. It's opinionated about everything so that you can focus on writing without worrying about scaffolding, dependencies, formatting or styling. 
+Scratchwork compiles MDX files into beautiful static websites that can be shared publicly or privately with a single command. It's opinionated about everything so that you can focus on writing without worrying about scaffolding, dependencies, formatting or styling.
 
-Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code. 
+Scratchwork was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code.
 
 
 ## Quick Start
 
-Scratch requires no configuration so it's easy to get started. First, install:
+Scratchwork requires no configuration so it's easy to get started. First, install:
 
 ```bash
-# Install Scratch
+# Install Scratchwork
 curl -fsSL https://scratch.dev/install.sh | bash
 ```
 or
 
 ```bash
-# Install Scratch
+# Install Scratchwork
 curl -fsSL https://scratch.dev/install.md | claude
 ```
 
@@ -44,14 +44,14 @@ scratch dev
 Now you're ready to start writing in `pages/index.mdx`. Use the `publish` command to share with specific people, your team, or the world:
 
 ```bash
-# Publish your project to a Scratch server. 
+# Publish your project to a Scratchwork server.
 # Grant access to specific people, @yourdomain.com, or the world
 scratch publish
 ```
 
-## What can you do with Scratch?
+## What can you do with Scratchwork?
 
-Scratch turns MDX content into static HTML and Javascript like this:
+Scratchwork turns MDX content into static HTML and Javascript like this:
 
 <div className="grid grid-cols-[1fr_auto_1fr] items-stretch my-8">
   <div className="pl-8 mx-8 pb-4 border border-gray-200 rounded-lg shadow-md">
@@ -79,7 +79,7 @@ Scratch turns MDX content into static HTML and Javascript like this:
   </div>
 </div> 
 
-Scratch makes it easy to express your ideas with code. Here are a few of the ways you can do that:
+Scratchwork makes it easy to express your ideas with code. Here are a few of the ways you can do that:
 
 ### Formatting text
 
@@ -95,7 +95,7 @@ For example, you can use inline components for things like <Highlight>highlighti
     Want to draw attention to a snippet or quote? That's easy to do with a custom component.
 </HighlightedSnippet>
 
-Scratch doesn't include any of these components out-of-the-box. Instead, you'll create them as the need arises while you write, effectively building a custom word processor for each document. It's a lot of fun!
+Scratchwork doesn't include any of these components out-of-the-box. Instead, you'll create them as the need arises while you write, effectively building a custom word processor for each document. It's a lot of fun!
 
 ### Interactive demos
 
@@ -111,14 +111,14 @@ Use the `scratch publish` command to share your writing, either privately with y
 
 For now, you can publish your work for free on [scratch.dev](https://scratch.dev). Projects published on scratch.dev must be less than 5MB and will persist for only 30 days.
 
-You can also [host your own Scratch server](/docs#self-hosting) on Cloudflare and protect it with Cloudflare Access for additional security.
+You can also [host your own Scratchwork server](/docs#self-hosting) on Cloudflare and protect it with Cloudflare Access for additional security.
 
 
 ## Acknowledgements
 
-Scratch is built on the shoulders of giants:
+Scratchwork is built on the shoulders of giants:
 
-Scratch uses [Bun](https://bun.com/) for lightning-fast builds, development with HMR, native typescript support, and bundling as a portable executable.
+Scratchwork uses [Bun](https://bun.com/) for lightning-fast builds, development with HMR, native typescript support, and bundling as a portable executable.
 
 [React](https://react.dev/) and [MDX](https://mdxjs.com/) make it possible to compile Markdown and code into static websites. [Tailwind CSS](https://tailwindcss.com/) makes them look good, and makes it easy to style custom components.
 
@@ -128,6 +128,6 @@ Content preprocessing relies on [unified](https://unifiedjs.com/), with [remark-
 
 [Commander.js](https://github.com/tj/commander.js) scaffolds the CLI.
 
-Scratch server uses [hono](https://hono.dev) for routing and [Better Auth](https://better-auth.com) for authentication.
+Scratchwork server uses [hono](https://hono.dev) for routing and [Better Auth](https://better-auth.com) for authentication.
 
-Additional dependencies can be found in the [Scratch repo](https://github.com/scratch/scratch).
+Additional dependencies can be found in the [Scratchwork repo](https://github.com/scratch/scratch).

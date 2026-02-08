@@ -107,7 +107,7 @@ describe("dev server lock file", () => {
 
   beforeEach(async () => {
     lockDir = await fs.mkdtemp(path.join(os.tmpdir(), "test-lock-"));
-    lockPath = path.join(lockDir, ".scratch", "dev.lock");
+    lockPath = path.join(lockDir, ".scratchwork", "dev.lock");
   });
 
   afterEach(async () => {
@@ -116,7 +116,7 @@ describe("dev server lock file", () => {
 
   describe("getLockFilePath", () => {
     test("returns correct path", () => {
-      expect(getLockFilePath("/project")).toBe("/project/.scratch/dev.lock");
+      expect(getLockFilePath("/project")).toBe("/project/.scratchwork/dev.lock");
     });
   });
 

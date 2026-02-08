@@ -55,7 +55,7 @@ export function registerCliCommands(program: Command): void {
   // Convenience aliases for common scripts
   cli
     .command('build')
-    .description('Build the scratch CLI')
+    .description('Build the scratchwork CLI')
     .action(async () => {
       await runCliScript('build', [])
     })

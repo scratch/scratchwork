@@ -7,7 +7,7 @@ export interface TemplateFile {
 }
 
 export const templates: Record<string, TemplateFile> = {
-  'public/scratch-logo.svg': { content: `<?xml version="1.0" encoding="UTF-8"?>
+  'public/scratchwork-logo.svg': { content: `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 360">
   <defs>
     <style>
@@ -217,7 +217,7 @@ export const templates: Record<string, TemplateFile> = {
   </g>
 
   <!-- Text -->
-  <text x="340" y="245" class="logo-text">Scratch</text>
+  <text x="340" y="245" class="logo-text">Scratchwork</text>
 </svg>
 `, binary: false },
 
@@ -421,9 +421,9 @@ export const templates: Record<string, TemplateFile> = {
 </svg>
 `, binary: false },
 
-  '.gitignore': { content: `# scratch build cache (but allow project.toml to be committed)
-.scratch/*
-!.scratch/project.toml
+  '.gitignore': { content: `# scratchwork build cache (but allow project.toml to be committed)
+.scratchwork/*
+!.scratchwork/project.toml
 
 # dependencies (bun install)
 node_modules
@@ -520,11 +520,11 @@ export const MDXComponents = {};
 
   'AGENTS.md': { content: `# AGENTS.md
 
-This is a **scratch** project - a static site built from MDX files using the scratch CLI.
+This is a **Scratchwork** project - a static site built from MDX files using the scratch CLI.
 
-## What is scratch?
+## What is Scratchwork?
 
-scratch is a CLI tool that compiles MDX (Markdown + JSX) files into a static website. It uses Bun as the build tool and bundler, React for rendering, and Tailwind CSS for styling.
+Scratchwork is a CLI tool that compiles MDX (Markdown + JSX) files into a static website. It uses Bun as the build tool and bundler, React for rendering, and Tailwind CSS for styling.
 
 ## CLI Commands
 
@@ -591,7 +591,7 @@ YAML frontmatter is automatically extracted and injected as HTML meta tags:
 - \`description\` - Meta description and og:description
 - \`image\` - og:image
 - \`keywords\` - Meta keywords
-- \`author\` - Meta author (also available as \`window.__scratch_author__\` for the Copyright component)
+- \`author\` - Meta author (also available as \`window.__scratchwork_author__\` for the Copyright component)
 
 ### URL Path Resolution
 
@@ -695,7 +695,7 @@ export default function PageWrapper({ children }) {
 }
 \`\`\`
 
-The default template includes Header, Footer, ScratchBadge, and Copyright components in \`src/template/\`. Customize these to change your site's layout.
+The default template includes Header, Footer, ScratchworkBadge, and Copyright components in \`src/template/\`. Customize these to change your site's layout.
 
 ### Markdown Components
 
@@ -714,21 +714,21 @@ Files in \`public/\` are copied directly to the build output. Reference them wit
 
 ### Static Assets in React Components
 
-**IMPORTANT:** When loading static assets from React components, you MUST use \`globalThis.__SCRATCH_BASE__\` as the URL base. This ensures assets load correctly when the site is deployed to a subdirectory.
+**IMPORTANT:** When loading static assets from React components, you MUST use \`globalThis.__SCRATCHWORK_BASE__\` as the URL base. This ensures assets load correctly when the site is deployed to a subdirectory.
 
 \`\`\`jsx
 // src/MyComponent.jsx
 export default function MyComponent() {
-  const base = globalThis.__SCRATCH_BASE__ || '';
+  const base = globalThis.__SCRATCHWORK_BASE__ || '';
   return <img src={\`\${base}/my-image.png\`} alt="My image" />;
 }
 \`\`\`
 
-See \`src/template/ScratchBadge.jsx\` for a working example.
+See \`src/template/ScratchworkBadge.jsx\` for a working example.
 
 ## Theming
 
-Scratch uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography) for markdown styling. The \`prose\` class is applied via PageWrapper.
+Scratchwork uses [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography) for markdown styling. The \`prose\` class is applied via PageWrapper.
 
 ### Customizing Typography
 
@@ -794,7 +794,7 @@ Use \`not-prose\` class to exclude elements from typography styling.
 These are generated and should be in \`.gitignore\`:
 
 - \`dist/\` - Build output
-- \`.scratch/\` - Build cache and project config
+- \`.scratchwork/\` - Build cache and project config
 `, binary: false },
 
   'pages/index.mdx': { content: `---
@@ -1176,20 +1176,20 @@ export default function HoverTooltip({ children }: HoverTooltipProps): React.Rea
 Read AGENTS.md for project context and conventions.
 `, binary: false },
 
-  '_config/global.toml': { content: `# Scratch Cloud Global Configuration
+  '_config/global.toml': { content: `# Scratchwork Cloud Global Configuration
 #
-# These are your default settings for all Scratch projects.
+# These are your default settings for all Scratchwork projects.
 # Run \`scratch cloud config\` from a non-project directory to update.
-# Project-specific settings in .scratch/project.toml override these.
+# Project-specific settings in .scratchwork/project.toml override these.
 
 # Default server URL
-# The Scratch Cloud server to deploy to.
-server_url = "https://app.scratch.dev"
+# The Scratchwork Cloud server to deploy to.
+server_url = "https://app.scratchwork.dev"
 `, binary: false },
 
-  '_config/project.toml': { content: `# Scratch Cloud Project Configuration
+  '_config/project.toml': { content: `# Scratchwork Cloud Project Configuration
 #
-# This file configures how your project deploys to Scratch Cloud.
+# This file configures how your project deploys to Scratchwork Cloud.
 # Run \`scratch cloud config\` to update these settings interactively.
 
 # Project name (required)
@@ -1197,9 +1197,9 @@ server_url = "https://app.scratch.dev"
 # This becomes part of your project URL.
 name = "my-project"
 
-# Scratch server URL (optional)
+# Scratchwork server URL (optional)
 # Override the global default server. Usually you don't need to change this.
-# server_url = "https://app.scratch.dev"
+# server_url = "https://app.scratchwork.dev"
 
 # Visibility (optional, defaults to "private")
 # Controls who can view your deployed site:
@@ -1370,30 +1370,30 @@ export default function PageWrapper({ children }) {
 }
 `, binary: false },
 
-  'src/template/Footer.jsx': { content: `import ScratchBadge from './ScratchBadge';
+  'src/template/Footer.jsx': { content: `import ScratchworkBadge from './ScratchworkBadge';
 import Copyright from './Copyright';
 
 export default function Footer() {
   return (
     <footer className="flex flex-col items-center gap-1 py-8">
-      <ScratchBadge />
+      <ScratchworkBadge />
       <Copyright />
     </footer>
   );
 }
 `, binary: false },
 
-  'src/template/ScratchBadge.jsx': { content: `export default function ScratchBadge() {
-  const base = globalThis.__SCRATCH_BASE__ || '';
+  'src/template/ScratchworkBadge.jsx': { content: `export default function ScratchworkBadge() {
+  const base = globalThis.__SCRATCHWORK_BASE__ || '';
   return (
     <a
-      href="https://scratch.dev"
+      href="https://scratchwork.dev"
       target="_blank"
       rel="noopener noreferrer"
       className="inline-flex items-center text-gray-400 text-sm font-normal no-underline hover:no-underline"
     >
       <span className="text-sm">Made from</span>
-      <img src={\`\${base}/scratch-logo.svg\`} alt="Scratch" className="h-9 pb-0.5" />
+      <img src={\`\${base}/scratchwork-logo.svg\`} alt="Scratchwork" className="h-9 pb-0.5" />
     </a>
   );
 }

@@ -2,7 +2,7 @@ import log from '../../logger'
 import { deploy, ApiError } from '../../cloud/api'
 import { buildCommand } from '../build'
 import { BuildContext } from '../../build/context'
-import { validateProjectName } from '@scratch/shared/project'
+import { validateProjectName } from '@scratchwork/shared/project'
 import { formatBytes, openBrowser, stripTrailingSlash } from '../../util'
 import {
   loadProjectConfig,
@@ -34,7 +34,7 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
 
   // Load project config first to check for server_url override
   let config = await loadProjectConfig(resolvedPath)
-  const configRelPath = '.scratch/project.toml'
+  const configRelPath = '.scratchwork/project.toml'
 
   // Load global config for fallback defaults
   const globalConfig = await loadGlobalConfig()
@@ -94,7 +94,7 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
   } else {
     // Valid name exists - save server_url to config if it was prompted
     if (serverUrlWasPrompted) {
-      log.info('Saving server URL to .scratch/project.toml...')
+      log.info('Saving server URL to .scratchwork/project.toml...')
       await saveProjectConfig(resolvedPath, {
         ...config,
         server_url: effectiveServerUrl,
@@ -225,7 +225,7 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
 
           // Save new config (preserve visibility and server_url from existing config, clear id for new project)
           log.info('')
-          log.info('Saving .scratch/project.toml...')
+          log.info('Saving .scratchwork/project.toml...')
           await saveProjectConfig(resolvedPath, {
             name: projectName,
             visibility: config.visibility,
@@ -250,9 +250,9 @@ export async function publishCommand(ctx: CloudContext, projectPath: string = '.
             log.error('This can happen if:')
             log.error(`  - The project was deleted from the server`)
             log.error(`  - You're logged in as a different user (currently logged in as ${credentials.user.email})`)
-            log.error(`  - The .scratch/project.toml contains an ID from a different server`)
+            log.error(`  - The .scratchwork/project.toml contains an ID from a different server`)
             log.error('')
-            log.error('To fix, remove the "id" line from .scratch/project.toml and publish again.')
+            log.error('To fix, remove the "id" line from .scratchwork/project.toml and publish again.')
             process.exit(1)
           } else if (code === 'WWW_PROJECT_MISMATCH') {
             log.error('')
@@ -320,7 +320,7 @@ async function runInteractiveSetup(
 
   // Save config
   log.info('')
-  log.info('Saving .scratch/project.toml...')
+  log.info('Saving .scratchwork/project.toml...')
   const newConfig: ProjectConfig = {
     name: projectName,
     visibility,

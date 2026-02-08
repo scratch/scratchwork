@@ -1,5 +1,7 @@
 # Changelog
 
+> **Note:** Scratch has been renamed to Scratchwork.
+
 ## [0.5.16] - 2026-02-05
 
 This release prevents conflicts when running multiple dev servers and fixes a bug with project visibility on first publish.
@@ -20,7 +22,7 @@ This release improves the server selection experience when publishing to multipl
 
 - When logged into multiple servers, the `publish` command now always prompts for server selection instead of silently using the global default
 - Server selection prompt now pre-selects the global default server when set, making it faster to confirm
-- Cleaner server URL display in prompts (e.g., `scratch.dev` instead of `https://app.scratch.dev`)
+- Cleaner server URL display in prompts (e.g., `scratchwork.dev` instead of `https://app.scratchwork.dev`)
 
 ## [0.5.14] - 2026-02-01
 
@@ -188,13 +190,13 @@ This release fixes the CLI login flow when connecting to servers protected by Cl
 
 ## [0.5.0] - 2026-01-14
 
-This release migrates Scratch to a monorepo structure, laying the groundwork for tighter integration between the CLI and Scratch Cloud server.
+This release migrates Scratchwork to a monorepo structure, laying the groundwork for tighter integration between the CLI and Scratchwork Cloud server.
 
 ### Improvements
 
 - Reorganized repository into a monorepo with dedicated `cli/`, `server/`, and `shared/` packages
 - Shared TypeScript types between CLI and server for better consistency
-- Installation URL simplified to `https://scratch.dev/install.sh`
+- Installation URL simplified to `https://scratchwork.dev/install.sh`
 
 ## [0.4.7] - 2026-01-14
 
@@ -203,7 +205,7 @@ This release simplifies the CLI authentication flow by replacing the device code
 ### Improvements
 
 - Simplified login flow: The CLI now opens your browser directly for authentication instead of displaying a code to enter manually. After approving in the browser, authentication completes automatically via localhost callback.
-- Styled authentication callback pages to match the Scratch server UI for a consistent experience
+- Styled authentication callback pages to match the Scratchwork server UI for a consistent experience
 
 ## [0.4.6] - 2026-01-14
 
@@ -229,11 +231,11 @@ This release simplifies the project model by removing namespaces and fixes Cloud
 
 ## [0.4.4] - 2026-01-11
 
-This release adds support for connecting to multiple Scratch Cloud servers and improves the project deletion workflow.
+This release adds support for connecting to multiple Scratchwork Cloud servers and improves the project deletion workflow.
 
 ### Features
 
-- Added global `--server-url` flag to all cloud commands, allowing you to target different Scratch Cloud servers without changing your configuration
+- Added global `--server-url` flag to all cloud commands, allowing you to target different Scratchwork Cloud servers without changing your configuration
 - Server URLs are automatically normalized (adds `https://` and `app.` subdomain when needed)
 - Added `--force` flag to `cloud projects delete` to skip the confirmation prompt
 
@@ -274,11 +276,11 @@ This release fixes a security issue with Cloudflare Access credential storage.
 
 ## [0.4.0] - 2026-01-07
 
-This release introduces Scratch Cloud, a complete deployment platform for hosting your static sites with project management and shareable links.
+This release introduces Scratchwork Cloud, a complete deployment platform for hosting your static sites with project management and shareable links.
 
 ### Features
 
-- Added `cloud` command suite for deploying and managing projects on Scratch Cloud:
+- Added `cloud` command suite for deploying and managing projects on Scratchwork Cloud:
   - `cloud login` / `cloud logout` / `cloud whoami` - Authentication via OAuth device flow
   - `cloud config` - Configure cloud settings including custom server URLs
   - `cloud deploy` - Build and deploy projects with automatic URL generation

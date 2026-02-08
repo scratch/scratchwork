@@ -26,7 +26,7 @@ export const normalizeServerUrl = normalizeServerUrlInput
  *
  * Server URL resolution precedence:
  * 1. CLI argument (--server flag)
- * 2. Project config (.scratch/project.toml server_url)
+ * 2. Project config (.scratchwork/project.toml server_url)
  * 3. If logged into exactly one server, use it
  * 4. If logged into multiple servers, prompt user to choose
  * 5. If not logged in anywhere, use default

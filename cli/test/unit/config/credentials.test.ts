@@ -23,16 +23,16 @@ import type { CredentialEntry, CredentialsFile, Credentials } from "../../../src
 
 describe("normalizeServerUrl", () => {
   test("removes trailing slashes", () => {
-    expect(normalizeServerUrl("https://app.scratch.dev/")).toBe("https://app.scratch.dev");
-    expect(normalizeServerUrl("https://app.scratch.dev///")).toBe("https://app.scratch.dev");
+    expect(normalizeServerUrl("https://app.scratchwork.dev/")).toBe("https://app.scratchwork.dev");
+    expect(normalizeServerUrl("https://app.scratchwork.dev///")).toBe("https://app.scratchwork.dev");
   });
 
   test("converts to lowercase", () => {
-    expect(normalizeServerUrl("https://APP.Scratch.DEV")).toBe("https://app.scratch.dev");
+    expect(normalizeServerUrl("https://APP.Scratchwork.DEV")).toBe("https://app.scratchwork.dev");
   });
 
   test("handles URLs with paths", () => {
-    expect(normalizeServerUrl("https://app.scratch.dev/api/")).toBe("https://app.scratch.dev/api");
+    expect(normalizeServerUrl("https://app.scratchwork.dev/api/")).toBe("https://app.scratchwork.dev/api");
   });
 
   test("handles localhost URLs", () => {
@@ -41,7 +41,7 @@ describe("normalizeServerUrl", () => {
   });
 
   test("returns unchanged URL if already normalized", () => {
-    expect(normalizeServerUrl("https://app.scratch.dev")).toBe("https://app.scratch.dev");
+    expect(normalizeServerUrl("https://app.scratchwork.dev")).toBe("https://app.scratchwork.dev");
   });
 
   test("handles empty string", () => {
@@ -49,26 +49,26 @@ describe("normalizeServerUrl", () => {
   });
 
   test("handles URL with multiple path segments", () => {
-    expect(normalizeServerUrl("https://app.scratch.dev/api/v1/")).toBe("https://app.scratch.dev/api/v1");
+    expect(normalizeServerUrl("https://app.scratchwork.dev/api/v1/")).toBe("https://app.scratchwork.dev/api/v1");
   });
 
   test("handles URL with port", () => {
-    expect(normalizeServerUrl("https://app.scratch.dev:443/")).toBe("https://app.scratch.dev:443");
+    expect(normalizeServerUrl("https://app.scratchwork.dev:443/")).toBe("https://app.scratchwork.dev:443");
   });
 
   test("preserves query strings", () => {
-    expect(normalizeServerUrl("https://app.scratch.dev?foo=bar")).toBe("https://app.scratch.dev?foo=bar");
+    expect(normalizeServerUrl("https://app.scratchwork.dev?foo=bar")).toBe("https://app.scratchwork.dev?foo=bar");
   });
 });
 
 describe("Credentials File Format", () => {
   test("stores multiple server credentials", () => {
     const file: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "prod-token",
         user: { id: "user-1", email: "prod@example.com", name: "Prod User" },
       },
-      "https://staging.scratch.dev": {
+      "https://staging.scratchwork.dev": {
         token: "staging-token",
         user: { id: "user-2", email: "staging@example.com", name: null },
       },
@@ -79,8 +79,8 @@ describe("Credentials File Format", () => {
     };
 
     expect(Object.keys(file)).toHaveLength(3);
-    expect(file["https://app.scratch.dev"].token).toBe("prod-token");
-    expect(file["https://staging.scratch.dev"].token).toBe("staging-token");
+    expect(file["https://app.scratchwork.dev"].token).toBe("prod-token");
+    expect(file["https://staging.scratchwork.dev"].token).toBe("staging-token");
     expect(file["http://localhost:8788"].token).toBe("local-token");
   });
 
@@ -121,10 +121,10 @@ describe("Credentials File Format", () => {
         email: "test@example.com",
         name: "Test User",
       },
-      server: "https://app.scratch.dev",
+      server: "https://app.scratchwork.dev",
     };
 
-    expect(credentials.server).toBe("https://app.scratch.dev");
+    expect(credentials.server).toBe("https://app.scratchwork.dev");
     expect(credentials.token).toBe("test-token");
   });
 });
@@ -281,11 +281,11 @@ describe("Multi-server Credential Lookup Logic", () => {
   }
 
   const mockStore: CredentialsFile = {
-    "https://app.scratch.dev": {
+    "https://app.scratchwork.dev": {
       token: "prod-token",
       user: { id: "user-1", email: "prod@example.com", name: "Prod User" },
     },
-    "https://staging.scratch.dev": {
+    "https://staging.scratchwork.dev": {
       token: "staging-token",
       user: { id: "user-2", email: "staging@example.com", name: null },
     },
@@ -296,30 +296,30 @@ describe("Multi-server Credential Lookup Logic", () => {
   };
 
   test("returns credentials for known server", () => {
-    const creds = lookupCredentials(mockStore, "https://app.scratch.dev");
+    const creds = lookupCredentials(mockStore, "https://app.scratchwork.dev");
     expect(creds).not.toBeNull();
     expect(creds!.token).toBe("prod-token");
   });
 
   test("returns null for unknown server", () => {
-    const creds = lookupCredentials(mockStore, "https://unknown.scratch.dev");
+    const creds = lookupCredentials(mockStore, "https://unknown.scratchwork.dev");
     expect(creds).toBeNull();
   });
 
   test("normalizes URL before lookup", () => {
-    const creds = lookupCredentials(mockStore, "https://APP.SCRATCH.DEV/");
+    const creds = lookupCredentials(mockStore, "https://APP.SCRATCHWORK.DEV/");
     expect(creds).not.toBeNull();
     expect(creds!.token).toBe("prod-token");
   });
 
   test("includes server URL in returned credentials", () => {
-    const creds = lookupCredentials(mockStore, "https://app.scratch.dev");
-    expect(creds!.server).toBe("https://app.scratch.dev");
+    const creds = lookupCredentials(mockStore, "https://app.scratchwork.dev");
+    expect(creds!.server).toBe("https://app.scratchwork.dev");
   });
 
   test("preserves original server URL case in returned credentials", () => {
-    const creds = lookupCredentials(mockStore, "https://APP.SCRATCH.DEV");
-    expect(creds!.server).toBe("https://APP.SCRATCH.DEV");
+    const creds = lookupCredentials(mockStore, "https://APP.SCRATCHWORK.DEV");
+    expect(creds!.server).toBe("https://APP.SCRATCHWORK.DEV");
   });
 
   test("looks up localhost correctly", () => {
@@ -329,8 +329,8 @@ describe("Multi-server Credential Lookup Logic", () => {
   });
 
   test("returns correct credentials for different servers", () => {
-    const prodCreds = lookupCredentials(mockStore, "https://app.scratch.dev");
-    const stagingCreds = lookupCredentials(mockStore, "https://staging.scratch.dev");
+    const prodCreds = lookupCredentials(mockStore, "https://app.scratchwork.dev");
+    const stagingCreds = lookupCredentials(mockStore, "https://staging.scratchwork.dev");
 
     expect(prodCreds!.user.email).toBe("prod@example.com");
     expect(stagingCreds!.user.email).toBe("staging@example.com");
@@ -366,15 +366,15 @@ describe("Credential Storage Logic", () => {
       user: { id: "user-1", email: "new@example.com", name: null },
     };
 
-    const updated = storeCredentials(store, entry, "https://app.scratch.dev");
+    const updated = storeCredentials(store, entry, "https://app.scratchwork.dev");
 
-    expect(updated["https://app.scratch.dev"]).toBeDefined();
-    expect(updated["https://app.scratch.dev"].token).toBe("new-token");
+    expect(updated["https://app.scratchwork.dev"]).toBeDefined();
+    expect(updated["https://app.scratchwork.dev"].token).toBe("new-token");
   });
 
   test("overwrites existing credentials for same server", () => {
     const store: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "old-token",
         user: { id: "user-1", email: "old@example.com", name: null },
       },
@@ -384,15 +384,15 @@ describe("Credential Storage Logic", () => {
       user: { id: "user-2", email: "new@example.com", name: null },
     };
 
-    const updated = storeCredentials(store, entry, "https://app.scratch.dev");
+    const updated = storeCredentials(store, entry, "https://app.scratchwork.dev");
 
-    expect(updated["https://app.scratch.dev"].token).toBe("new-token");
-    expect(updated["https://app.scratch.dev"].user.email).toBe("new@example.com");
+    expect(updated["https://app.scratchwork.dev"].token).toBe("new-token");
+    expect(updated["https://app.scratchwork.dev"].user.email).toBe("new@example.com");
   });
 
   test("preserves credentials for other servers", () => {
     const store: CredentialsFile = {
-      "https://staging.scratch.dev": {
+      "https://staging.scratchwork.dev": {
         token: "staging-token",
         user: { id: "user-1", email: "staging@example.com", name: null },
       },
@@ -402,10 +402,10 @@ describe("Credential Storage Logic", () => {
       user: { id: "user-2", email: "prod@example.com", name: null },
     };
 
-    const updated = storeCredentials(store, entry, "https://app.scratch.dev");
+    const updated = storeCredentials(store, entry, "https://app.scratchwork.dev");
 
-    expect(updated["https://app.scratch.dev"].token).toBe("prod-token");
-    expect(updated["https://staging.scratch.dev"].token).toBe("staging-token");
+    expect(updated["https://app.scratchwork.dev"].token).toBe("prod-token");
+    expect(updated["https://staging.scratchwork.dev"].token).toBe("staging-token");
   });
 
   test("normalizes URL when storing", () => {
@@ -415,62 +415,62 @@ describe("Credential Storage Logic", () => {
       user: { id: "user-1", email: "test@example.com", name: null },
     };
 
-    const updated = storeCredentials(store, entry, "https://APP.SCRATCH.DEV/");
+    const updated = storeCredentials(store, entry, "https://APP.SCRATCHWORK.DEV/");
 
-    expect(updated["https://app.scratch.dev"]).toBeDefined();
-    expect(updated["https://APP.SCRATCH.DEV/"]).toBeUndefined();
+    expect(updated["https://app.scratchwork.dev"]).toBeDefined();
+    expect(updated["https://APP.SCRATCHWORK.DEV/"]).toBeUndefined();
   });
 
   test("removes credentials for specific server", () => {
     const store: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "prod-token",
         user: { id: "user-1", email: "prod@example.com", name: null },
       },
-      "https://staging.scratch.dev": {
+      "https://staging.scratchwork.dev": {
         token: "staging-token",
         user: { id: "user-2", email: "staging@example.com", name: null },
       },
     };
 
-    const updated = removeCredentials(store, "https://app.scratch.dev");
+    const updated = removeCredentials(store, "https://app.scratchwork.dev");
 
-    expect(updated["https://app.scratch.dev"]).toBeUndefined();
-    expect(updated["https://staging.scratch.dev"]).toBeDefined();
+    expect(updated["https://app.scratchwork.dev"]).toBeUndefined();
+    expect(updated["https://staging.scratchwork.dev"]).toBeDefined();
   });
 
   test("normalizes URL when removing", () => {
     const store: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "test-token",
         user: { id: "user-1", email: "test@example.com", name: null },
       },
     };
 
-    const updated = removeCredentials(store, "https://APP.SCRATCH.DEV/");
+    const updated = removeCredentials(store, "https://APP.SCRATCHWORK.DEV/");
 
-    expect(updated["https://app.scratch.dev"]).toBeUndefined();
+    expect(updated["https://app.scratchwork.dev"]).toBeUndefined();
   });
 
   test("removing non-existent server leaves store unchanged", () => {
     const store: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "test-token",
         user: { id: "user-1", email: "test@example.com", name: null },
       },
     };
 
-    const updated = removeCredentials(store, "https://unknown.scratch.dev");
+    const updated = removeCredentials(store, "https://unknown.scratchwork.dev");
 
     expect(Object.keys(updated)).toHaveLength(1);
-    expect(updated["https://app.scratch.dev"]).toBeDefined();
+    expect(updated["https://app.scratchwork.dev"]).toBeDefined();
   });
 });
 
 describe("JSON Serialization", () => {
   test("serializes credentials file correctly", () => {
     const file: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "test-token",
         user: { id: "user-1", email: "test@example.com", name: "Test User" },
       },
@@ -479,13 +479,13 @@ describe("JSON Serialization", () => {
     const json = JSON.stringify(file, null, 2);
     const parsed = JSON.parse(json) as CredentialsFile;
 
-    expect(parsed["https://app.scratch.dev"].token).toBe("test-token");
-    expect(parsed["https://app.scratch.dev"].user.name).toBe("Test User");
+    expect(parsed["https://app.scratchwork.dev"].token).toBe("test-token");
+    expect(parsed["https://app.scratchwork.dev"].user.name).toBe("Test User");
   });
 
   test("preserves null values in serialization", () => {
     const file: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "test-token",
         user: { id: "user-1", email: "test@example.com", name: null },
       },
@@ -494,7 +494,7 @@ describe("JSON Serialization", () => {
     const json = JSON.stringify(file, null, 2);
     const parsed = JSON.parse(json) as CredentialsFile;
 
-    expect(parsed["https://app.scratch.dev"].user.name).toBeNull();
+    expect(parsed["https://app.scratchwork.dev"].user.name).toBeNull();
   });
 
   test("handles empty credentials file", () => {
@@ -508,7 +508,7 @@ describe("JSON Serialization", () => {
 
   test("handles special characters in email", () => {
     const file: CredentialsFile = {
-      "https://app.scratch.dev": {
+      "https://app.scratchwork.dev": {
         token: "test-token",
         user: { id: "user-1", email: "test+tag@example.com", name: null },
       },
@@ -517,6 +517,6 @@ describe("JSON Serialization", () => {
     const json = JSON.stringify(file, null, 2);
     const parsed = JSON.parse(json) as CredentialsFile;
 
-    expect(parsed["https://app.scratch.dev"].user.email).toBe("test+tag@example.com");
+    expect(parsed["https://app.scratchwork.dev"].user.email).toBe("test+tag@example.com");
   });
 });

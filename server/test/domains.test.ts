@@ -73,10 +73,10 @@ describe('getContentDomain', () => {
 
   test('uses custom content subdomain', () => {
     const env = createEnv({
-      BASE_DOMAIN: 'scratch.dev',
+      BASE_DOMAIN: 'scratchwork.dev',
       CONTENT_SUBDOMAIN: 'cdn',
     })
-    expect(getContentDomain(env)).toBe('cdn.scratch.dev')
+    expect(getContentDomain(env)).toBe('cdn.scratchwork.dev')
   })
 })
 
@@ -99,10 +99,10 @@ describe('getAppBaseUrl', () => {
 
   test('uses custom app subdomain', () => {
     const env = createEnv({
-      BASE_DOMAIN: 'scratch.dev',
+      BASE_DOMAIN: 'scratchwork.dev',
       APP_SUBDOMAIN: 'api',
     })
-    expect(getAppBaseUrl(env)).toBe('https://api.scratch.dev')
+    expect(getAppBaseUrl(env)).toBe('https://api.scratchwork.dev')
   })
 })
 
@@ -125,10 +125,10 @@ describe('getContentBaseUrl', () => {
 
   test('uses custom content subdomain', () => {
     const env = createEnv({
-      BASE_DOMAIN: 'scratch.dev',
+      BASE_DOMAIN: 'scratchwork.dev',
       CONTENT_SUBDOMAIN: 'cdn',
     })
-    expect(getContentBaseUrl(env)).toBe('https://cdn.scratch.dev')
+    expect(getContentBaseUrl(env)).toBe('https://cdn.scratchwork.dev')
   })
 })
 
@@ -183,9 +183,9 @@ describe('isWwwOrRootDomain', () => {
   })
 
   test('works with custom domain', () => {
-    const env = createEnv({ BASE_DOMAIN: 'scratch.dev' })
-    expect(isWwwOrRootDomain('www.scratch.dev', env)).toBe(true)
-    expect(isWwwOrRootDomain('scratch.dev', env)).toBe(true)
-    expect(isWwwOrRootDomain('app.scratch.dev', env)).toBe(false)
+    const env = createEnv({ BASE_DOMAIN: 'scratchwork.dev' })
+    expect(isWwwOrRootDomain('www.scratchwork.dev', env)).toBe(true)
+    expect(isWwwOrRootDomain('scratchwork.dev', env)).toBe(true)
+    expect(isWwwOrRootDomain('app.scratchwork.dev', env)).toBe(false)
   })
 })

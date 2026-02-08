@@ -1,5 +1,5 @@
 /**
- * Scratch Cloud API client.
+ * Scratchwork Cloud API client.
  * Each function maps to a specific API endpoint.
  */
 
@@ -16,7 +16,7 @@ import type {
   ShareTokenCreateResponse,
   ShareTokenListResponse,
   ShareTokenResponse,
-} from '@scratch/shared/api'
+} from '@scratchwork/shared/api'
 
 // Re-export errors for consumers
 export { ApiError, CfAccessError }

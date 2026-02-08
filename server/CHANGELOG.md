@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Scratch Server will be documented in this file.
+All notable changes to the Scratchwork Server will be documented in this file.
 
 ## [0.2.4] - 2026-02-01
 
@@ -62,7 +62,7 @@ This release adds support for serving a project on the www subdomain and root do
 
 ## [0.2.0] - 2026-01-14
 
-Initial release of Scratch Server as part of the monorepo structure. The server is a Cloudflare Worker that powers the Scratch Cloud platform.
+Initial release of Scratchwork Server as part of the monorepo structure. The server is a Cloudflare Worker that powers the Scratchwork Cloud platform.
 
 ### Features
 
@@ -79,7 +79,7 @@ Initial release of Scratch Server as part of the monorepo structure. The server 
 - Cloudflare D1 database for user, session, and project metadata
 - Cloudflare R2 storage for deployed static files
 - Domain-based routing with isolated authentication between app and content subdomains
-- Shared TypeScript types between server and CLI via `@scratch/shared` package
+- Shared TypeScript types between server and CLI via `@scratchwork/shared` package
 
 ## [0.1.2] - 2026-01-14
 

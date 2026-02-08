@@ -159,10 +159,10 @@ export async function createTokenCommand(
   log.info('')
   log.info('Usage:')
   log.info('  # Option 1: Environment variable (CI/CD)')
-  log.info('  export SCRATCH_TOKEN=<token>')
+  log.info('  export SCRATCHWORK_TOKEN=<token>')
   log.info('')
   log.info('  # Option 2: Project .env file')
-  log.info('  echo "SCRATCH_TOKEN=<token>" >> .env')
+  log.info('  echo "SCRATCHWORK_TOKEN=<token>" >> .env')
   log.info('')
   log.info('  # Option 3: Store in credentials file')
   log.info('  scratch tokens use <token>')
@@ -215,8 +215,8 @@ export async function useTokenCommand(
   options: UseTokenOptions
 ): Promise<void> {
   // Validate token format
-  if (!apiToken.startsWith('scratch_')) {
-    throw new Error('Invalid token format. API tokens start with "scratch_"')
+  if (!apiToken.startsWith('scratchwork_') && !apiToken.startsWith('scratch_')) {
+    throw new Error('Invalid token format. API tokens start with "scratchwork_"')
   }
 
   // Determine server URL

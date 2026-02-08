@@ -16,7 +16,7 @@
 import { Hono } from 'hono'
 import type { Env } from '../env'
 import { createDbClient } from '../db/client'
-import { parsePagePath, isSingleDomainAllowedUsers } from '@scratch/shared/project'
+import { parsePagePath, isSingleDomainAllowedUsers } from '@scratchwork/shared/project'
 import {
   type Project,
   validateFilePath,

@@ -72,7 +72,7 @@ export function withErrorHandling(
 
 program
   .command('create')
-  .description('Create a new Scratch project')
+  .description('Create a new Scratchwork project')
   .argument('[path]', 'Target directory', '.')
   .action(
     withErrorHandling('Create', async (path, options) => {
@@ -158,8 +158,8 @@ program
     withErrorHandling('Clean', async () => {
       await fs.rm(ctx.buildDir, { recursive: true, force: true });
       await fs.rm(ctx.tempDir, { recursive: true, force: true });
-      await fs.rm(`${ctx.rootDir}/.scratch/dev`, { recursive: true, force: true });
-      log.info('Cleaned dist/, .scratch/cache/, and .scratch/dev/');
+      await fs.rm(`${ctx.rootDir}/.scratchwork/dev`, { recursive: true, force: true });
+      log.info('Cleaned dist/, .scratchwork/cache/, and .scratchwork/dev/');
     })
   );
 
@@ -177,7 +177,7 @@ program
 
 program
   .command('config')
-  .description('Configure local project settings (.scratch/project.toml)')
+  .description('Configure local project settings (.scratchwork/project.toml)')
   .argument('[path]', 'Path to project directory', '.')
   .action(
     withErrorHandling('Config', async (projectPath) => {
@@ -191,7 +191,7 @@ program
 
 program
   .command('publish')
-  .description('Build and publish project to a Scratch server')
+  .description('Build and publish project to a Scratchwork server')
   .argument('[path]', 'Path to project directory', '.')
   .option('--server <url>', 'Server URL (uses project config or prompts if not specified)')
   .option('--name <name>', 'Override project name')
@@ -216,8 +216,8 @@ program
 
 program
   .command('login')
-  .description('Log in to a Scratch server')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .description('Log in to a Scratchwork server')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .option('--timeout <minutes>', 'Timeout in minutes for login approval (default: 10)')
   .action(
     withErrorHandling('Login', async (options) => {
@@ -228,8 +228,8 @@ program
 
 program
   .command('logout')
-  .description('Log out from a Scratch server')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .description('Log out from a Scratchwork server')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Logout', async (options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -240,7 +240,7 @@ program
 program
   .command('whoami')
   .description('Show current logged-in user')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Whoami', async (options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -251,13 +251,13 @@ program
 // Projects subcommand group
 const projects = program
   .command('projects')
-  .description('Manage projects on a Scratch server');
+  .description('Manage projects on a Scratchwork server');
 
 projects
   .command('ls', { isDefault: true })
   .alias('list')
   .description('List all projects')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Projects ls', async (options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -268,8 +268,8 @@ projects
 projects
   .command('info')
   .description('Show project details')
-  .argument('[name]', 'Project name (uses .scratch/project.toml if not specified)')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .argument('[name]', 'Project name (uses .scratchwork/project.toml if not specified)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Projects info', async (name, options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -280,8 +280,8 @@ projects
 projects
   .command('rm')
   .description('Delete a project and all its deploys')
-  .argument('[name]', 'Project name (uses .scratch/project.toml if not specified)')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .argument('[name]', 'Project name (uses .scratchwork/project.toml if not specified)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .option('-f, --force', 'Skip confirmation prompt')
   .action(
     withErrorHandling('Projects rm', async (name, options) => {
@@ -298,8 +298,8 @@ const share = program
 share
   .command('create', { isDefault: true })
   .description('Create a share token')
-  .argument('[project]', 'Project name (uses .scratch/project.toml if not specified)')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .argument('[project]', 'Project name (uses .scratchwork/project.toml if not specified)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .option('--name <name>', 'Token name')
   .option('--duration <duration>', 'Token duration (1d, 1w, 1m)')
   .action(
@@ -312,8 +312,8 @@ share
 share
   .command('ls')
   .description('List share tokens for a project')
-  .argument('[project]', 'Project name (uses .scratch/project.toml if not specified)')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .argument('[project]', 'Project name (uses .scratchwork/project.toml if not specified)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Share ls', async (project, options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -325,8 +325,8 @@ share
   .command('revoke')
   .description('Revoke a share token')
   .argument('<tokenId>', 'Token ID to revoke')
-  .argument('[project]', 'Project name (uses .scratch/project.toml if not specified)')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .argument('[project]', 'Project name (uses .scratchwork/project.toml if not specified)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Share revoke', async (tokenId, project, options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -343,7 +343,7 @@ tokens
   .command('ls', { isDefault: true })
   .alias('list')
   .description('List your API tokens')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Tokens ls', async (options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -355,7 +355,7 @@ tokens
   .command('create')
   .description('Create a new API token')
   .argument('<name>', 'Token name (3-40 characters, alphanumeric with hyphens/underscores)')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .option('--expires <days>', 'Days until expiration', parseInt)
   .action(
     withErrorHandling('Tokens create', async (name, options) => {
@@ -368,7 +368,7 @@ tokens
   .command('revoke')
   .description('Revoke an API token')
   .argument('<id-or-name>', 'Token ID or name')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('Tokens revoke', async (idOrName, options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -379,7 +379,7 @@ tokens
 tokens
   .command('use')
   .description('Store an API token for CLI authentication')
-  .argument('<token>', 'API token (starts with scratch_)')
+  .argument('<token>', 'API token (starts with scratchwork_)')
   .option('--server <url>', 'Server URL (prompts if not specified)')
   .option('--force', 'Replace existing credential without prompting')
   .action(
@@ -391,7 +391,7 @@ tokens
 program
   .command('cf-access')
   .description('Configure Cloudflare Access service token')
-  .option('--server <url>', 'Server URL (defaults to scratch.dev)')
+  .option('--server <url>', 'Server URL (defaults to scratchwork.dev)')
   .action(
     withErrorHandling('CF Access', async (options) => {
       const ctx = new CloudContext({ serverUrl: options.server });
@@ -583,10 +583,10 @@ program.hook('preAction', (thisCommand, actionCommand) => {
   opts.path = actionCommand.args[0] || '.';
 
   // Dev command should always run in development mode
-  // Output to .scratch/dev/ so it doesn't conflict with scratch build
+  // Output to .scratchwork/dev/ so it doesn't conflict with scratch build
   if (actionCommand.name() === 'dev') {
     opts.development = true;
-    opts.outDir = '.scratch/dev';
+    opts.outDir = '.scratchwork/dev';
   }
 
   ctx = new BuildContext(opts);

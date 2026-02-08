@@ -1,5 +1,5 @@
 {
-  "name": "scratch.dev",
+  "name": "scratchwork.dev",
   "private": true,
   "scripts": {
     "dev": "scratch dev",

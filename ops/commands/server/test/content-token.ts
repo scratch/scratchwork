@@ -15,7 +15,7 @@ export function contentTokenTests() {
 
       // Create a private project for this test
       ctx.privateProjectName = generateRandomProjectName()
-      ctx.privateProjectDir = join(tmpdir(), `scratch-${ctx.instance}-private-${Date.now()}`)
+      ctx.privateProjectDir = join(tmpdir(), `scratchwork-${ctx.instance}-private-${Date.now()}`)
 
       const createExitCode = await runCommandInherit([CLI_BIN, 'create', ctx.privateProjectDir])
       expect(createExitCode).toBe(0)
@@ -32,7 +32,7 @@ export function contentTokenTests() {
       expect(privateDeployResult.exitCode).toBe(0)
 
       // Extract project ID from project.toml
-      const privateProjectTomlPath = join(ctx.privateProjectDir, '.scratch', 'project.toml')
+      const privateProjectTomlPath = join(ctx.privateProjectDir, '.scratchwork', 'project.toml')
       const privateProjectToml = await readFile(privateProjectTomlPath, 'utf-8')
       const privateIdMatch = privateProjectToml.match(/^id\s*=\s*"([^"]+)"/m)
       expect(privateIdMatch).toBeTruthy()
@@ -104,7 +104,7 @@ export function contentTokenTests() {
       console.log('Testing query param preservation during redirect...')
 
       // Get a fresh content token
-      const privateProjectTomlPath = join(ctx.privateProjectDir, '.scratch', 'project.toml')
+      const privateProjectTomlPath = join(ctx.privateProjectDir, '.scratchwork', 'project.toml')
       const privateProjectToml = await readFile(privateProjectTomlPath, 'utf-8')
       const privateIdMatch = privateProjectToml.match(/^id\s*=\s*"([^"]+)"/m)
       expect(privateIdMatch).toBeTruthy()

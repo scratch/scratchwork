@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="./template/public/scratch-logo.svg" alt="Scratch" height="120" />
+  <img src="./template/public/scratchwork-logo.svg" alt="Scratchwork" height="120" />
 </p>
 
-Scratch is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/).
+Scratchwork is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/).
 
-Scratch compiles MDX files into beautiful static websites that can be shared publicly or privately with a single command. It's opinionated about everything so that you can focus on writing without worrying about scaffolding, dependencies, formatting or styling.
+Scratchwork compiles MDX files into beautiful static websites that can be shared publicly or privately with a single command. It's opinionated about everything so that you can focus on writing without worrying about scaffolding, dependencies, formatting or styling.
 
-Scratch was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code.
+Scratchwork was designed for collaborative writing with coding agents like [Claude Code](https://www.claude.com/product/claude-code). Use your favorite editor to write in Markdown and ask an agent for help when it's easier to express yourself with code.
 
 ## Quick Start
 
-Scratch requires no configuration so it's easy to get started. First, install:
+Scratchwork requires no configuration so it's easy to get started. First, install:
 
 ```bash
 # Install scratch
-curl -fsSL https://scratch.dev/install.sh | bash
+curl -fsSL https://scratchwork.dev/install.sh | bash
 ```
 
 Then create a project and start the dev server:
@@ -30,14 +30,14 @@ scratch dev
 Now you're ready to start writing in `pages/index.mdx`. Use the `publish` command to share with specific people, your team, or the world:
 
 ```bash
-# Publish your project to a Scratch server.
+# Publish your project to a Scratchwork server.
 # Grant access to specific people, @youdomain.com, or the world
 scratch publish
 ```
 
-## What can you do with Scratch?
+## What can you do with Scratchwork?
 
-Scratch turns Markdown and MDX content into static websites you can share privately with your colleagues or publicly with the world.
+Scratchwork turns Markdown and MDX content into static websites you can share privately with your colleagues or publicly with the world.
 
 ### Formatting text
 
@@ -47,7 +47,7 @@ In contrast, Markdown pares all of this down to the bare essentials, like `**bol
 
 MDX gives us a way to add an essentially infinite variety of formatting options: **use Markdown for the basics and React components for everything else**.
 
-For example, you can create inline components for highlighting text, hover tooltips, or callout boxes that draw attention to important snippets. Scratch doesn't include any of these components out-of-the-box. Instead, you'll create them as the need arises while you write, effectively building a custom word processor for each document. It's a lot of fun!
+For example, you can create inline components for highlighting text, hover tooltips, or callout boxes that draw attention to important snippets. Scratchwork doesn't include any of these components out-of-the-box. Instead, you'll create them as the need arises while you write, effectively building a custom word processor for each document. It's a lot of fun!
 
 ### Interactive demos
 
@@ -59,15 +59,15 @@ This is particularly handy for writing product specs where embedded demos can co
 
 Use the `scratch publish` command to share your writing, either privately with your colleagues or publicly with the world.
 
-For now, you can publish your work for free on [scratch.dev](https://scratch.dev). Right now, this capability is a "preview" and shouldn't be used for anything important. Projects published on scratch.dev must be less than 5MB and will persist for only 30 days.
+For now, you can publish your work for free on [scratchwork.dev](https://scratchwork.dev). Right now, this capability is a "preview" and shouldn't be used for anything important. Projects published on scratchwork.dev must be less than 5MB and will persist for only 30 days.
 
-You can also host your own Scratch server on Cloudflare and protect it with Cloudflare Access for additional security.
+You can also host your own Scratchwork server on Cloudflare and protect it with Cloudflare Access for additional security.
 
 ## No Boilerplate
 
-Scratch uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing.
+Scratchwork uses an opinionated project structure and requires **no boilerplate or configuration**: just create a project, run the dev server with `scratch dev`, and start writing.
 
-A simple Scratch project (created with `scratch create`) looks like this:
+A simple Scratchwork project (created with `scratch create`) looks like this:
 
 ```
 my-scratch-project/
@@ -87,9 +87,9 @@ my-scratch-project/
 └── .gitignore
 ```
 
-Use `scratch build` to compile this project into a static website, like [scratch.dev](https://scratch.dev).
+Use `scratch build` to compile this project into a static website, like [scratchwork.dev](https://scratchwork.dev).
 
-Component files and libraries can live anywhere in `pages/` and `src/`. They are auto-detected by Scratch and don't need to be explicitly imported in your .mdx files as long as the filename matches the component name.
+Component files and libraries can live anywhere in `pages/` and `src/`. They are auto-detected by Scratchwork and don't need to be explicitly imported in your .mdx files as long as the filename matches the component name.
 
 Modify `src/tailwind.css` to change the styling of your document. Add headers, footers and other site-wide elements by modifying `src/PageWrapper.jsx`.
 
@@ -127,9 +127,9 @@ scratch update
 
 ## Acknowledgements
 
-Scratch is built on the shoulders of giants:
+Scratchwork is built on the shoulders of giants:
 
-Scratch uses [Bun](https://bun.com/) for lightning-fast builds, development with HMR, native TypeScript support, and bundling as a portable executable.
+Scratchwork uses [Bun](https://bun.com/) for lightning-fast builds, development with HMR, native TypeScript support, and bundling as a portable executable.
 
 [React](https://react.dev/) and [MDX](https://mdxjs.com/) make it possible to compile Markdown and code into static websites. [Tailwind CSS](https://tailwindcss.com/) makes them look good, and makes it easy to style custom components.
 
@@ -139,7 +139,7 @@ Content preprocessing relies on [unified](https://unifiedjs.com/), with [remark-
 
 [Commander.js](https://github.com/tj/commander.js) scaffolds the CLI.
 
-Scratch server uses [hono](https://hono.dev) for routing and [Better Auth](https://better-auth.com) for authentication.
+Scratchwork server uses [hono](https://hono.dev) for routing and [Better Auth](https://better-auth.com) for authentication.
 
 ## License
 
