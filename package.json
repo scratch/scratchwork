@@ -13,5 +13,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@inquirer/prompts": "^8.1.0"
+  },
+  "patchedDependencies": {
+    "estree-util-build-jsx@3.0.1": "patches/estree-util-build-jsx@3.0.1.patch"
   }
 }
