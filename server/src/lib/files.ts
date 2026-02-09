@@ -81,7 +81,7 @@ export function getCacheControl(path: string): string {
   if (
     ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.avif', '.mp4', '.webm', '.mp3', '.wav'].includes(ext)
   ) {
-    return 'public, max-age=86400, s-maxage=604800'
+    return 'public, max-age=86400, s-maxage=3600'
   }
 
   // Default
