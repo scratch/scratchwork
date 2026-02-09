@@ -153,6 +153,16 @@ async function createR2Bucket(bucketName: string, accountId?: string): Promise<v
   }
 }
 
+function parseWhoamiAccounts(stdout: string): { name: string; id: string }[] {
+  const accounts: { name: string; id: string }[] = []
+  const regex = /│\s+(.+?)\s+│\s+([a-f0-9]{32})\s+│/g
+  let match
+  while ((match = regex.exec(stdout)) !== null) {
+    accounts.push({ name: match[1].trim(), id: match[2] })
+  }
+  return accounts
+}
+
 export async function setupAction(instance: string): Promise<void> {
   console.log(`Setting up Cloudflare resources for instance: ${instance}\n`)
 
@@ -165,8 +175,8 @@ export async function setupAction(instance: string): Promise<void> {
 
   // Read account ID from existing vars if available (for multi-account users)
   const existingVars = existsSync(varsPath) ? parseVarsFile(varsPath) : new Map<string, string>()
-  const accountId = existingVars.get('CLOUDFLARE_ACCOUNT_ID') || undefined
-  const wranglerEnv = accountId ? { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId } : undefined
+  let accountId = existingVars.get('CLOUDFLARE_ACCOUNT_ID') || undefined
+  let wranglerEnv: Record<string, string> | undefined = accountId ? { ...process.env as Record<string, string>, CLOUDFLARE_ACCOUNT_ID: accountId } : undefined
 
   if (accountId) {
     console.log(`Using Cloudflare account: ${accountId}\n`)
@@ -181,9 +191,9 @@ export async function setupAction(instance: string): Promise<void> {
   })
 
   const whoamiExitCode = await whoamiProc.exited
+  const whoamiStdout = await new Response(whoamiProc.stdout).text()
   if (whoamiExitCode === 0) {
-    const stdout = await new Response(whoamiProc.stdout).text()
-    const match = stdout.match(/associated with the email (.+?)!/)
+    const match = whoamiStdout.match(/associated with the email (.+?)!/)
     if (match) {
       console.log(`  ${green}✓${reset} Logged in as ${match[1]}`)
     } else {
@@ -197,6 +207,26 @@ export async function setupAction(instance: string): Promise<void> {
       stderr: 'inherit',
     })
     await loginProc.exited
+  }
+
+  // If no account ID set, detect accounts from whoami output
+  if (!accountId) {
+    const accounts = parseWhoamiAccounts(whoamiStdout)
+
+    if (accounts.length > 1) {
+      const selectedId = await select({
+        message: 'Multiple Cloudflare accounts found. Which account?',
+        choices: accounts.map(a => ({ name: `${a.name} (${a.id})`, value: a.id })),
+      })
+      accountId = selectedId
+      wranglerEnv = { ...process.env as Record<string, string>, CLOUDFLARE_ACCOUNT_ID: accountId }
+      existingVars.set('CLOUDFLARE_ACCOUNT_ID', accountId)
+      console.log(`  Using account: ${accountId}\n`)
+    } else if (accounts.length === 1) {
+      accountId = accounts[0].id
+      wranglerEnv = { ...process.env as Record<string, string>, CLOUDFLARE_ACCOUNT_ID: accountId }
+      existingVars.set('CLOUDFLARE_ACCOUNT_ID', accountId)
+    }
   }
 
   // Step 2: Create R2 bucket
