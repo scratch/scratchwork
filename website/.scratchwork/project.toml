@@ -4,7 +4,7 @@
 # Run `scratch cloud config` to update these settings interactively.
 
 # Project ID (do not modify)
-id = "8ed7f3ff-077d-49e2-9cda-46ac8841762a"
+id = "c828a287-1f30-40a6-be34-d822c44cc725"
 
 # Project name
 name = "scratch-dev"
