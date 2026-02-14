@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./template/public/scratchwork-logo.svg" alt="Scratchwork" height="120" />
+  <img src="./website/public/scratchwork-logo.svg" alt="Scratchwork" height="120" />
 </p>
 
 Scratchwork is a tool for writing with [Markdown](https://daringfireball.net/projects/markdown/) and [React](https://react.dev/).
