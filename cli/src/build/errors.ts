@@ -7,10 +7,12 @@ export interface ErrorSourceLocation {
   column?: number;
   lineText?: string;
   jsxElement?: string;
-  lineAppliesToSource?: boolean;
+  lineFromSourceFile?: boolean;
   renderEntryPath?: string;
   renderEntryLine?: number;
 }
+
+const FAILED_TO_RENDER_RE = /Failed to render\s+([^\n:]+\.(?:mdx|md))\s*:/;
 
 const ERROR_PATTERNS: Array<{
   pattern: RegExp;
@@ -81,13 +83,13 @@ const ERROR_PATTERNS: Array<{
 function extractSourceLocation(error: Error | string): ErrorSourceLocation | null {
   const errorStr =
     error instanceof Error
-      ? [error.message, error.stack].filter((value): value is string => Boolean(value)).join('\n')
+      ? [error.message, error.stack].filter(Boolean).join('\n')
       : error;
   const location: ErrorSourceLocation = {};
 
   // Render errors include the source path directly in the message.
   // Example: "Failed to render docs/page.mdx: Element type is invalid..."
-  let match = errorStr.match(/Failed to render\s+([^\n:]+\.(?:mdx|md))\s*:/);
+  let match = errorStr.match(FAILED_TO_RENDER_RE);
   if (match?.[1]) {
     location.filePath = match[1];
   }
@@ -98,7 +100,7 @@ function extractSourceLocation(error: Error | string): ErrorSourceLocation | nul
     location.filePath ??= match[1];
     location.line = Number(match[2]);
     location.column = Number(match[3]);
-    location.lineAppliesToSource = true;
+    location.lineFromSourceFile = true;
   }
 
   // Bun build errors often embed line text in "line | content" style.
@@ -169,15 +171,8 @@ function extractSourceLocation(error: Error | string): ErrorSourceLocation | nul
 }
 
 function formatSourceReference(location?: ErrorSourceLocation | null): string {
-  if (!location?.filePath) {
-    return '';
-  }
-
-  const lineSuffix =
-    location.line !== undefined && location.lineAppliesToSource === true
-      ? `:${location.line}` + (location.column !== undefined ? `:${location.column}` : '')
-      : '';
-  return ` in ${location.filePath}${lineSuffix}`;
+  if (!location?.filePath) return '';
+  return ` in ${formatAtReference(location)}`;
 }
 
 function formatSourceDetails(location?: ErrorSourceLocation | null): string {
@@ -207,7 +202,7 @@ function formatSourceDetails(location?: ErrorSourceLocation | null): string {
 
 function formatAtReference(location: ErrorSourceLocation): string {
   const lineSuffix =
-    location.line !== undefined && location.lineAppliesToSource === true
+    location.line !== undefined && location.lineFromSourceFile === true
       ? `:${location.line}` + (location.column !== undefined ? `:${location.column}` : '')
       : '';
   return `${location.filePath}${lineSuffix}`;
@@ -268,26 +263,23 @@ export function enrichRenderError(
   if (err.message?.includes('Element type is invalid')) {
     const gotTypeMatch = err.message.match(/but got:\s*([^.\n]+)/);
     const gotType = gotTypeMatch?.[1]?.trim();
-    const extraLines = [
-      gotType ? `  React received: ${gotType}` : null,
-      hint?.jsxElement ? `  JSX element: ${hint.jsxElement}` : null,
-      hint?.renderEntryPath
-        ? `  Render entry: ${hint.renderEntryPath}${
-            hint.renderEntryLine !== undefined ? `:${hint.renderEntryLine}` : ''
-          }`
-        : null,
-      hint?.renderEntryLine !== undefined && hint.lineText
-        ? `  ${hint.renderEntryLine} | ${hint.lineText}`
-        : null,
-    ]
-      .filter((line): line is string => line !== null)
-      .join('\n');
 
     return new Error(
-      `Failed to render ${sourcePath}: ${err.message}\n` +
-        `${extraLines ? `${extraLines}\n` : ''}` +
-        `  This usually means a component in the MDX file could not be resolved.\n` +
-        `  Check for typos in component names or missing imports.`
+      [
+        `Failed to render ${sourcePath}: ${err.message}`,
+        gotType ? `  React received: ${gotType}` : null,
+        hint?.jsxElement ? `  JSX element: ${hint.jsxElement}` : null,
+        hint?.renderEntryPath
+          ? `  Render entry: ${hint.renderEntryPath}${hint.renderEntryLine !== undefined ? `:${hint.renderEntryLine}` : ''}`
+          : null,
+        hint?.renderEntryLine !== undefined && hint.lineText
+          ? `  ${hint.renderEntryLine} | ${hint.lineText}`
+          : null,
+        `  This usually means a component in the MDX file could not be resolved.`,
+        `  Check for typos in component names or missing imports.`,
+      ]
+        .filter(Boolean)
+        .join('\n')
     );
   }
 
@@ -295,8 +287,7 @@ export function enrichRenderError(
 }
 
 function extractFailureSourcePath(errorMessage: string): string {
-  const match = errorMessage.match(/Failed to render\s+([^\n:]+\.(?:mdx|md))\s*:/);
-  return match?.[1] ?? '';
+  return errorMessage.match(FAILED_TO_RENDER_RE)?.[1] ?? '';
 }
 
 function summarizeRenderFailure(errorMessage: string): string {
