@@ -1,7 +1,52 @@
-import type { BuildContext } from '../context';
+import path from 'path';
+import type { BuildContext, Entry } from '../context';
+import type { ErrorSourceLocation } from '../errors';
+import { enrichRenderError, aggregateRenderFailures } from '../errors';
 import type { BuildPipelineState } from '../types';
 import type { BuildStep } from '../types';
 import log from '../../logger';
+
+async function extractRenderElementHint(
+  ctx: BuildContext,
+  entry: Entry
+): Promise<ErrorSourceLocation | null> {
+  const serverEntryPath = entry.getArtifactPath('.jsx', ctx.serverSrcDir);
+  const renderEntryPath = path.relative(ctx.rootDir, serverEntryPath) || serverEntryPath;
+
+  let source: string;
+  try {
+    source = await Bun.file(serverEntryPath).text();
+  } catch {
+    return null;
+  }
+
+  const mdxImportMatch = source.match(
+    /import\s+([A-Za-z_$][\w$]*)\s+from\s+["'][^"']+\.(?:mdx|md)["'];?/
+  );
+  const componentName = mdxImportMatch?.[1];
+  if (!componentName) {
+    return { renderEntryPath };
+  }
+
+  const jsxElement = `<${componentName} />`;
+  const lines = source.split('\n');
+  const targetPattern = new RegExp(`<${componentName}(\\s|/|>)`);
+  const lineIndex = lines.findIndex((line) => targetPattern.test(line));
+
+  if (lineIndex < 0) {
+    return { jsxElement, renderEntryPath };
+  }
+
+  const renderEntryLine = lineIndex + 1;
+  const lineText = lines[lineIndex]!.trim();
+
+  return {
+    jsxElement,
+    renderEntryPath,
+    renderEntryLine,
+    lineText,
+  };
+}
 
 export const renderServerStep: BuildStep = {
   name: '05b-render-server',
@@ -39,19 +84,27 @@ export const renderServerStep: BuildStep = {
         renderedContent.set(name, html);
       } catch (err: any) {
         const sourcePath = entry.relPath;
-        // Enhance React error messages with file context
-        if (err.message?.includes('Element type is invalid')) {
-          throw new Error(
-            `Failed to render ${sourcePath}: ${err.message}\n` +
-              `  This usually means a component in the MDX file could not be resolved.\n` +
-              `  Check for typos in component names or missing imports.`
-          );
-        }
-        throw new Error(`Failed to render ${sourcePath}: ${err.message}`);
+        const hint = err.message?.includes('Element type is invalid')
+          ? await extractRenderElementHint(ctx, entry)
+          : null;
+        throw enrichRenderError(sourcePath, err, hint);
       }
     });
 
-    await Promise.all(renderPromises);
+    const renderResults = await Promise.allSettled(renderPromises);
+    const failures = renderResults
+      .filter(
+        (result): result is PromiseRejectedResult => result.status === 'rejected'
+      )
+      .map((result) =>
+        result.reason instanceof Error
+          ? result.reason
+          : new Error(String(result.reason))
+      );
+
+    if (failures.length > 0) {
+      throw aggregateRenderFailures(failures);
+    }
 
     state.outputs.renderedContent = renderedContent;
   },
