@@ -157,7 +157,7 @@ export const renderServerStep: BuildStep = {
         throw primary;
       }
 
-      const extraFailures = failures.slice(1, 6).map((failure) =>
+      const extraFailures = failures.slice(1, 100).map((failure) =>
         `  - ${summarizeRenderFailure(failure.message)}`
       );
       const hiddenCount = failures.length - 1 - extraFailures.length;
