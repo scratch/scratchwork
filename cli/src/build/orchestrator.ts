@@ -1,6 +1,5 @@
 import type { BuildContext } from './context';
 import type { BuildOptions, BuildPipelineState, BuildStep } from './types';
-import { formatBuildError } from './errors';
 import { resetPluginState } from './plugins';
 import log from '../logger';
 
@@ -128,7 +127,7 @@ export async function runBuildPipeline(
     } catch (error) {
       state.error = error instanceof Error ? error : new Error(String(error));
       state.failedStep = Array.isArray(stepOrGroup) ? stepOrGroup[0]?.name : stepOrGroup.name;
-      throw new Error(formatBuildError(state.error));
+      throw state.error;
     }
   }
 

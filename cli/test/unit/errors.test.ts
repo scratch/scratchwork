@@ -64,6 +64,53 @@ describe("formatBuildError", () => {
 
             expect(result).toContain("MDX syntax error");
         });
+
+        test("includes source line and JSX element when available", () => {
+            const error = new Error(
+                'Failed to render docs/doc-207.mdx: Element type is invalid: expected a string but got: undefined\n' +
+                    '  207 | <HeroImage src="/image.png" />'
+            );
+            const result = formatBuildError(error);
+
+            expect(result).toContain("MDX syntax error in docs/doc-207.mdx:");
+            expect(result).toContain("A JSX element couldn't be rendered (<HeroImage>)");
+            expect(result).toContain('207 | <HeroImage src="/image.png" />');
+        });
+
+        test("includes render-entry hints when provided", () => {
+            const error = new Error(
+                "Failed to render docs/doc-207.mdx: Element type is invalid: expected a string but got: object\n" +
+                    "  JSX element: <Component />\n" +
+                    "  Render entry: .scratchwork/cache/server-src/docs/doc-207/index.jsx:16\n" +
+                    "  16 | <Component />"
+            );
+            const result = formatBuildError(error);
+
+            expect(result).toContain("MDX syntax error in docs/doc-207.mdx:");
+            expect(result).toContain("A JSX element couldn't be rendered (<Component>)");
+            expect(result).toContain(
+                "Render entry: .scratchwork/cache/server-src/docs/doc-207/index.jsx:16"
+            );
+            expect(result).toContain("16 | <Component />");
+        });
+
+        test("preserves additional render error summaries", () => {
+            const error = new Error(
+                "Failed to render docs/doc-003.mdx: Element type is invalid: expected a string but got: object\n" +
+                    "  JSX element: <Component />\n" +
+                    "  Render entry: .scratchwork/cache/server-src/docs/doc-003/index.jsx:17\n" +
+                    "  17 | <Component />\n" +
+                    "  Additional render errors (2):\n" +
+                    "  - docs/doc-010.mdx: Element type is invalid: expected a string but got: object\n" +
+                    "  - docs/doc-018.mdx: id is not defined"
+            );
+            const result = formatBuildError(error);
+
+            expect(result).toContain("MDX syntax error in docs/doc-003.mdx:");
+            expect(result).toContain("A JSX element couldn't be rendered (<Component>)");
+            expect(result).toContain("Additional render errors (2):");
+            expect(result).toContain("- docs/doc-018.mdx: id is not defined");
+        });
     });
 
     describe("unclosed tag errors", () => {
@@ -110,6 +157,28 @@ describe("formatBuildError", () => {
             const result = formatBuildError(error);
 
             expect(result).toBe("Some other error that is not recognized");
+        });
+
+        test("formats render errors with clean at-location output", () => {
+            const error = new Error(
+                "Failed to render docs/doc-207.mdx: Custom renderer failure\n" +
+                    "  207 | <UnknownWidget />"
+            );
+            const result = formatBuildError(error);
+
+            expect(result).toContain("at docs/doc-207.mdx:");
+            expect(result).toContain("207 | <UnknownWidget />");
+            expect(result).not.toContain("at in ");
+        });
+
+        test("does not duplicate existing at-location lines", () => {
+            const original =
+                "Failed to render docs/doc-574.mdx: q_φ is not defined\n" +
+                "  at docs/doc-574.mdx";
+            const error = new Error(original);
+            const result = formatBuildError(error);
+
+            expect(result).toBe(original);
         });
 
         test("handles string errors", () => {
