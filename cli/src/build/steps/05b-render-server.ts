@@ -1,34 +1,15 @@
 import path from 'path';
 import type { BuildContext, Entry } from '../context';
+import type { ErrorSourceLocation } from '../errors';
+import { enrichRenderError, aggregateRenderFailures } from '../errors';
 import type { BuildPipelineState } from '../types';
 import type { BuildStep } from '../types';
 import log from '../../logger';
 
-interface RenderElementHint {
-  jsxElement?: string;
-  renderEntryPath?: string;
-  renderEntryLine?: number;
-  renderEntryLineText?: string;
-}
-
-function extractFailureSourcePath(errorMessage: string): string {
-  const match = errorMessage.match(/Failed to render\s+([^\n:]+\.(?:mdx|md))\s*:/);
-  return match?.[1] ?? '';
-}
-
-function summarizeRenderFailure(errorMessage: string): string {
-  const singleLine = errorMessage.split('\n')[0] ?? errorMessage;
-  const match = singleLine.match(/Failed to render\s+([^\n:]+\.(?:mdx|md))\s*:\s*(.+)$/);
-  if (match?.[1] && match?.[2]) {
-    return `${match[1]}: ${match[2]}`;
-  }
-  return singleLine;
-}
-
 async function extractRenderElementHint(
   ctx: BuildContext,
   entry: Entry
-): Promise<RenderElementHint | null> {
+): Promise<ErrorSourceLocation | null> {
   const serverEntryPath = entry.getArtifactPath('.jsx', ctx.serverSrcDir);
   const renderEntryPath = path.relative(ctx.rootDir, serverEntryPath) || serverEntryPath;
 
@@ -57,13 +38,13 @@ async function extractRenderElementHint(
   }
 
   const renderEntryLine = lineIndex + 1;
-  const renderEntryLineText = lines[lineIndex]!.trim();
+  const lineText = lines[lineIndex]!.trim();
 
   return {
     jsxElement,
     renderEntryPath,
     renderEntryLine,
-    renderEntryLineText,
+    lineText,
   };
 }
 
@@ -103,34 +84,10 @@ export const renderServerStep: BuildStep = {
         renderedContent.set(name, html);
       } catch (err: any) {
         const sourcePath = entry.relPath;
-        // Enhance React error messages with file context
-        if (err.message?.includes('Element type is invalid')) {
-          const hint = await extractRenderElementHint(ctx, entry);
-          const gotTypeMatch = err.message.match(/but got:\s*([^.\n]+)/);
-          const gotType = gotTypeMatch?.[1]?.trim();
-          const extraLines = [
-            gotType ? `  React received: ${gotType}` : null,
-            hint?.jsxElement ? `  JSX element: ${hint.jsxElement}` : null,
-            hint?.renderEntryPath
-              ? `  Render entry: ${hint.renderEntryPath}${
-                  hint.renderEntryLine !== undefined ? `:${hint.renderEntryLine}` : ''
-                }`
-              : null,
-            hint?.renderEntryLine !== undefined && hint.renderEntryLineText
-              ? `  ${hint.renderEntryLine} | ${hint.renderEntryLineText}`
-              : null,
-          ]
-            .filter((line): line is string => line !== null)
-            .join('\n');
-
-          throw new Error(
-            `Failed to render ${sourcePath}: ${err.message}\n` +
-              `${extraLines ? `${extraLines}\n` : ''}` +
-              `  This usually means a component in the MDX file could not be resolved.\n` +
-              `  Check for typos in component names or missing imports.`
-          );
-        }
-        throw new Error(`Failed to render ${sourcePath}: ${err.message}`);
+        const hint = err.message?.includes('Element type is invalid')
+          ? await extractRenderElementHint(ctx, entry)
+          : null;
+        throw enrichRenderError(sourcePath, err, hint);
       }
     });
 
@@ -146,29 +103,7 @@ export const renderServerStep: BuildStep = {
       );
 
     if (failures.length > 0) {
-      failures.sort((a, b) => {
-        const pathA = extractFailureSourcePath(a.message);
-        const pathB = extractFailureSourcePath(b.message);
-        return pathA.localeCompare(pathB);
-      });
-
-      const primary = failures[0]!;
-      if (failures.length === 1) {
-        throw primary;
-      }
-
-      const extraFailures = failures.slice(1, 100).map((failure) =>
-        `  - ${summarizeRenderFailure(failure.message)}`
-      );
-      const hiddenCount = failures.length - 1 - extraFailures.length;
-      const hiddenLine = hiddenCount > 0 ? `\n  ... and ${hiddenCount} more` : '';
-
-      throw new Error(
-        `${primary.message}\n` +
-          `  Additional render errors (${failures.length - 1}):\n` +
-          `${extraFailures.join('\n')}` +
-          `${hiddenLine}`
-      );
+      throw aggregateRenderFailures(failures);
     }
 
     state.outputs.renderedContent = renderedContent;

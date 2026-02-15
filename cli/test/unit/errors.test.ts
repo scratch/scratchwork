@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatBuildError } from "../../src/build/errors";
+import { formatBuildError, enrichRenderError, aggregateRenderFailures } from "../../src/build/errors";
 
 describe("formatBuildError", () => {
     describe("style attribute errors", () => {
@@ -221,5 +221,83 @@ describe("formatBuildError", () => {
             expect(result).toContain("MDX syntax error");
             expect(result).not.toContain("pages/");
         });
+    });
+});
+
+describe("enrichRenderError", () => {
+    test("enriches 'Element type is invalid' error with hint", () => {
+        const err = new Error(
+            "Element type is invalid: expected a string but got: undefined"
+        );
+        const hint = {
+            jsxElement: "<MyWidget />",
+            renderEntryPath: ".scratchwork/cache/server-src/index/index.jsx",
+            renderEntryLine: 10,
+            lineText: "<MyWidget />",
+        };
+        const result = enrichRenderError("pages/index.mdx", err, hint);
+
+        expect(result.message).toContain("Failed to render pages/index.mdx:");
+        expect(result.message).toContain("Element type is invalid");
+        expect(result.message).toContain("React received: undefined");
+        expect(result.message).toContain("JSX element: <MyWidget />");
+        expect(result.message).toContain("Render entry: .scratchwork/cache/server-src/index/index.jsx:10");
+        expect(result.message).toContain("10 | <MyWidget />");
+        expect(result.message).toContain("component in the MDX file could not be resolved");
+    });
+
+    test("enriches 'Element type is invalid' error without hint", () => {
+        const err = new Error(
+            "Element type is invalid: expected a string but got: object"
+        );
+        const result = enrichRenderError("pages/about.mdx", err);
+
+        expect(result.message).toContain("Failed to render pages/about.mdx:");
+        expect(result.message).toContain("React received: object");
+        expect(result.message).toContain("component in the MDX file could not be resolved");
+        expect(result.message).not.toContain("JSX element:");
+        expect(result.message).not.toContain("Render entry:");
+    });
+
+    test("wraps generic render error with source path", () => {
+        const err = new Error("Cannot read properties of undefined");
+        const result = enrichRenderError("pages/broken.mdx", err);
+
+        expect(result.message).toBe(
+            "Failed to render pages/broken.mdx: Cannot read properties of undefined"
+        );
+        expect(result.message).not.toContain("component in the MDX file");
+    });
+});
+
+describe("aggregateRenderFailures", () => {
+    test("passes through a single failure unchanged", () => {
+        const failure = new Error("Failed to render pages/index.mdx: something broke");
+        const result = aggregateRenderFailures([failure]);
+
+        expect(result).toBe(failure);
+    });
+
+    test("aggregates multiple failures sorted by source path", () => {
+        const f1 = new Error("Failed to render pages/zebra.mdx: error one");
+        const f2 = new Error("Failed to render pages/alpha.mdx: error two");
+        const f3 = new Error("Failed to render pages/middle.mdx: error three");
+
+        const result = aggregateRenderFailures([f1, f2, f3]);
+
+        // Primary should be alpha (sorted first)
+        expect(result.message).toContain("Failed to render pages/alpha.mdx: error two");
+        expect(result.message).toContain("Additional render errors (2):");
+        expect(result.message).toContain("- pages/middle.mdx: error three");
+        expect(result.message).toContain("- pages/zebra.mdx: error one");
+    });
+
+    test("handles failures without parseable source paths", () => {
+        const f1 = new Error("some generic error");
+        const f2 = new Error("Failed to render pages/ok.mdx: specific error");
+
+        const result = aggregateRenderFailures([f1, f2]);
+
+        expect(result.message).toContain("Additional render errors (1):");
     });
 });

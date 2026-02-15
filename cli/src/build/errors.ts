@@ -1,7 +1,7 @@
 /**
  * Common MDX/JSX errors and their user-friendly explanations
  */
-interface ErrorSourceLocation {
+export interface ErrorSourceLocation {
   filePath?: string;
   line?: number;
   column?: number;
@@ -254,4 +254,90 @@ export function formatBuildError(error: Error | string): string {
 
   // Return original error if no pattern matched
   return errorStr;
+}
+
+/**
+ * Enrich a render error with source file context and optional hint information.
+ * Absorbs the catch-block logic previously inline in 05b-render-server.
+ */
+export function enrichRenderError(
+  sourcePath: string,
+  err: Error,
+  hint?: ErrorSourceLocation | null
+): Error {
+  if (err.message?.includes('Element type is invalid')) {
+    const gotTypeMatch = err.message.match(/but got:\s*([^.\n]+)/);
+    const gotType = gotTypeMatch?.[1]?.trim();
+    const extraLines = [
+      gotType ? `  React received: ${gotType}` : null,
+      hint?.jsxElement ? `  JSX element: ${hint.jsxElement}` : null,
+      hint?.renderEntryPath
+        ? `  Render entry: ${hint.renderEntryPath}${
+            hint.renderEntryLine !== undefined ? `:${hint.renderEntryLine}` : ''
+          }`
+        : null,
+      hint?.renderEntryLine !== undefined && hint.lineText
+        ? `  ${hint.renderEntryLine} | ${hint.lineText}`
+        : null,
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n');
+
+    return new Error(
+      `Failed to render ${sourcePath}: ${err.message}\n` +
+        `${extraLines ? `${extraLines}\n` : ''}` +
+        `  This usually means a component in the MDX file could not be resolved.\n` +
+        `  Check for typos in component names or missing imports.`
+    );
+  }
+
+  return new Error(`Failed to render ${sourcePath}: ${err.message}`);
+}
+
+function extractFailureSourcePath(errorMessage: string): string {
+  const match = errorMessage.match(/Failed to render\s+([^\n:]+\.(?:mdx|md))\s*:/);
+  return match?.[1] ?? '';
+}
+
+function summarizeRenderFailure(errorMessage: string): string {
+  const singleLine = errorMessage.split('\n')[0] ?? errorMessage;
+  const match = singleLine.match(/Failed to render\s+([^\n:]+\.(?:mdx|md))\s*:\s*(.+)$/);
+  if (match?.[1] && match?.[2]) {
+    return `${match[1]}: ${match[2]}`;
+  }
+  return singleLine;
+}
+
+/**
+ * Aggregate multiple render failures into a single error.
+ * Sorts by source path and includes a summary of additional failures.
+ */
+export function aggregateRenderFailures(failures: Error[]): Error {
+  if (failures.length === 0) {
+    return new Error('Unknown render failure');
+  }
+
+  failures.sort((a, b) => {
+    const pathA = extractFailureSourcePath(a.message);
+    const pathB = extractFailureSourcePath(b.message);
+    return pathA.localeCompare(pathB);
+  });
+
+  const primary = failures[0]!;
+  if (failures.length === 1) {
+    return primary;
+  }
+
+  const extraFailures = failures.slice(1, 100).map((failure) =>
+    `  - ${summarizeRenderFailure(failure.message)}`
+  );
+  const hiddenCount = failures.length - 1 - extraFailures.length;
+  const hiddenLine = hiddenCount > 0 ? `\n  ... and ${hiddenCount} more` : '';
+
+  return new Error(
+    `${primary.message}\n` +
+      `  Additional render errors (${failures.length - 1}):\n` +
+      `${extraFailures.join('\n')}` +
+      `${hiddenLine}`
+  );
 }
