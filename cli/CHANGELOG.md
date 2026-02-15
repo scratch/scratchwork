@@ -2,6 +2,17 @@
 
 > **Note:** Scratch has been renamed to Scratchwork.
 
+## [0.5.17] - 2026-02-15
+
+This release significantly improves build error messages and updates branding from Scratch to Scratchwork.
+
+### Improvements
+
+- Build errors now show source file paths, line numbers, column numbers, and the offending JSX element, making it much easier to locate and fix issues in your MDX files
+- When multiple pages fail to render, all errors are now reported at once instead of stopping at the first failure
+- Render errors include a link to the generated server entry file and the specific line that triggered the error, helping diagnose component resolution issues
+- Updated default project template and branding to use the Scratchwork name
+
 ## [0.5.16] - 2026-02-05
 
 This release prevents conflicts when running multiple dev servers and fixes a bug with project visibility on first publish.
