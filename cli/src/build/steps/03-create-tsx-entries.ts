@@ -1,4 +1,5 @@
 import path from 'path';
+import matter from 'gray-matter';
 import type { BuildContext, Entry } from '../context';
 import type { BuildPipelineState } from '../types';
 import type { BuildStep } from '../types';
@@ -29,7 +30,8 @@ async function createEntries(
   const { extension, outDir, templatePath, variables = {} } = options;
   const entryPts: Record<string, string> = {};
 
-  for (const [name, entry] of Object.entries(entries)) {
+  // Create all entry files in parallel (each writes to a unique path)
+  await Promise.all(Object.entries(entries).map(async ([name, entry]) => {
     const artifactPath = entry.getArtifactPath(extension, outDir);
 
     // variables: regular template vars (not path-converted)
@@ -41,7 +43,7 @@ async function createEntries(
 
     entryPts[name] = artifactPath;
     log.debug(`  ${path.relative(ctx.rootDir, artifactPath)}`);
-  }
+  }));
 
   return entryPts;
 }
@@ -62,6 +64,17 @@ export const createTsxEntriesStep: BuildStep = {
           `Then run 'scratch build' again.`
       );
     }
+
+    // Extract frontmatter from all entries upfront (avoids doing it during MDX compilation)
+    await Promise.all(
+      Object.values(entries).map(async (entry) => {
+        const content = await Bun.file(entry.absPath).text();
+        const extracted = matter(content);
+        if (extracted.data && Object.keys(extracted.data).length > 0) {
+          entry.frontmatterData = extracted.data;
+        }
+      })
+    );
 
     // Check for markdown components directory, fall back to empty components
     let markdownComponentsPath = await ctx.markdownComponentsDir();

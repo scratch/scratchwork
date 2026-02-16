@@ -56,6 +56,10 @@ let highlighterPromise: Promise<Highlighter> | null = null;
 let detectedLanguagesCache: BundledLanguage[] | null = null;
 let detectedLanguagesPromise: Promise<BundledLanguage[]> | null = null;
 
+// Cache for highlighted code blocks (keyed by lang:meta:code)
+// Shared across all files in a build to avoid re-highlighting identical blocks
+const shikiCodeCache = new Map<string, any>();
+
 /**
  * Scan files and extract code fence language identifiers.
  * Returns only languages that are valid shiki languages.
@@ -180,6 +184,7 @@ export function resetShikiState(): void {
   cachedHighlighter = null;
   cachedHighlighterLangs = null;
   highlighterPromise = null;
+  shikiCodeCache.clear();
 }
 
 /**
@@ -198,5 +203,5 @@ export async function createShikiPlugin(
   const langs = await getLanguagesForMode(ctx, highlightMode);
   const highlighter = await getShikiHighlighter(langs);
 
-  return [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light' }];
+  return [rehypeShikiFromHighlighter, highlighter, { theme: 'github-light', cache: shikiCodeCache }];
 }
