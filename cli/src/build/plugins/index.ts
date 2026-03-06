@@ -39,6 +39,7 @@ export { createPackageResolverPlugin } from './bun-package-resolver';
 // Import reset functions for consolidated reset
 import { resetAutoImportState } from './remark-auto-import';
 import { resetShikiState } from './rehype-shiki';
+import { resetMdxCache } from '../buncfg';
 
 /**
  * Reset all plugin state for a new build.
@@ -47,4 +48,5 @@ import { resetShikiState } from './rehype-shiki';
 export function resetPluginState(): void {
   resetAutoImportState();
   resetShikiState();
+  resetMdxCache();
 }

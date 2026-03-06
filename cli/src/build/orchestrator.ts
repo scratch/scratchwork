@@ -13,7 +13,6 @@ import {
   renderServerStep,
   clientBuildStep,
   generateHtmlStep,
-  injectFrontmatterStep,
   checkConflictsStep,
   copyStaticStep,
   copyToDistStep,
@@ -38,11 +37,9 @@ const BUILD_STEPS: (BuildStep | BuildStep[])[] = [
   resetDirectoriesStep,
   checkConflictsStep, // Must run early to catch conflicts before build fails for other reasons
   createTsxEntriesStep,
-  [tailwindCssStep, serverBuildStep],
-  renderServerStep,
-  clientBuildStep,
-  generateHtmlStep,
-  injectFrontmatterStep,
+  [tailwindCssStep, serverBuildStep], // Tailwind runs in parallel with server build
+  [renderServerStep, clientBuildStep], // Independent: render uses server output, client uses MDX cache
+  generateHtmlStep, // Includes frontmatter injection (step 08 merged to avoid read-back pass)
   copyStaticStep,
   copyToDistStep,
 ];

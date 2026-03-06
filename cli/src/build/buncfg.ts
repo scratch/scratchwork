@@ -5,27 +5,50 @@
  * plugins from ./plugins for MDX compilation.
  */
 import type { BunPlugin, BuildConfig } from 'bun';
-import mdx from '@mdx-js/esbuild';
+import path from 'path';
+import { createFormatAwareProcessors } from '@mdx-js/mdx/internal-create-format-aware-processors';
+import { VFile } from 'vfile';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { BuildContext } from './context';
+import { BuildCache } from './cache';
 import {
   createAutoImportPlugin,
   createNotProsePlugin,
   createFootnotesPlugin,
-  createFrontmatterPlugin,
   createShikiPlugin,
   createPackageResolverPlugin,
   createImagePathsPlugin,
   createLinkPathsPlugin,
 } from './plugins';
+// Note: createFrontmatterPlugin removed — frontmatter is now extracted in step 03
+
+/**
+ * Module-level MDX compilation cache.
+ * Initialized on first use; reset between builds via resetMdxCache().
+ */
+let mdxCache: BuildCache | null = null;
+
+/**
+ * Reset the MDX compilation cache. Called between full builds.
+ */
+export function resetMdxCache(): void {
+  mdxCache?.resetMemory();
+}
 
 export interface BunBuildConfigOptions {
   entryPts: string[];
   outDir: string;
   root: string;
 }
+
+/**
+ * Disk cache version. Bump this when the compilation pipeline changes
+ * (e.g., plugins added/removed, processing logic modified) to invalidate
+ * all previously cached results.
+ */
+const MDX_DISK_CACHE_VERSION = 1;
 
 // MDX node types that should pass through rehype-raw unchanged
 const MDX_NODE_TYPES = [
@@ -37,56 +60,93 @@ const MDX_NODE_TYPES = [
 ];
 
 /**
- * Create the MDX plugin with remark/rehype preprocessing.
+ * Create the MDX plugin with remark/rehype preprocessing and cross-build caching.
+ *
+ * The compiled MDX output is cached by file path so the second build (client)
+ * reuses the compilation results from the first build (server), avoiding
+ * duplicate MDX processing of every file.
  */
-async function createMdxBuildPlugin(
-  ctx: BuildContext,
-  options: { extractFrontmatter?: boolean } = {}
-): Promise<BunPlugin> {
-  const { extractFrontmatter = false } = options;
+async function createMdxBuildPlugin(ctx: BuildContext): Promise<BunPlugin> {
   const componentMap = await ctx.getComponentMap();
   const componentConflicts = ctx.getComponentConflicts();
 
-  // Build remark plugins list
-  const remarkPlugins: any[] = [remarkGfm, remarkFrontmatter];
-
-  if (extractFrontmatter) {
-    remarkPlugins.push(createFrontmatterPlugin(ctx));
-  }
-
-  if (!ctx.options.strict) {
-    remarkPlugins.push(createAutoImportPlugin(componentMap, componentConflicts));
-    remarkPlugins.push(createNotProsePlugin());
-  }
-
-  // Build rehype plugins list
-  // rehype-raw processes raw HTML in markdown, with passThrough to preserve MDX nodes
-  const rehypePlugins: any[] = [[rehypeRaw, { passThrough: MDX_NODE_TYPES }]];
-
-  // Transform relative image paths to absolute static routes
-  rehypePlugins.push(createImagePathsPlugin(ctx));
-
-  // Transform internal link paths to include base path
-  rehypePlugins.push(createLinkPathsPlugin(ctx));
-
-  // Add shiki syntax highlighting unless disabled
-  const shikiPlugin = await createShikiPlugin(ctx);
-  if (shikiPlugin) {
-    rehypePlugins.push(shikiPlugin);
-  }
-
-  if (!ctx.options.strict) {
-    rehypePlugins.push(createFootnotesPlugin());
-  }
-
-  return mdx({
-    providerImportSource: '@mdx-js/react',
-    remarkPlugins,
-    rehypePlugins,
-    remarkRehypeOptions: {
-      passThrough: MDX_NODE_TYPES,
-    },
+  // Compute a fingerprint of the entire plugin pipeline configuration.
+  // This is included in disk cache keys so that config changes (strict mode,
+  // highlight mode, component additions/removals) invalidate stale entries.
+  const pipelineFingerprint = JSON.stringify({
+    v: MDX_DISK_CACHE_VERSION,
+    strict: !!ctx.options.strict,
+    highlight: ctx.options.highlight || 'auto',
+    base: ctx.options.base || '',
+    components: Object.entries(componentMap).sort((a, b) => a[0].localeCompare(b[0])),
+    conflicts: [...componentConflicts].sort(),
   });
+
+  // Initialize module-level cache on first use (rootDir determines disk location)
+  if (!mdxCache) {
+    mdxCache = new BuildCache({ name: 'mdx', rootDir: ctx.rootDir, extension: '.js' });
+  }
+
+  // Lazy-initialized MDX processor. The remark/rehype pipeline (including Shiki
+  // highlighter) is only created when the first cache miss requires actual compilation.
+  // On warm builds where every file hits the disk or in-memory cache, the expensive
+  // Shiki WASM initialization and processor setup are skipped entirely.
+  let processorPromise: Promise<(file: VFile) => Promise<VFile>> | null = null;
+
+  function getProcessor(): Promise<(file: VFile) => Promise<VFile>> {
+    if (!processorPromise) {
+      processorPromise = (async () => {
+        // Build remark plugins list
+        const remarkPlugins: any[] = [remarkGfm, remarkFrontmatter];
+        if (!ctx.options.strict) {
+          remarkPlugins.push(createAutoImportPlugin(componentMap, componentConflicts));
+          remarkPlugins.push(createNotProsePlugin());
+        }
+
+        // Build rehype plugins list
+        const rehypePlugins: any[] = [[rehypeRaw, { passThrough: MDX_NODE_TYPES }]];
+        rehypePlugins.push(createImagePathsPlugin(ctx));
+        rehypePlugins.push(createLinkPathsPlugin(ctx));
+
+        const shikiPlugin = await createShikiPlugin(ctx);
+        if (shikiPlugin) {
+          rehypePlugins.push(shikiPlugin);
+        }
+
+        if (!ctx.options.strict) {
+          rehypePlugins.push(createFootnotesPlugin());
+        }
+
+        const { process } = createFormatAwareProcessors({
+          providerImportSource: '@mdx-js/react',
+          remarkPlugins,
+          rehypePlugins,
+          remarkRehypeOptions: { passThrough: MDX_NODE_TYPES },
+        });
+
+        return process;
+      })();
+    }
+    return processorPromise;
+  }
+
+  return {
+    name: 'mdx-cached',
+    setup(build) {
+      build.onLoad({ filter: /\.mdx?$/ }, async (args) => {
+        const content = await Bun.file(args.path).text();
+        const compiled = await mdxCache!.getOrCompute(
+          args.path, content, pipelineFingerprint,
+          async () => {
+            const process = await getProcessor();
+            const file = new VFile({ value: content, path: args.path });
+            return String((await process(file)).value);
+          },
+        );
+        return { contents: compiled, loader: 'js' as const, resolveDir: path.dirname(args.path) };
+      });
+    },
+  };
 }
 
 /**
@@ -97,7 +157,7 @@ export async function getBunBuildConfig(
   options: BunBuildConfigOptions
 ): Promise<BuildConfig> {
   const nodeModulesDir = ctx.nodeModulesDir;
-  const mdxPlugin = await createMdxBuildPlugin(ctx, { extractFrontmatter: true });
+  const mdxPlugin = await createMdxBuildPlugin(ctx);
 
   return {
     entrypoints: options.entryPts,
