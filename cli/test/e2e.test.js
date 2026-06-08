@@ -1,0 +1,562 @@
+/*
+ * End-to-end tests for `scratch dev`.
+ *
+ * These are real e2e tests: each one spawns the actual CLI (`bun scratch.js dev
+ * <fixture>`) against a throwaway temp directory and drives it over HTTP, then
+ * asserts on the real responses. Nothing is mocked.
+ *
+ * They are written to be AUDITABLE. Every test:
+ *   1. declares its on-disk fixture inline (a { "path": "contents" } map), so
+ *      you can see the exact directory layout it runs against;
+ *   2. makes one request to a specific URL;
+ *   3. asserts what the server returned, classified into a few obvious kinds:
+ *        • STATIC HTML  — an authored .html page, served as-is
+ *        • SHELL        — a renderer index.html (which loads the .md client-side)
+ *        • RAW          — a file served byte-for-byte (.md, .js, .css, …)
+ *        • 404 / 403
+ *
+ * To tell SHELLs apart without a browser, the fixtures use tiny fake shells
+ * whose body carries a unique marker (e.g. "shell@a" for a/index.html); the
+ * assertion names the exact shell expected. Marker ids are chosen so none is a
+ * prefix of another ("root", "a"), so substring assertions stay unambiguous.
+ * The one exception is the embedded-fallback test, which
+ * asserts the *real* shell baked into the CLI (identified by "BUNDLED ENGINE").
+ *
+ * The numbered comments below map each group to the spec it covers:
+ *
+ *   (1) scratch dev dir/file.html → root=dir, open /file
+ *   (2) scratch dev dir           → root=dir, open /
+ *   (3) /path/to/file → file.html | file/index.html  ⇒ served directly
+ *   (4) /path/to/file → file.md   | file/index.md    ⇒ served via the nearest
+ *       ancestor index.html shell (…/index.html up the tree, else the embedded
+ *       shell baked into the CLI)
+ *   (5) the served shell loads /path/to/file.md | /path/to/file/index.md
+ *       (asserted server-side: the route serves a shell AND the raw .md is
+ *        fetchable; the client-side render itself needs a browser and is out of
+ *        scope for these HTTP tests)
+ */
+import { test, expect, describe, beforeAll } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const CLI_DIR = join(TEST_DIR, "..");
+const SCRATCH = join(CLI_DIR, "scratch.js");
+
+// ---------------------------------------------------------------------------
+// Markers used in fixtures / assertions
+// ---------------------------------------------------------------------------
+const RELOAD = "data-scratch-dev"; // the injected live-reload <script> tag
+const ENGINE = "BUNDLED ENGINE"; // appears only in the real (embedded) renderer
+
+// A tiny fake renderer shell tagged with `id`, e.g. fakeShell("a") → contains
+// "shell@a". Has a <body>…</body> so the reload client can be injected.
+const fakeShell = (id) =>
+  `<!doctype html><html><body><div id="root"></div><!-- shell@${id} --></body></html>`;
+
+// A static (authored) HTML page tagged with `id`.
+const staticPage = (id) => `<!doctype html><html><body><h1>static@${id}</h1></body></html>`;
+
+// ---------------------------------------------------------------------------
+// Harness: write a fixture, spawn the real CLI, wait until it's listening,
+// hand the test a `get(path)`, then tear everything down.
+// ---------------------------------------------------------------------------
+let nextPort = 34100; // each spawn gets a fresh port; the CLI probes upward too
+
+function makeFixture(files) {
+  const dir = mkdtempSync(join(tmpdir(), "scratch-e2e-"));
+  for (const [rel, content] of Object.entries(files)) {
+    const abs = join(dir, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content);
+  }
+  return dir;
+}
+
+function spawnServer(arg) {
+  return Bun.spawn(["bun", SCRATCH, "dev", arg, "--port", String(nextPort++)], {
+    env: { ...process.env, SCRATCH_NO_OPEN: "1" }, // never pop a browser in tests
+    stdout: "pipe",
+    stderr: "inherit", // surface CLI crashes directly in the test output
+  });
+}
+
+// Block until the CLI prints its "at http://localhost:PORT<path>" banner, then
+// return the live port and the path it would open in the browser.
+async function waitForReady(proc, timeoutMs = 8000) {
+  const killer = setTimeout(() => proc.kill(), timeoutMs);
+  const reader = proc.stdout.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error(`scratch dev exited before it was ready:\n${buf}`);
+      buf += dec.decode(value, { stream: true });
+      const m = buf.match(/at\s+http:\/\/localhost:(\d+)(\S*)/);
+      if (m) return { port: Number(m[1]), openPath: m[2] };
+    }
+  } finally {
+    clearTimeout(killer);
+    reader.releaseLock();
+  }
+}
+
+async function httpGet(port, path) {
+  const res = await fetch(`http://localhost:${port}${path}`);
+  return {
+    status: res.status,
+    type: res.headers.get("content-type") || "",
+    body: await res.text(),
+  };
+}
+
+// Run `fn` against a live server for the given fixture. `argSubpath` lets a test
+// pass `dir/<subpath>` as the CLI argument (for the file-arg cases); omit it to
+// pass the directory itself.
+async function withServer(files, fn, { argSubpath } = {}) {
+  const dir = makeFixture(files);
+  const proc = spawnServer(argSubpath ? join(dir, argSubpath) : dir);
+  try {
+    const { port, openPath } = await waitForReady(proc);
+    await fn({ port, openPath, dir, get: (p) => httpGet(port, p) });
+  } finally {
+    proc.kill();
+    await proc.exited;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Run the CLI once to completion (for the non-server commands: create, eject,
+// --version). Returns { code, stdout, stderr }.
+async function runCli(args, cwd) {
+  const proc = Bun.spawn(["bun", SCRATCH, ...args], {
+    cwd,
+    env: { ...process.env, SCRATCH_NO_OPEN: "1" },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  const code = await proc.exited;
+  return { code, stdout, stderr };
+}
+
+// The embedded-fallback test relies on the renderer shell at
+// template/dist/shell.js (which `bun cli/scratch.js` loads when no index.html is
+// found). Build it once if absent so `bun test` works from a clean checkout.
+// (scratch.js would build it on demand too, but pre-building keeps tests fast.)
+const TEMPLATE_DIR = join(CLI_DIR, "..", "template");
+beforeAll(() => {
+  if (existsSync(join(TEMPLATE_DIR, "dist", "shell.js"))) return;
+  const r = Bun.spawnSync(["bun", "build.js"], { cwd: TEMPLATE_DIR, stdout: "pipe", stderr: "pipe" });
+  if (!r.success) throw new Error(`failed to build renderer shell:\n${r.stderr.toString()}`);
+});
+
+// ===========================================================================
+// (1)(2) The path argument sets the server root and the page to open — then
+// fetching that opened URL must serve the right content. Each test runs the
+// full round-trip: arg → announced openPath → GET openPath → assert content.
+// ===========================================================================
+describe("path argument → open URL → served content", () => {
+  test("(2) `scratch dev dir` opens / and / serves the root page", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "index.md": "# home\n" },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/");
+        expect((await get(openPath)).body).toContain("shell@root"); // / → root shell
+        expect((await get("/index.md")).body).toBe("# home\n"); // …which loads this
+      },
+    );
+  });
+
+  test("(1) `scratch dev dir/file.html` opens /file and /file serves file.html", async () => {
+    await withServer(
+      { "file.html": staticPage("file") },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/file");
+        const res = await get(openPath); // GET /file
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("static@file"); // the authored page
+        expect(res.body).not.toContain("shell@"); // served directly, not via a shell
+      },
+      { argSubpath: "file.html" },
+    );
+  });
+
+  test("(1) `scratch dev dir/file.md` opens /file and /file serves the shell for file.md", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "file.md": "# file\n" },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/file");
+        expect((await get(openPath)).body).toContain("shell@root"); // /file → shell
+        expect((await get("/file.md")).body).toBe("# file\n"); // …which loads this
+      },
+      { argSubpath: "file.md" },
+    );
+  });
+});
+
+// ===========================================================================
+// (3) A route that resolves to HTML is served directly.
+// ===========================================================================
+describe("(3) static HTML served directly", () => {
+  test("/about → about.html", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "about.html": staticPage("about") },
+      async ({ get }) => {
+        const res = await get("/about");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("static@about"); // the authored page
+        expect(res.body).not.toContain("shell@"); // NOT the renderer shell
+      },
+    );
+  });
+
+  test("/foo → foo/index.html", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "foo/index.html": staticPage("foo-index") },
+      async ({ get }) => {
+        const res = await get("/foo");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("static@foo-index");
+      },
+    );
+  });
+
+  test("/foo/ (trailing slash) → foo/index.html", async () => {
+    await withServer({ "foo/index.html": staticPage("foo-index") }, async ({ get }) => {
+      const res = await get("/foo/");
+      expect(res.status).toBe(200);
+      expect(res.body).toContain("static@foo-index");
+    });
+  });
+
+  test("HTML wins when both file.html and file.md exist", async () => {
+    await withServer(
+      {
+        "index.html": fakeShell("root"),
+        "about.html": staticPage("about"),
+        "about.md": "# raw about\n",
+      },
+      async ({ get }) => {
+        const res = await get("/about");
+        expect(res.body).toContain("static@about");
+        expect(res.body).not.toContain("shell@");
+      },
+    );
+  });
+});
+
+// ===========================================================================
+// (4) A route that resolves to markdown is served through the nearest ancestor
+//     index.html shell; (5) the matching raw .md is fetchable.
+// ===========================================================================
+describe("(4) markdown served through the nearest ancestor shell", () => {
+  test("/a/b/page → uses a/index.html (nearest), not the root shell", async () => {
+    await withServer(
+      {
+        "index.html": fakeShell("root"),
+        "a/index.html": fakeShell("a"),
+        "a/b/page.md": "# page\n",
+      },
+      async ({ get }) => {
+        const res = await get("/a/b/page");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("shell@a"); // nearest ancestor (a/index.html)
+        expect(res.body).not.toContain("shell@root"); // not the root one
+      },
+    );
+  });
+
+  test("/a/b/page → walks all the way up to the root shell when no closer one", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "a/b/page.md": "# page\n" },
+      async ({ get }) => {
+        const res = await get("/a/b/page");
+        expect(res.body).toContain("shell@root");
+      },
+    );
+  });
+
+  test("/file → file/index.md is served via the shell", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "file/index.md": "# dir index\n" },
+      async ({ get }) => {
+        const res = await get("/file");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("shell@root");
+      },
+    );
+  });
+
+  test("(5) the route serves a shell AND the underlying .md is fetchable raw", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "guide.md": "# the guide\n" },
+      async ({ get }) => {
+        const page = await get("/guide");
+        expect(page.body).toContain("shell@root"); // shell serves the route
+
+        const md = await get("/guide.md"); // …and loads this
+        expect(md.status).toBe(200);
+        expect(md.body).toBe("# the guide\n"); // byte-for-byte, not wrapped
+        expect(md.body).not.toContain(RELOAD);
+      },
+    );
+  });
+
+  test("(4) embedded shell is used when no index.html exists anywhere", async () => {
+    await withServer({ "sub/page.md": "# orphan\n" }, async ({ get }) => {
+      const res = await get("/sub/page");
+      expect(res.status).toBe(200);
+      expect(res.body).toContain(ENGINE); // the real renderer baked into the CLI
+      expect(res.body).toContain(RELOAD); // reload client injected into it
+    });
+  });
+
+  // template.html (what `scratch eject` writes) overrides the default template
+  // for rendered markdown, and beats an index.html at the same level.
+  test("template.html overrides the built-in template for markdown", async () => {
+    await withServer(
+      { "template.html": fakeShell("tpl"), "index.html": fakeShell("root"), "page.md": "# p\n" },
+      async ({ get }) => {
+        const res = await get("/page");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("shell@tpl"); // template.html wins
+        expect(res.body).not.toContain("shell@root"); // …over index.html
+      },
+    );
+  });
+});
+
+// ===========================================================================
+// Resolution precedence for "/" (index.html before index.md).
+// ===========================================================================
+describe("root route", () => {
+  test("/ → index.html shell when present", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "index.md": "# home\n" },
+      async ({ get }) => {
+        const res = await get("/");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("shell@root");
+      },
+    );
+  });
+});
+
+// ===========================================================================
+// Raw files are served directly, untouched.
+// ===========================================================================
+describe("raw file serving", () => {
+  test("a referenced component .js is served as-is", async () => {
+    const js = "export default () => null;\n";
+    await withServer({ "index.html": fakeShell("root"), "components/X.js": js }, async ({ get }) => {
+      const res = await get("/components/X.js");
+      expect(res.status).toBe(200);
+      expect(res.body).toBe(js);
+    });
+  });
+
+  test("a .md fetched directly is raw markdown, not shell-wrapped", async () => {
+    await withServer({ "index.html": fakeShell("root"), "about.md": "# about\n" }, async ({ get }) => {
+      const res = await get("/about.md");
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("# about\n");
+      expect(res.body).not.toContain("shell@");
+      expect(res.body).not.toContain(RELOAD);
+    });
+  });
+});
+
+// ===========================================================================
+// Hot-reload requirement: every served HTML page gets the reload client.
+// ===========================================================================
+describe("hot reload", () => {
+  test("the live-reload client is injected into static pages and shells", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "about.html": staticPage("about"), "doc.md": "# d\n" },
+      async ({ get }) => {
+        expect((await get("/about")).body).toContain(RELOAD); // static page
+        expect((await get("/doc")).body).toContain(RELOAD); // shell page
+      },
+    );
+  });
+});
+
+// ===========================================================================
+// Not found and path-traversal safety.
+// ===========================================================================
+// ===========================================================================
+// `scratch --version` — prints the package version.
+// ===========================================================================
+describe("scratch --version", () => {
+  test("prints a semver-ish version and exits 0", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratch-ver-"));
+    try {
+      const { code, stdout } = await runCli(["--version"], dir);
+      expect(code).toBe(0);
+      expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ===========================================================================
+// `scratch create [path]` — scaffolds a runnable starter project.
+// ===========================================================================
+describe("scratch create", () => {
+  test("scaffolds example .md + components into the target dir", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratch-create-"));
+    try {
+      const { code, stdout } = await runCli(["create", "site"], dir);
+      expect(code).toBe(0);
+      expect(stdout).toContain("Created a Scratchwork project");
+
+      // The scaffold lands on disk…
+      expect(existsSync(join(dir, "site", "index.md"))).toBe(true);
+      expect(existsSync(join(dir, "site", "components", "Counter.js"))).toBe(true);
+
+      // …and the index.md references the component it ships, so it renders.
+      const md = readFileSync(join(dir, "site", "index.md"), "utf8");
+      expect(md).toContain("<Counter />");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the scaffolded project actually serves through `scratch dev`", async () => {
+    // create → then dev the result → the root page renders via a shell and the
+    // scaffolded index.md is fetchable raw.
+    const dir = mkdtempSync(join(tmpdir(), "scratch-create-dev-"));
+    try {
+      expect((await runCli(["create", "."], dir)).code).toBe(0);
+      const proc = spawnServer(dir);
+      try {
+        const { port } = await waitForReady(proc);
+        expect((await httpGet(port, "/")).status).toBe(200); // root renders (baked shell)
+        const md = await httpGet(port, "/index.md");
+        expect(md.status).toBe(200);
+        expect(md.body).toContain("<Counter />"); // the scaffolded content, raw
+        expect((await httpGet(port, "/components/Counter.js")).status).toBe(200);
+      } finally {
+        proc.kill();
+        await proc.exited;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to overwrite existing files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratch-create-clash-"));
+    try {
+      writeFileSync(join(dir, "index.md"), "# mine\n");
+      const { code, stderr } = await runCli(["create", "."], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("refusing to overwrite");
+      expect(readFileSync(join(dir, "index.md"), "utf8")).toBe("# mine\n"); // untouched
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ===========================================================================
+// `scratch eject [file]` — writes the default renderer template to a file.
+// ===========================================================================
+describe("scratch eject", () => {
+  test("writes the real renderer template to template.html by default", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratch-eject-"));
+    try {
+      const { code, stdout } = await runCli(["eject"], dir);
+      expect(code).toBe(0);
+      expect(stdout).toContain("template.html");
+
+      const html = readFileSync(join(dir, "template.html"), "utf8");
+      expect(html).toContain(ENGINE); // it's the real baked renderer, not a stub
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an ejected template.html overrides the default when serving markdown", async () => {
+    // The end-to-end contract from the docs: eject, tweak, and `scratch dev`
+    // renders markdown through your copy. We tag the ejected file and assert the
+    // tag shows up in the served page.
+    const dir = mkdtempSync(join(tmpdir(), "scratch-eject-dev-"));
+    try {
+      expect((await runCli(["eject"], dir)).code).toBe(0);
+      // Mark the ejected template so we can tell it apart from the baked one.
+      const tpl = join(dir, "template.html");
+      writeFileSync(tpl, readFileSync(tpl, "utf8").replace("</body>", "<!-- EJECTED MARK --></body>"));
+      writeFileSync(join(dir, "page.md"), "# p\n");
+
+      const proc = spawnServer(dir);
+      try {
+        const { port } = await waitForReady(proc);
+        const res = await httpGet(port, "/page");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("EJECTED MARK"); // served through the ejected template
+      } finally {
+        proc.kill();
+        await proc.exited;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to overwrite an existing file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratch-eject-clash-"));
+    try {
+      writeFileSync(join(dir, "template.html"), "KEEP ME");
+      const { code, stderr } = await runCli(["eject"], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("refusing to overwrite");
+      expect(readFileSync(join(dir, "template.html"), "utf8")).toBe("KEEP ME");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("not found & safety", () => {
+  test("an unknown extensionless route → 404", async () => {
+    await withServer({ "index.html": fakeShell("root") }, async ({ get }) => {
+      expect((await get("/nope")).status).toBe(404);
+    });
+  });
+
+  test("a missing file with an extension → 404", async () => {
+    await withServer({ "index.html": fakeShell("root") }, async ({ get }) => {
+      expect((await get("/missing.md")).status).toBe(404);
+    });
+  });
+
+  test("a path that escapes the root → 403 and leaks nothing", async () => {
+    // Root is dir/site; a secret sits one level up at dir/secret.txt.
+    const dir = makeFixture({
+      "site/index.html": fakeShell("root"),
+      "secret.txt": "TOP SECRET",
+    });
+    const proc = spawnServer(join(dir, "site"));
+    try {
+      const { port } = await waitForReady(proc);
+      // %2e%2e%2f is an encoded "../" — stays encoded through fetch so the
+      // server, not the URL parser, has to defend against it.
+      const res = await httpGet(port, "/%2e%2e%2fsecret.txt");
+      expect(res.status).toBe(403);
+      expect(res.body).not.toContain("TOP SECRET");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

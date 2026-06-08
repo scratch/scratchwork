@@ -1,20 +1,13 @@
 {
   "name": "scratchwork",
+  "version": "0.1.0",
   "private": true,
-  "workspaces": ["server", "shared", "cli"],
+  "type": "module",
+  "description": "Scratchwork — the single-file Markdown renderer (template/) and the scratch dev CLI (cli/).",
   "scripts": {
-    "dev": "bun run --cwd server dev",
-    "ops": "bun ops/index.ts"
-  },
-  "devDependencies": {
-    "bun-types": "^1.3.5",
-    "commander": "^12.1.0"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@inquirer/prompts": "^8.1.0"
-  },
-  "patchedDependencies": {
-    "estree-util-build-jsx@3.0.1": "patches/estree-util-build-jsx@3.0.1.patch"
+    "build": "cd template && bun install && cd ../cli && bun run build",
+    "build:template": "cd template && bun install && bun run build",
+    "dev:template": "cd template && bun run dev",
+    "test": "cd cli && bun test"
   }
 }
