@@ -1,0 +1,20 @@
+{
+  "name": "scratchwork-template",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Build-once pipeline that produces the single-file Scratchwork universal renderer (index.html). The output renders any .md/.mdx file at runtime — content is never rebuilt.",
+  "scripts": {
+    "build": "bun build.js",
+    "dev": "bun build.js --watch"
+  },
+  "dependencies": {
+    "htm": "^3.1.1",
+    "prismjs": "^1.29.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
+  }
+}
