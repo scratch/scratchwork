@@ -1,7 +1,7 @@
 /*
- * End-to-end tests for `scratch dev`.
+ * End-to-end tests for `scratchwork dev`.
  *
- * These are real e2e tests: each one spawns the actual CLI (`bun scratch.js dev
+ * These are real e2e tests: each one spawns the actual CLI (`bun scratchwork.js dev
  * <fixture>`) against a throwaway temp directory and drives it over HTTP, then
  * asserts on the real responses. Nothing is mocked.
  *
@@ -24,8 +24,8 @@
  *
  * The numbered comments below map each group to the spec it covers:
  *
- *   (1) scratch dev dir/file.html → root=dir, open /file
- *   (2) scratch dev dir           → root=dir, open /
+ *   (1) scratchwork dev dir/file.html → root=dir, open /file
+ *   (2) scratchwork dev dir           → root=dir, open /
  *   (3) /path/to/file → file.html | file/index.html  ⇒ served directly
  *   (4) /path/to/file → file.md   | file/index.md    ⇒ served via the nearest
  *       ancestor index.html shell (…/index.html up the tree, else the embedded
@@ -43,12 +43,12 @@ import { fileURLToPath } from "node:url";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = join(TEST_DIR, "..");
-const SCRATCH = join(CLI_DIR, "scratch.js");
+const SCRATCHWORK = join(CLI_DIR, "scratchwork.js");
 
 // ---------------------------------------------------------------------------
 // Markers used in fixtures / assertions
 // ---------------------------------------------------------------------------
-const RELOAD = "data-scratch-dev"; // the injected live-reload <script> tag
+const RELOAD = "data-scratchwork-dev"; // the injected live-reload <script> tag
 const ENGINE = "BUNDLED ENGINE"; // appears only in the real (embedded) renderer
 
 // A tiny fake renderer shell tagged with `id`, e.g. fakeShell("a") → contains
@@ -66,7 +66,7 @@ const staticPage = (id) => `<!doctype html><html><body><h1>static@${id}</h1></bo
 let nextPort = 34100; // each spawn gets a fresh port; the CLI probes upward too
 
 function makeFixture(files) {
-  const dir = mkdtempSync(join(tmpdir(), "scratch-e2e-"));
+  const dir = mkdtempSync(join(tmpdir(), "scratchwork-e2e-"));
   for (const [rel, content] of Object.entries(files)) {
     const abs = join(dir, rel);
     mkdirSync(dirname(abs), { recursive: true });
@@ -76,8 +76,8 @@ function makeFixture(files) {
 }
 
 function spawnServer(arg) {
-  return Bun.spawn(["bun", SCRATCH, "dev", arg, "--port", String(nextPort++)], {
-    env: { ...process.env, SCRATCH_NO_OPEN: "1" }, // never pop a browser in tests
+  return Bun.spawn(["bun", SCRATCHWORK, "dev", arg, "--port", String(nextPort++)], {
+    env: { ...process.env, SCRATCHWORK_NO_OPEN: "1" }, // never pop a browser in tests
     stdout: "pipe",
     stderr: "inherit", // surface CLI crashes directly in the test output
   });
@@ -93,7 +93,7 @@ async function waitForReady(proc, timeoutMs = 8000) {
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) throw new Error(`scratch dev exited before it was ready:\n${buf}`);
+      if (done) throw new Error(`scratchwork dev exited before it was ready:\n${buf}`);
       buf += dec.decode(value, { stream: true });
       const m = buf.match(/at\s+http:\/\/localhost:(\d+)(\S*)/);
       if (m) return { port: Number(m[1]), openPath: m[2] };
@@ -132,9 +132,9 @@ async function withServer(files, fn, { argSubpath } = {}) {
 // Run the CLI once to completion (for the non-server commands: create, eject,
 // --version). Returns { code, stdout, stderr }.
 async function runCli(args, cwd) {
-  const proc = Bun.spawn(["bun", SCRATCH, ...args], {
+  const proc = Bun.spawn(["bun", SCRATCHWORK, ...args], {
     cwd,
-    env: { ...process.env, SCRATCH_NO_OPEN: "1" },
+    env: { ...process.env, SCRATCHWORK_NO_OPEN: "1" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -147,9 +147,9 @@ async function runCli(args, cwd) {
 }
 
 // The embedded-fallback test relies on the renderer shell at
-// template/dist/shell.js (which `bun cli/scratch.js` loads when no index.html is
+// template/dist/shell.js (which `bun cli/scratchwork.js` loads when no index.html is
 // found). Build it once if absent so `bun test` works from a clean checkout.
-// (scratch.js would build it on demand too, but pre-building keeps tests fast.)
+// (scratchwork.js would build it on demand too, but pre-building keeps tests fast.)
 const TEMPLATE_DIR = join(CLI_DIR, "..", "template");
 beforeAll(() => {
   if (existsSync(join(TEMPLATE_DIR, "dist", "shell.js"))) return;
@@ -163,7 +163,7 @@ beforeAll(() => {
 // full round-trip: arg → announced openPath → GET openPath → assert content.
 // ===========================================================================
 describe("path argument → open URL → served content", () => {
-  test("(2) `scratch dev dir` opens / and / serves the root page", async () => {
+  test("(2) `scratchwork dev dir` opens / and / serves the root page", async () => {
     await withServer(
       { "index.html": fakeShell("root"), "index.md": "# home\n" },
       async ({ openPath, get }) => {
@@ -174,7 +174,7 @@ describe("path argument → open URL → served content", () => {
     );
   });
 
-  test("(1) `scratch dev dir/file.html` opens /file and /file serves file.html", async () => {
+  test("(1) `scratchwork dev dir/file.html` opens /file and /file serves file.html", async () => {
     await withServer(
       { "file.html": staticPage("file") },
       async ({ openPath, get }) => {
@@ -188,7 +188,7 @@ describe("path argument → open URL → served content", () => {
     );
   });
 
-  test("(1) `scratch dev dir/file.md` opens /file and /file serves the shell for file.md", async () => {
+  test("(1) `scratchwork dev dir/file.md` opens /file and /file serves the shell for file.md", async () => {
     await withServer(
       { "index.html": fakeShell("root"), "file.md": "# file\n" },
       async ({ openPath, get }) => {
@@ -318,7 +318,7 @@ describe("(4) markdown served through the nearest ancestor shell", () => {
     });
   });
 
-  // template.html (what `scratch eject` writes) overrides the default template
+  // template.html (what `scratchwork eject` writes) overrides the default template
   // for rendered markdown, and beats an index.html at the same level.
   test("template.html overrides the built-in template for markdown", async () => {
     await withServer(
@@ -392,11 +392,11 @@ describe("hot reload", () => {
 // Not found and path-traversal safety.
 // ===========================================================================
 // ===========================================================================
-// `scratch --version` — prints the package version.
+// `scratchwork --version` — prints the package version.
 // ===========================================================================
-describe("scratch --version", () => {
+describe("scratchwork --version", () => {
   test("prints a semver-ish version and exits 0", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratch-ver-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-ver-"));
     try {
       const { code, stdout } = await runCli(["--version"], dir);
       expect(code).toBe(0);
@@ -408,11 +408,11 @@ describe("scratch --version", () => {
 });
 
 // ===========================================================================
-// `scratch create [path]` — scaffolds a runnable starter project.
+// `scratchwork create [path]` — scaffolds a runnable starter project.
 // ===========================================================================
-describe("scratch create", () => {
+describe("scratchwork create", () => {
   test("scaffolds example .md + components into the target dir", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratch-create-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-create-"));
     try {
       const { code, stdout } = await runCli(["create", "site"], dir);
       expect(code).toBe(0);
@@ -430,10 +430,10 @@ describe("scratch create", () => {
     }
   });
 
-  test("the scaffolded project actually serves through `scratch dev`", async () => {
+  test("the scaffolded project actually serves through `scratchwork dev`", async () => {
     // create → then dev the result → the root page renders via a shell and the
     // scaffolded index.md is fetchable raw.
-    const dir = mkdtempSync(join(tmpdir(), "scratch-create-dev-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-create-dev-"));
     try {
       expect((await runCli(["create", "."], dir)).code).toBe(0);
       const proc = spawnServer(dir);
@@ -454,7 +454,7 @@ describe("scratch create", () => {
   });
 
   test("refuses to overwrite existing files", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratch-create-clash-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-create-clash-"));
     try {
       writeFileSync(join(dir, "index.md"), "# mine\n");
       const { code, stderr } = await runCli(["create", "."], dir);
@@ -468,11 +468,11 @@ describe("scratch create", () => {
 });
 
 // ===========================================================================
-// `scratch eject [file]` — writes the default renderer template to a file.
+// `scratchwork eject [file]` — writes the default renderer template to a file.
 // ===========================================================================
-describe("scratch eject", () => {
+describe("scratchwork eject", () => {
   test("writes the real renderer template to template.html by default", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratch-eject-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-"));
     try {
       const { code, stdout } = await runCli(["eject"], dir);
       expect(code).toBe(0);
@@ -486,10 +486,10 @@ describe("scratch eject", () => {
   });
 
   test("an ejected template.html overrides the default when serving markdown", async () => {
-    // The end-to-end contract from the docs: eject, tweak, and `scratch dev`
+    // The end-to-end contract from the docs: eject, tweak, and `scratchwork dev`
     // renders markdown through your copy. We tag the ejected file and assert the
     // tag shows up in the served page.
-    const dir = mkdtempSync(join(tmpdir(), "scratch-eject-dev-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-dev-"));
     try {
       expect((await runCli(["eject"], dir)).code).toBe(0);
       // Mark the ejected template so we can tell it apart from the baked one.
@@ -513,7 +513,7 @@ describe("scratch eject", () => {
   });
 
   test("refuses to overwrite an existing file", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratch-eject-clash-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-clash-"));
     try {
       writeFileSync(join(dir, "template.html"), "KEEP ME");
       const { code, stderr } = await runCli(["eject"], dir);

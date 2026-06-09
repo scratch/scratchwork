@@ -2,9 +2,9 @@
  * Rendering: turns parsed blocks (from parser.js) into React elements.
  *
  * Styling note: there are NO utility (Tailwind) classes here. Markdown output
- * is styled by prose.css via the `.scratch-prose` container; a handful of
- * semantic class names (scratch-heading, scratch-codeblock, scratch-copy,
- * scratch-table-wrap, heading-anchor) are also defined there.
+ * is styled by prose.css via the `.scratchwork-prose` container; a handful of
+ * semantic class names (scratchwork-heading, scratchwork-codeblock, scratchwork-copy,
+ * scratchwork-table-wrap, heading-anchor) are also defined there.
  */
 import React from "react";
 import {
@@ -123,10 +123,10 @@ function renderElementNode(node, ctx, opts = {}) {
   if (isComponent) {
     const Comp = ctx.components[node.name];
     if (!Comp) {
-      return e("span", { key, className: "scratch-missing" }, `<${node.name} />`);
+      return e("span", { key, className: "scratchwork-missing" }, `<${node.name} />`);
     }
     const el = children == null ? e(Comp, { ...props }) : e(Comp, { ...props }, ...children);
-    // Self-closing block components opt out of prose typography (scratch behavior).
+    // Self-closing block components opt out of prose typography (scratchwork behavior).
     if (node.selfClosing && !opts.inline) {
       return e("div", { key, className: "not-prose" }, el);
     }
@@ -168,7 +168,7 @@ function Heading({ level, text, ctx }) {
     const id = slugify(label);
     return e(
       Tag,
-      { id, className: "scratch-heading" },
+      { id, className: "scratchwork-heading" },
       e("a", { href: "#" + id, className: "heading-anchor", "aria-label": "Link to " + label }, "#"),
       ...kids,
     );
@@ -205,8 +205,8 @@ function CodeBlock({ lang, code }) {
 
   return e(
     "div",
-    { className: "scratch-codeblock" },
-    e("button", { className: "scratch-copy", "aria-label": "Copy code", onClick: onCopy }, copied ? "Copied!" : "Copy"),
+    { className: "scratchwork-codeblock" },
+    e("button", { className: "scratchwork-copy", "aria-label": "Copy code", onClick: onCopy }, copied ? "Copied!" : "Copy"),
     pre,
   );
 }
@@ -234,7 +234,7 @@ function renderBlock(block, key, ctx) {
     case "table":
       return e(
         "div",
-        { key: k, className: "scratch-table-wrap" },
+        { key: k, className: "scratchwork-table-wrap" },
         e(
           "table",
           null,

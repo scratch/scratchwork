@@ -14,11 +14,11 @@ window.SCRATCHWORK = window.SCRATCHWORK || {};
 window.SCRATCHWORK.components = window.SCRATCHWORK.components || {};
 
 /* ---------- Page chrome ----------
- * Wraps the rendered markdown, which lives inside `.scratch-prose` (styled by
+ * Wraps the rendered markdown, which lives inside `.scratchwork-prose` (styled by
  * the theme above). Edit freely — add a header or footer, rebrand, etc. */
 window.SCRATCHWORK.layout = ({ children }) => html`
-  <div className="scratch-page">
-    <main className="scratch-prose">${children}</main>
+  <div className="scratchwork-page">
+    <main className="scratchwork-prose">${children}</main>
   </div>
 `;
 

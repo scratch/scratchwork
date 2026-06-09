@@ -18,27 +18,27 @@ There are two ways to get started with Scratchwork. The first way is to ask your
 Publish myspec.md on scratchwork.dev
 ```
 
-Alternatively, you can install `scratch`, the Scratchwork CLI, directly:
+Alternatively, you can install `scratchwork`, the Scratchwork CLI, directly:
 
 ```sh
 curl -fsSL https://scratchwork.dev/install.sh | bash
 
-scratch --version
+scratchwork --version
 ```
 
 ## Publishing with Scratchwork
 
-You can use the `scratch` CLI to publish any static website:
+You can use the `scratchwork` CLI to publish any static website:
 
 ```sh
 # Publish all .html, .js, .css, .md, and image files in dir (defaults to .)
-scratch publish [dir]
+scratchwork publish [dir]
 
 # Publish page.html
-scratch publish page.html
+scratchwork publish page.html
 
 # Publish page.md
-scratch publish page.md
+scratchwork publish page.md
 ```
 
 ## Working with Markdown
@@ -47,7 +47,7 @@ In addition to HTML, Scratchwork supports Markdown, which is easier for humans t
 
 ```sh
 # Serve myspec.md with the development server
-scratch dev myspec.md
+scratchwork dev myspec.md
 ```
 
 Scratchwork uses a default template HTML file to render Markdown content as a web page. The template lets you embed React components right in your Markdown files — handy for adding interactive demos (a live counter, say) to your writing, or for building custom formatting components like an inline highlighter. See [`docs/index.md`](docs/index.md) for the live examples.
@@ -56,14 +56,14 @@ You can add the template directly to your project with:
 
 ```sh
 # Write the default template to template.html
-scratch eject template.html
+scratchwork eject template.html
 ```
 
 To use the docs page as a starting point for your own project, use:
 
 ```sh
 # Create a new project with example Markdown and React content
-scratch create [path]
+scratchwork create [path]
 ```
 
 When `template.html` is present in your project root directory it overrides the default Scratchwork template, which allows you to modify the default styling for rendered Markdown files.

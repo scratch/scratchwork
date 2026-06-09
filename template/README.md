@@ -24,7 +24,7 @@ So the pipeline ships the *renderer*, not the pages.
 The produced `index.html` is deliberately laid out in three regions so a coding
 agent can edit the parts that matter while the engine stays out of the way:
 
-1. **`<style id="scratch-theme">`** — the theme (`src/prose.css`), injected
+1. **`<style id="scratchwork-theme">`** — the theme (`src/prose.css`), injected
    **formatted**. Design tokens, page chrome, prose typography, Prism theme.
 2. **The editable `<script>`** — the page shell (`shell.js`), injected
    **formatted**. Defines `window.SCRATCHWORK.layout` and
@@ -48,8 +48,8 @@ components. Branding lives with the project content instead:
 - The sample project (`docs/`) ships `scratchwork-logo.svg` (figure + wordmark)
   and uses it directly in `index.md`, plus a `MadeWithScratchwork` component
   under `docs/components/`.
-- The `scratch dev` server serves the Scratchwork figure mark as the **default
-  favicon** when a project ships none of its own (see `../cli/scratch.js` and
+- The `scratchwork dev` server serves the Scratchwork figure mark as the **default
+  favicon** when a project ships none of its own (see `../cli/scratchwork.js` and
   `../cli/assets/figure.svg`).
 
 ## Build
@@ -74,7 +74,7 @@ Override the dev port with `PORT=4321 bun run dev`. `dist/` is gitignored.
 `build.js` also **exports** `assemble()` (returns the HTML string, no writes) and
 `buildDist()` (writes both `dist/` artifacts). The CLI's build
 (`../cli/build.js`) imports `buildDist()` to produce the shell, then compiles
-`scratch.js` — which loads `../renderer/dist/shell.js` — into a standalone
+`scratchwork.js` — which loads `../renderer/dist/shell.js` — into a standalone
 binary. See the root `package.json`'s `build` script, which builds the renderer
 and the CLI in one step.
 
@@ -102,7 +102,7 @@ and the CLI in one step.
 ## Styling model
 
 There is no CSS framework. Rendered markdown is styled by `prose.css` (scoped to
-`.scratch-prose`). Components style themselves with inline `style` or a small
+`.scratchwork-prose`). Components style themselves with inline `style` or a small
 scoped `<style>` injected once (see `docs/components/Counter.js`). Raw HTML
 in markdown can use inline `style="..."` — the renderer converts the string to a
 React style object.

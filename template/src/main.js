@@ -39,16 +39,16 @@ window.SCRATCHWORK = window.SCRATCHWORK || {};
 window.SCRATCHWORK.components = window.SCRATCHWORK.components || {};
 
 // Re-render the current page in place (re-fetches its .md, no full reload).
-// Used by `scratch dev` for hot-reloading content edits; harmless otherwise.
+// Used by `scratchwork dev` for hot-reloading content edits; harmless otherwise.
 window.SCRATCHWORK.refresh = () => renderPage();
 
 // Minimal fallback chrome, used only if the editable region didn't define a
-// layout. Renders the markdown inside `.scratch-prose` with no footer.
+// layout. Renders the markdown inside `.scratchwork-prose` with no footer.
 function FallbackLayout({ children }) {
   return e(
     "div",
-    { className: "scratch-page" },
-    e("div", { className: "scratch-prose" }, ...children),
+    { className: "scratchwork-page" },
+    e("div", { className: "scratchwork-prose" }, ...children),
   );
 }
 
@@ -65,7 +65,7 @@ let container = null;
 function applyMeta(meta) {
   if (meta.title) document.title = meta.title;
   if (meta.lang) document.documentElement.lang = meta.lang;
-  if (meta.author) window.__scratch_author__ = meta.author;
+  if (meta.author) window.__scratchwork_author__ = meta.author;
   const setMeta = (name, content, attr = "name") => {
     if (!content) return;
     let el = document.head.querySelector(`meta[${attr}="${name}"]`);
@@ -96,7 +96,7 @@ async function renderPage() {
     }
   }
   if (!res) {
-    console.error(`[scratch] no markdown for ${location.pathname}`);
+    console.error(`[scratchwork] no markdown for ${location.pathname}`);
     return;
   }
   // Content + referenced components resolve against the markdown's own directory.

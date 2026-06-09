@@ -17,7 +17,7 @@ export async function loadComponent(name, base) {
       // try next path
     }
   }
-  console.warn(`[scratch] failed to load component ${name}`);
+  console.warn(`[scratchwork] failed to load component ${name}`);
   return null;
 }
 

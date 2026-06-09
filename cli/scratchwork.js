@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 /*
- * scratch — a tiny CLI for Scratchwork projects.
+ * scratchwork — a tiny CLI for Scratchwork projects.
  *
- *   scratch dev [path] [--port N]   start the dev server (below)
- *   scratch create [path]           scaffold a new project (example .md + components)
- *   scratch eject [file]            write the default renderer template to a file
- *   scratch --version               print the version
+ *   scratchwork dev [path] [--port N]   start the dev server (below)
+ *   scratchwork create [path]           scaffold a new project (example .md + components)
+ *   scratchwork eject [file]            write the default renderer template to a file
+ *   scratchwork --version               print the version
  *
  * `path` is a directory to serve, or a file inside it to open:
  *   dir            → root = dir,  open /
@@ -40,10 +40,10 @@ import { fileURLToPath } from "node:url";
 // The Scratchwork figure mark, served as the default favicon when a project
 // ships none. Imported as text so `bun build --compile` embeds it in the binary.
 import FIGURE_SVG from "./assets/figure.svg" with { type: "text" };
-// The version printed by `scratch --version`. Imported (not read at runtime) so
+// The version printed by `scratchwork --version`. Imported (not read at runtime) so
 // the compiled standalone binary carries it.
 import pkg from "./package.json";
-// The starter project written by `scratch create`. Each file is imported as
+// The starter project written by `scratchwork create`. Each file is imported as
 // text so `bun build --compile` embeds it; the SCAFFOLD map below pairs each
 // with its destination path relative to the new project root.
 import SCAFFOLD_INDEX_MD from "./scaffold/index.md" with { type: "text" };
@@ -57,7 +57,7 @@ const SCAFFOLD = {
 };
 
 const DEFAULT_PORT = 3000;
-const RELOAD_PATH = "/__scratch_reload";
+const RELOAD_PATH = "/__scratchwork_reload";
 const WATCH_EXT = new Set([".md", ".html", ".js", ".css"]);
 const encoder = new TextEncoder();
 
@@ -84,7 +84,7 @@ if (cmd === "eject") {
   process.exit(0);
 }
 if (cmd !== "dev") {
-  console.error(`scratch: unknown command "${cmd}"\n`);
+  console.error(`scratchwork: unknown command "${cmd}"\n`);
   printHelp();
   process.exit(1);
 }
@@ -101,7 +101,7 @@ for (let i = 1; i < argv.length; i++) {
   } else if (a.startsWith("--port=")) {
     startPort = parseInt(a.slice("--port=".length), 10);
   } else if (a.startsWith("-")) {
-    console.error(`scratch dev: unknown option "${a}"`);
+    console.error(`scratchwork dev: unknown option "${a}"`);
     process.exit(1);
   } else {
     pathArg = a;
@@ -109,7 +109,7 @@ for (let i = 1; i < argv.length; i++) {
 }
 
 if (!Number.isInteger(startPort) || startPort < 1 || startPort > 65535) {
-  console.error(`scratch dev: invalid --port "${startPort}"`);
+  console.error(`scratchwork dev: invalid --port "${startPort}"`);
   process.exit(1);
 }
 
@@ -125,7 +125,7 @@ if (existsSync(target) && statSync(target).isDirectory()) {
   root = dirname(target);
   openPath = "/" + basename(target).replace(/\.(html?|md)$/i, "");
 } else {
-  console.error(`scratch dev: no such file or directory: ${target}`);
+  console.error(`scratchwork dev: no such file or directory: ${target}`);
   process.exit(1);
 }
 
@@ -133,7 +133,7 @@ if (existsSync(target) && statSync(target).isDirectory()) {
 // the served tree. Resolved lazily and memoized:
 //   • In the standalone binary (cli/build.js), the literal import below is
 //     embedded by `bun build --compile`, so it just resolves.
-//   • Run directly from source (`bun cli/scratch.js`), it loads
+//   • Run directly from source (`bun cli/scratchwork.js`), it loads
 //     ../template/dist/shell.js — building the renderer first if dist is absent.
 let _shellPromise = null;
 function bakedShell() {
@@ -168,8 +168,9 @@ const CLIENT = `
   es.onmessage = function (ev) {
     var msg = {};
     try { msg = JSON.parse(ev.data); } catch (e) {}
-    if (msg.ext === "md" && window.SCRATCH && typeof window.SCRATCH.refresh === "function") {
-      try { window.SCRATCH.refresh(); return; } catch (e) {}
+    var runtime = window.SCRATCHWORK;
+    if (msg.ext === "md" && runtime && typeof runtime.refresh === "function") {
+      try { runtime.refresh(); return; } catch (e) {}
     }
     location.reload();
   };
@@ -218,7 +219,7 @@ const HEARTBEAT = encoder.encode(": ping\n\n");
 setInterval(() => broadcast(HEARTBEAT), 20000);
 
 function injectClient(html) {
-  const tag = `\n<script data-scratch-dev>${CLIENT}</script>\n`;
+  const tag = `\n<script data-scratchwork-dev>${CLIENT}</script>\n`;
   const i = html.lastIndexOf("</body>");
   return i === -1 ? html + tag : html.slice(0, i) + tag + html.slice(i);
 }
@@ -245,7 +246,7 @@ function htmlResponse(html) {
 
 // Walk up from `dir` looking for a renderer shell to wrap markdown in, falling
 // back to the CLI's baked-in shell. At each level a `template.html` (the file
-// `scratch eject` writes, the documented way to override the default template)
+// `scratchwork eject` writes, the documented way to override the default template)
 // wins over an `index.html`. Returns the HTML string or null.
 async function nearestShell(dir) {
   let d = dir;
@@ -334,7 +335,7 @@ for (let attempt = 0; attempt < 100 && !server; attempt++) {
   }
 }
 if (!server) {
-  console.error(`scratch dev: no free port found in [${startPort}, ${startPort + 100})`);
+  console.error(`scratchwork dev: no free port found in [${startPort}, ${startPort + 100})`);
   process.exit(1);
 }
 
@@ -361,14 +362,14 @@ watch(root, { recursive: true }, (_event, filename) => {
 // Announce + open browser
 // ---------------------------------------------------------------------------
 const url = `http://localhost:${port}${openPath}`;
-console.log(`\n  scratch dev`);
+console.log(`\n  scratchwork dev`);
 console.log(`  serving  ${root}`);
 console.log(`  at       ${url}`);
 console.log(`  watching .md .html .js .css — hot reload on\n`);
 
-// SCRATCH_NO_OPEN=1 skips launching a browser — used by the e2e tests, which
+// SCRATCHWORK_NO_OPEN=1 skips launching a browser — used by the e2e tests, which
 // drive the server over HTTP and don't want a tab opened per run.
-if (!process.env.SCRATCH_NO_OPEN) {
+if (!process.env.SCRATCHWORK_NO_OPEN) {
   const opener =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const openArgs = process.platform === "win32" ? ["/c", "start", "", url] : [opener, url];
@@ -380,18 +381,18 @@ if (!process.env.SCRATCH_NO_OPEN) {
 }
 
 // ---------------------------------------------------------------------------
-// `scratch create [path]` — scaffold a new project from the embedded starter
+// `scratchwork create [path]` — scaffold a new project from the embedded starter
 // (example index.md + components). Refuses to clobber existing files.
 // ---------------------------------------------------------------------------
 async function runCreate(args) {
   let dest = ".";
   for (const a of args) {
     if (a === "--help" || a === "-h") {
-      console.log("Usage: scratch create [path]\n\nScaffold a new Scratchwork project (example Markdown + React components).");
+      console.log("Usage: scratchwork create [path]\n\nScaffold a new Scratchwork project (example Markdown + React components).");
       return;
     }
     if (a.startsWith("-")) {
-      console.error(`scratch create: unknown option "${a}"`);
+      console.error(`scratchwork create: unknown option "${a}"`);
       process.exit(1);
     }
     dest = a;
@@ -401,7 +402,7 @@ async function runCreate(args) {
   const targets = Object.keys(SCAFFOLD).map((rel) => ({ rel, abs: join(root, rel) }));
   const clashes = targets.filter(({ abs }) => existsSync(abs));
   if (clashes.length) {
-    console.error(`scratch create: refusing to overwrite existing file(s):`);
+    console.error(`scratchwork create: refusing to overwrite existing file(s):`);
     for (const { rel } of clashes) console.error(`  ${join(dest, rel)}`);
     process.exit(1);
   }
@@ -414,11 +415,11 @@ async function runCreate(args) {
   console.log(`\n  Created a Scratchwork project in ${root}`);
   for (const { rel } of targets) console.log(`    + ${rel}`);
   const cd = dest === "." ? "" : `cd ${dest} && `;
-  console.log(`\n  Next:  ${cd}scratch dev\n`);
+  console.log(`\n  Next:  ${cd}scratchwork dev\n`);
 }
 
 // ---------------------------------------------------------------------------
-// `scratch eject [file]` — write the default renderer template to a file
+// `scratchwork eject [file]` — write the default renderer template to a file
 // (default template.html). When template.html sits in a project root it
 // overrides the built-in template for rendered Markdown (see nearestShell).
 // ---------------------------------------------------------------------------
@@ -427,15 +428,15 @@ async function runEject(args) {
   let sawFile = false;
   for (const a of args) {
     if (a === "--help" || a === "-h") {
-      console.log("Usage: scratch eject [file]\n\nWrite the default renderer template to <file> (default: template.html).");
+      console.log("Usage: scratchwork eject [file]\n\nWrite the default renderer template to <file> (default: template.html).");
       return;
     }
     if (a.startsWith("-")) {
-      console.error(`scratch eject: unknown option "${a}"`);
+      console.error(`scratchwork eject: unknown option "${a}"`);
       process.exit(1);
     }
     if (sawFile) {
-      console.error(`scratch eject: unexpected extra argument "${a}"`);
+      console.error(`scratchwork eject: unexpected extra argument "${a}"`);
       process.exit(1);
     }
     dest = a;
@@ -444,13 +445,13 @@ async function runEject(args) {
 
   const out = resolve(process.cwd(), dest);
   if (existsSync(out)) {
-    console.error(`scratch eject: refusing to overwrite existing file: ${dest}`);
+    console.error(`scratchwork eject: refusing to overwrite existing file: ${dest}`);
     process.exit(1);
   }
 
   const html = await loadShell();
   if (html == null) {
-    console.error("scratch eject: could not load the default template (renderer build failed)");
+    console.error("scratchwork eject: could not load the default template (renderer build failed)");
     process.exit(1);
   }
 
@@ -460,14 +461,14 @@ async function runEject(args) {
 }
 
 function printHelp() {
-  console.log(`scratch — CLI for Scratchwork projects
+  console.log(`scratchwork — CLI for Scratchwork projects
 
 Usage:
-  scratch dev [path] [--port N]   Serve a project with hot reload
-  scratch create [path]           Scaffold a new project (example .md + components)
-  scratch eject [file]            Write the default template (default: template.html)
-  scratch --version               Print the version
-  scratch --help                  Show this help
+  scratchwork dev [path] [--port N]   Serve a project with hot reload
+  scratchwork create [path]           Scaffold a new project (example .md + components)
+  scratchwork eject [file]            Write the default template (default: template.html)
+  scratchwork --version               Print the version
+  scratchwork --help                  Show this help
 
 dev arguments:
   path           Directory to serve, or a file inside it to open.

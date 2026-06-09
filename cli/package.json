@@ -1,17 +1,17 @@
 {
-  "name": "scratch-cli",
+  "name": "scratchwork-cli",
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "scratch dev — zero-dependency static dev server with hot reload for Scratchwork projects (Bun).",
+  "description": "scratchwork dev — zero-dependency static dev server with hot reload for Scratchwork projects (Bun).",
   "bin": {
-    "scratch": "./scratch.js"
+    "scratchwork": "./scratchwork.js"
   },
   "scripts": {
     "build": "bun build.js",
     "test": "bun test"
   },
   "files": [
-    "scratch.js"
+    "scratchwork.js"
   ]
 }

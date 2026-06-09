@@ -1,11 +1,11 @@
 /*
  * Scratchwork renderer styles — everything the artifact needs, with NO CSS
  * framework. Three parts:
- *   1. Page chrome (.scratch-page, .scratch-prose, footer, headings, code UI)
+ *   1. Page chrome (.scratchwork-page, .scratchwork-prose, footer, headings, code UI)
  *   2. Prose typography for rendered markdown (a hand-written `prose`)
  *   3. A github-light Prism token theme
  *
- * Prose rules are scoped to `.scratch-prose` and guarded with `:not(.not-prose
+ * Prose rules are scoped to `.scratchwork-prose` and guarded with `:not(.not-prose
  * *)` so component internals (wrapped in `.not-prose`) are never restyled.
  * Components style themselves (inline styles / their own <style>); this file
  * deliberately ships no utility classes.
@@ -50,14 +50,14 @@ body {
 
 /* ---------- Page chrome ---------- */
 
-.scratch-page {
+.scratchwork-page {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background: #fff;
 }
 
-.scratch-prose {
+.scratchwork-prose {
   flex: 1 1 auto;
   width: 100%;
   max-width: 56rem;
@@ -68,14 +68,14 @@ body {
   color: var(--prose-body);
 }
 
-.scratch-footer {
+.scratchwork-footer {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.25rem;
   padding: 2rem 0;
 }
-.scratch-badge {
+.scratchwork-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
@@ -83,14 +83,14 @@ body {
   font-size: 0.875rem;
   text-decoration: none;
 }
-.scratch-badge img { height: 2.25rem; padding-bottom: 0.125rem; }
-.scratch-copyright { color: var(--gray-400); font-size: 0.875rem; margin: 0; }
+.scratchwork-badge img { height: 2.25rem; padding-bottom: 0.125rem; }
+.scratchwork-copyright { color: var(--gray-400); font-size: 0.875rem; margin: 0; }
 
-.scratch-missing { color: #b91c1c; }
+.scratchwork-missing { color: #b91c1c; }
 
 /* ---------- Heading anchors ---------- */
 
-.scratch-heading { position: relative; }
+.scratchwork-heading { position: relative; }
 .heading-anchor {
   position: absolute;
   top: 0;
@@ -101,13 +101,13 @@ body {
   user-select: none;
   transition: opacity 150ms ease, color 150ms ease;
 }
-.scratch-heading:hover .heading-anchor { opacity: 1; }
+.scratchwork-heading:hover .heading-anchor { opacity: 1; }
 .heading-anchor:hover { color: var(--gray-600); }
 
 /* ---------- Code blocks + copy button ---------- */
 
-.scratch-codeblock { position: relative; margin: 1em 0; }
-.scratch-copy {
+.scratchwork-codeblock { position: relative; margin: 1em 0; }
+.scratchwork-copy {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
@@ -122,60 +122,60 @@ body {
   cursor: pointer;
   transition: opacity 150ms ease, color 150ms ease;
 }
-.scratch-codeblock:hover .scratch-copy { opacity: 1; }
-.scratch-copy:hover { color: var(--gray-700); }
+.scratchwork-codeblock:hover .scratchwork-copy { opacity: 1; }
+.scratchwork-copy:hover { color: var(--gray-700); }
 
 /* ---------- Prose typography (scoped, .not-prose excluded) ---------- */
 
-.scratch-prose > :first-child:not(.not-prose *) { margin-top: 0; }
-.scratch-prose > :last-child:not(.not-prose *) { margin-bottom: 0; }
+.scratchwork-prose > :first-child:not(.not-prose *) { margin-top: 0; }
+.scratchwork-prose > :last-child:not(.not-prose *) { margin-bottom: 0; }
 
-.scratch-prose p:not(.not-prose *) { margin: 0.8em 0; }
+.scratchwork-prose p:not(.not-prose *) { margin: 0.8em 0; }
 
-.scratch-prose h1:not(.not-prose *) {
+.scratchwork-prose h1:not(.not-prose *) {
   font-size: 1.75em;
   font-weight: 800;
   line-height: 1.15;
   margin: 0 0 0.4em;
   color: var(--prose-headings);
 }
-.scratch-prose h2:not(.not-prose *) {
+.scratchwork-prose h2:not(.not-prose *) {
   font-size: 1.25em;
   font-weight: 700;
   line-height: 1.3;
   margin: 1.3em 0 0.5em;
   color: var(--prose-headings);
 }
-.scratch-prose h3:not(.not-prose *) {
+.scratchwork-prose h3:not(.not-prose *) {
   font-size: 1.1em;
   font-weight: 600;
   line-height: 1.4;
   margin: 1.1em 0 0.35em;
   color: var(--prose-headings);
 }
-.scratch-prose h4:not(.not-prose *) {
+.scratchwork-prose h4:not(.not-prose *) {
   font-weight: 600;
   line-height: 1.4;
   margin: 1em 0 0.35em;
   color: var(--prose-headings);
 }
 
-.scratch-prose a:not(.not-prose *) {
+.scratchwork-prose a:not(.not-prose *) {
   color: var(--prose-links);
   font-weight: 500;
   text-decoration: none;
 }
-.scratch-prose strong:not(.not-prose *) { color: var(--prose-headings); font-weight: 600; }
-.scratch-prose em:not(.not-prose *) { font-style: italic; }
+.scratchwork-prose strong:not(.not-prose *) { color: var(--prose-headings); font-weight: 600; }
+.scratchwork-prose em:not(.not-prose *) { font-style: italic; }
 
-.scratch-prose ul:not(.not-prose *),
-.scratch-prose ol:not(.not-prose *) { margin: 0.8em 0; padding-left: 1.625em; }
-.scratch-prose ul:not(.not-prose *) { list-style: disc; }
-.scratch-prose ol:not(.not-prose *) { list-style: decimal; }
-.scratch-prose li:not(.not-prose *) { margin: 0.3em 0; padding-left: 0.375em; }
-.scratch-prose li::marker { color: var(--gray-400); }
+.scratchwork-prose ul:not(.not-prose *),
+.scratchwork-prose ol:not(.not-prose *) { margin: 0.8em 0; padding-left: 1.625em; }
+.scratchwork-prose ul:not(.not-prose *) { list-style: disc; }
+.scratchwork-prose ol:not(.not-prose *) { list-style: decimal; }
+.scratchwork-prose li:not(.not-prose *) { margin: 0.3em 0; padding-left: 0.375em; }
+.scratchwork-prose li::marker { color: var(--gray-400); }
 
-.scratch-prose blockquote:not(.not-prose *) {
+.scratchwork-prose blockquote:not(.not-prose *) {
   margin: 1.1em 0;
   padding-left: 1em;
   border-left: 0.25rem solid var(--gray-200);
@@ -183,12 +183,12 @@ body {
   color: var(--prose-headings);
 }
 
-.scratch-prose hr:not(.not-prose *) { border: 0; border-top: 1px solid var(--gray-200); margin: 2em 0; }
+.scratchwork-prose hr:not(.not-prose *) { border: 0; border-top: 1px solid var(--gray-200); margin: 2em 0; }
 
-.scratch-prose img:not(.not-prose *) { max-width: 100%; height: auto; }
+.scratchwork-prose img:not(.not-prose *) { max-width: 100%; height: auto; }
 
-/* Inline code (not inside <pre>) — matches the legacy scratch build */
-.scratch-prose code:not(pre code):not(.not-prose *) {
+/* Inline code (not inside <pre>) — matches the previous Scratchwork build */
+.scratchwork-prose code:not(pre code):not(.not-prose *) {
   background: var(--gray-50);
   color: var(--gray-700);
   font-weight: 500;
@@ -198,8 +198,8 @@ body {
   font-size: 0.9em;
 }
 
-/* Code blocks — matches the legacy scratch build (white, borderless, Shiki-like) */
-.scratch-prose pre:not(.not-prose *) {
+/* Code blocks — matches the previous Scratchwork build (white, borderless, Shiki-like) */
+.scratchwork-prose pre:not(.not-prose *) {
   margin: 0;
   overflow-x: auto;
   background: var(--code-bg);
@@ -210,7 +210,7 @@ body {
   font-size: 0.875rem;
   line-height: 1.55;
 }
-.scratch-prose pre code:not(.not-prose *) {
+.scratchwork-prose pre code:not(.not-prose *) {
   display: block;
   background: none;
   padding: 0;
@@ -220,16 +220,16 @@ body {
 }
 
 /* Tables */
-.scratch-table-wrap { overflow-x: auto; margin: 1.5em 0; }
-.scratch-table-wrap table { width: 100%; border-collapse: collapse; font-size: 0.875em; }
-.scratch-table-wrap th {
+.scratchwork-table-wrap { overflow-x: auto; margin: 1.5em 0; }
+.scratchwork-table-wrap table { width: 100%; border-collapse: collapse; font-size: 0.875em; }
+.scratchwork-table-wrap th {
   font-weight: 600;
   text-align: left;
   padding: 0.5em 0.75em;
   border-bottom: 1px solid var(--gray-300);
   color: var(--prose-headings);
 }
-.scratch-table-wrap td { padding: 0.5em 0.75em; border-bottom: 1px solid var(--gray-200); }
+.scratchwork-table-wrap td { padding: 0.5em 0.75em; border-bottom: 1px solid var(--gray-200); }
 
 /* ---------- Prism github-light token theme ---------- */
 

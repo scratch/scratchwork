@@ -6,7 +6,7 @@
  *      the markdown parser/renderer) into one engine string, in memory.
  *   2. That string is wrapped in an index.html with three clearly-marked,
  *      hand-editable regions:
- *        THEME      — src/prose.css, formatted, in <style id="scratch-theme">
+ *        THEME      — src/prose.css, formatted, in <style id="scratchwork-theme">
  *        PAGE SHELL — shell.js, formatted, in an editable <script>
  *        ENGINE     — the minified bundle, in a <script> at the bottom
  *
@@ -78,7 +78,7 @@ export async function assemble() {
   │ never rely on them):                                                    │
   │                                                                         │
   │   "EDITABLE — THEME"                                                    │
-  │       Opens the <style id="scratch-theme"> block. Colors, fonts,        │
+  │       Opens the <style id="scratchwork-theme"> block. Colors, fonts,        │
   │       spacing, prose typography, code highlighting. Edit freely. To     │
   │       edit CSS: grep for this marker to get its line N, then read from  │
   │       N up to the "EDITABLE — PAGE SHELL & COMPONENTS" marker only.     │
@@ -112,7 +112,7 @@ export async function assemble() {
          EDITABLE — THEME
          Colors, fonts, spacing, prose typography, and the code (Prism) theme.
          ===================================================================== -->
-    <style id="scratch-theme">
+    <style id="scratchwork-theme">
 ${theme}
     </style>
   </head>
