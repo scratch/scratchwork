@@ -9,6 +9,7 @@
     "build:template": "cd template && bun install && bun run build",
     "dev:template": "cd template && bun run dev",
     "serve": "cd server && bun run start",
+    "deploy": "cd server && bun run deploy",
     "test": "cd cli && bun test && cd ../server && bun test",
     "test:cli": "cd cli && bun test",
     "test:server": "cd server && bun test"

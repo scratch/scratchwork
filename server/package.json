@@ -8,7 +8,7 @@
     "start": "bun src/local.js",
     "dev": "bun src/local.js --port 8787",
     "cf:dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "./deploy.sh",
     "test": "bun test"
   },
   "devDependencies": {

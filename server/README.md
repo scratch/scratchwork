@@ -27,13 +27,17 @@ locally — set `SCRATCHWORK_TOKEN` to require a bearer token, matching producti
 
 ## Deploy to Cloudflare
 
-Three steps — one bucket, one secret, one deploy:
+One command, idempotent — run it as often as you like:
 
 ```sh
-wrangler r2 bucket create scratchwork
-wrangler secret put SCRATCHWORK_TOKEN     # the deploy token clients will use
-wrangler deploy
+SCRATCHWORK_TOKEN=$(openssl rand -hex 24) ./deploy.sh   # first deploy: pick & save a token
+./deploy.sh                                             # every deploy after that
 ```
+
+[`deploy.sh`](deploy.sh) creates the R2 bucket if it's missing, deploys the
+Worker (with the routes from [`wrangler.toml`](wrangler.toml)), sets the deploy
+token when one is in the environment, and health-checks the result. It refuses
+to deploy a server that would end up with no token.
 
 That's the whole production footprint: a Worker and an R2 bucket. No D1, no KV,
 no Durable Objects. See [`wrangler.toml`](wrangler.toml) for optional settings

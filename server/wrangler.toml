@@ -1,9 +1,8 @@
 # Cloudflare Workers config for the Scratchwork publishing server.
 #
-# Deploy in three steps:
-#   1. wrangler r2 bucket create scratchwork
-#   2. wrangler secret put SCRATCHWORK_TOKEN     # the deploy token clients send
-#   3. wrangler deploy
+# Deploy with ./deploy.sh — it creates the R2 bucket if missing, deploys the
+# Worker, sets the SCRATCHWORK_TOKEN secret when one is in the environment,
+# and health-checks the result. Idempotent; run it as often as you like.
 #
 # That's it — one R2 bucket and one secret. No D1, no KV, no extra services.
 
