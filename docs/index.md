@@ -7,7 +7,7 @@ author: "Scratchwork"                                           # Meta author
 lang: "en"                                                      # HTML lang attribute
 ---
 
-<img src="/scratchwork-logo.svg" alt="Scratchwork" style="width:80%; display:block; margin:0 auto;" />
+<img src="scratchwork-logo.svg" alt="Scratchwork" style="width:80%; display:block; margin:0 auto;" />
 
 Scratchwork is a tool for sharing the static HTML and Markdown artifacts created by your coding agent.
 

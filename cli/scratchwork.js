@@ -49,6 +49,13 @@ import pkg from "./package.json";
 import SCAFFOLD_INDEX_MD from "./scaffold/index.md" with { type: "text" };
 import SCAFFOLD_COUNTER_JS from "./scaffold/components/Counter.js" with { type: "text" };
 import SCAFFOLD_HIGHLIGHT_JS from "./scaffold/components/Highlight.js" with { type: "text" };
+// Publishing: build the static bundle, pack it, and talk to a Scratchwork server.
+// All zero-dependency (Bun + the shared modules); embedded into the binary by
+// `bun build --compile` via this import graph.
+import { buildPublishFiles } from "./lib/publish-build.js";
+import { packBundle } from "../shared/bundle.js";
+import { deploy as apiDeploy, whoami as apiWhoami, ApiError } from "./lib/server-client.js";
+import * as cfg from "./lib/config.js";
 
 const SCAFFOLD = {
   "index.md": SCAFFOLD_INDEX_MD,
@@ -81,6 +88,22 @@ if (cmd === "create") {
 }
 if (cmd === "eject") {
   await runEject(argv.slice(1));
+  process.exit(0);
+}
+if (cmd === "publish") {
+  await runPublish(argv.slice(1));
+  process.exit(0);
+}
+if (cmd === "login") {
+  await runLogin(argv.slice(1));
+  process.exit(0);
+}
+if (cmd === "logout") {
+  await runLogout(argv.slice(1));
+  process.exit(0);
+}
+if (cmd === "whoami") {
+  await runWhoami(argv.slice(1));
   process.exit(0);
 }
 if (cmd !== "dev") {
@@ -460,15 +483,322 @@ async function runEject(args) {
   console.log(`Wrote default template to ${dest}`);
 }
 
+// ---------------------------------------------------------------------------
+// Publishing helpers
+// ---------------------------------------------------------------------------
+function openBrowser(url) {
+  if (process.env.SCRATCHWORK_NO_OPEN) return;
+  try {
+    const opener =
+      process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+    const openArgs = process.platform === "win32" ? ["/c", "start", "", url] : [opener, url];
+    Bun.spawn(openArgs, { stdout: "ignore", stderr: "ignore" });
+  } catch {
+    /* opening the browser is best-effort */
+  }
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Read a single line from stdin (used to collect a token interactively).
+async function promptLine(question) {
+  process.stdout.write(question);
+  for await (const line of console) return line;
+  return "";
+}
+
+// ---------------------------------------------------------------------------
+// `scratchwork publish [path] [--server URL] [--name NAME] [--unlisted]
+//                      [--no-open] [--dry-run]`
+//
+// Packages a directory (or a single file, which becomes the site index) into the
+// exact static files a host should serve — baking a renderer shell for every
+// markdown route — then uploads the gzipped bundle to a Scratchwork server. The
+// published site renders byte-for-byte like `scratchwork dev`.
+// ---------------------------------------------------------------------------
+async function runPublish(args) {
+  let pathArg = ".";
+  let serverFlag = null;
+  let nameFlag = null;
+  let visibility = null;
+  let noOpen = false;
+  let dryRun = false;
+  let sawPath = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--help" || a === "-h") {
+      printPublishHelp();
+      return;
+    } else if (a === "--server") {
+      serverFlag = args[++i];
+    } else if (a.startsWith("--server=")) {
+      serverFlag = a.slice("--server=".length);
+    } else if (a === "--name") {
+      nameFlag = args[++i];
+    } else if (a.startsWith("--name=")) {
+      nameFlag = a.slice("--name=".length);
+    } else if (a === "--unlisted") {
+      visibility = "unlisted";
+    } else if (a === "--no-open" || a === "-n") {
+      noOpen = true;
+    } else if (a === "--dry-run") {
+      dryRun = true;
+    } else if (a.startsWith("-")) {
+      console.error(`scratchwork publish: unknown option "${a}"`);
+      process.exit(1);
+    } else if (!sawPath) {
+      pathArg = a;
+      sawPath = true;
+    } else {
+      console.error(`scratchwork publish: unexpected argument "${a}"`);
+      process.exit(1);
+    }
+  }
+
+  // Resolve the path into a publish root + optional single file (which becomes
+  // the index). Mirrors `scratchwork dev` path handling.
+  const target = resolve(process.cwd(), pathArg);
+  if (!existsSync(target)) {
+    console.error(`scratchwork publish: no such file or directory: ${target}`);
+    process.exit(1);
+  }
+  let pubRoot, only;
+  if (statSync(target).isDirectory()) {
+    pubRoot = target;
+    only = null;
+  } else {
+    pubRoot = dirname(target);
+    only = basename(target);
+  }
+
+  const projectConfig = cfg.loadProjectConfig(pubRoot);
+  const serverUrl = cfg.resolveServerUrl({ flag: serverFlag, projectConfig });
+  const name = (nameFlag || projectConfig.name || basename(pubRoot) || "site").trim();
+  const token = cfg.resolveToken(serverUrl);
+
+  const bakedShell = await loadShell();
+  if (bakedShell == null) {
+    console.error("scratchwork publish: could not load the renderer shell (renderer build failed)");
+    process.exit(1);
+  }
+
+  let built;
+  try {
+    built = buildPublishFiles({ root: pubRoot, only, bakedShell });
+  } catch (err) {
+    console.error(`scratchwork publish: ${err.message}`);
+    process.exit(1);
+  }
+  if (!built.files.length) {
+    console.error("scratchwork publish: nothing to publish (no static files found)");
+    process.exit(1);
+  }
+
+  const bundle = await packBundle(built.files);
+
+  console.log(`\n  scratchwork publish`);
+  console.log(`  source   ${only ? join(pubRoot, only) : pubRoot}`);
+  console.log(`  server   ${serverUrl}`);
+  console.log(
+    `  files    ${built.stats.fileCount} (${formatBytes(built.stats.totalBytes)} → ${formatBytes(bundle.byteLength)} gzipped)`,
+  );
+
+  if (dryRun) {
+    console.log(`\n  dry run — not uploading. Bundle contents:`);
+    for (const f of built.files) console.log(`    ${f.path}  (${formatBytes(f.data.length)})`);
+    console.log("");
+    return;
+  }
+
+  let result;
+  try {
+    result = await apiDeploy({
+      serverUrl,
+      token,
+      name,
+      id: projectConfig.id,
+      visibility,
+      bundle,
+    });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        console.error(`\n  Authentication required. Run:\n    scratchwork login --server ${serverUrl}\n`);
+      } else if (err.status === 413) {
+        console.error(`\n  Deploy too large. Reduce the size of ${pubRoot}.\n`);
+      } else {
+        console.error(`\n  ${err.message}\n`);
+      }
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  // Remember the server-assigned id (+ name/server) so the next publish updates
+  // the same project at the same URL.
+  cfg.saveProjectConfig(pubRoot, {
+    id: result.id,
+    name: result.name || name,
+    server: serverUrl,
+  });
+
+  console.log(`\n  published ${result.created ? "a new project" : `v${result.version}`}`);
+  console.log(`  ${result.url}\n`);
+
+  if (!noOpen) openBrowser(result.url);
+}
+
+// ---------------------------------------------------------------------------
+// `scratchwork login [--server URL] [--token TOKEN]`  — store a deploy token.
+// Open servers (no token required) need no login.
+// ---------------------------------------------------------------------------
+async function runLogin(args) {
+  let serverFlag = null;
+  let tokenFlag = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--help" || a === "-h") {
+      console.log("Usage: scratchwork login [--server URL] [--token TOKEN]\n\nStore a deploy token for a Scratchwork server.");
+      return;
+    } else if (a === "--server") serverFlag = args[++i];
+    else if (a.startsWith("--server=")) serverFlag = a.slice("--server=".length);
+    else if (a === "--token") tokenFlag = args[++i];
+    else if (a.startsWith("--token=")) tokenFlag = a.slice("--token=".length);
+    else {
+      console.error(`scratchwork login: unexpected argument "${a}"`);
+      process.exit(1);
+    }
+  }
+
+  const serverUrl = cfg.resolveServerUrl({ flag: serverFlag });
+
+  let info;
+  try {
+    info = await apiWhoami({ serverUrl, token: null });
+  } catch (err) {
+    console.error(`scratchwork login: ${err.message}`);
+    process.exit(1);
+  }
+  if (!info.authRequired) {
+    console.log(`\n  ${serverUrl} is open — no token needed to publish.\n`);
+    return;
+  }
+
+  let token = tokenFlag || process.env.SCRATCHWORK_TOKEN;
+  if (!token) token = await promptLine(`Paste your deploy token for ${serverUrl}: `);
+  token = (token || "").trim();
+  if (!token) {
+    console.error("scratchwork login: no token provided");
+    process.exit(1);
+  }
+
+  const verify = await apiWhoami({ serverUrl, token });
+  if (!verify.authenticated) {
+    console.error("scratchwork login: that token was not accepted by the server");
+    process.exit(1);
+  }
+
+  cfg.saveCredentials(serverUrl, { token });
+  console.log(`\n  Logged in to ${serverUrl}\n`);
+}
+
+async function runLogout(args) {
+  let serverFlag = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--help" || a === "-h") {
+      console.log("Usage: scratchwork logout [--server URL]");
+      return;
+    } else if (a === "--server") serverFlag = args[++i];
+    else if (a.startsWith("--server=")) serverFlag = a.slice("--server=".length);
+    else {
+      console.error(`scratchwork logout: unexpected argument "${a}"`);
+      process.exit(1);
+    }
+  }
+  const serverUrl = cfg.resolveServerUrl({ flag: serverFlag });
+  cfg.clearCredentials(serverUrl);
+  console.log(`Logged out from ${serverUrl}`);
+}
+
+async function runWhoami(args) {
+  let serverFlag = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--help" || a === "-h") {
+      console.log("Usage: scratchwork whoami [--server URL]");
+      return;
+    } else if (a === "--server") serverFlag = args[++i];
+    else if (a.startsWith("--server=")) serverFlag = a.slice("--server=".length);
+    else {
+      console.error(`scratchwork whoami: unexpected argument "${a}"`);
+      process.exit(1);
+    }
+  }
+  const serverUrl = cfg.resolveServerUrl({ flag: serverFlag });
+  const token = cfg.resolveToken(serverUrl);
+  let info;
+  try {
+    info = await apiWhoami({ serverUrl, token });
+  } catch (err) {
+    console.error(`scratchwork whoami: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`server:        ${serverUrl}`);
+  console.log(`auth required: ${info.authRequired}`);
+  console.log(`authenticated: ${info.authenticated}`);
+}
+
+function printPublishHelp() {
+  console.log(`Usage: scratchwork publish [path] [options]
+
+Package a static site and publish it to a Scratchwork server.
+
+Arguments:
+  path             Directory to publish, or a single file to publish as the
+                   site's homepage. A single file is uploaded on its own — to
+                   include sibling assets or components, publish the directory.
+                   (default: current directory)
+
+Options:
+      --server URL   Server to publish to (default: project config, then
+                     ${cfg.DEFAULT_SERVER})
+      --name NAME    Project name (default: directory name)
+      --unlisted     Mark the project unlisted (served only at its random URL)
+  -n, --no-open      Don't open the published URL in a browser
+      --dry-run      Show what would be uploaded without uploading
+  -h, --help         Show this help
+
+Markdown is published with the same renderer shell \`scratchwork dev\` uses, so a
+published page renders identically. Re-publishing updates the same URL (the
+assigned id is saved to .scratchwork.json).`);
+}
+
 function printHelp() {
   console.log(`scratchwork — CLI for Scratchwork projects
 
 Usage:
   scratchwork dev [path] [--port N]   Serve a project with hot reload
+  scratchwork publish [path]          Publish a static site to a Scratchwork server
   scratchwork create [path]           Scaffold a new project (example .md + components)
   scratchwork eject [file]            Write the default template (default: template.html)
+  scratchwork login [--server URL]    Store a deploy token for a server
+  scratchwork logout [--server URL]   Forget a server's token
+  scratchwork whoami [--server URL]   Show auth status for a server
   scratchwork --version               Print the version
   scratchwork --help                  Show this help
+
+publish:
+  scratchwork publish [path] [--server URL] [--name NAME] [--unlisted]
+                             [--no-open] [--dry-run]
+  Packages a directory (or a single file, used as the index) and uploads it.
+  Markdown is published with the same renderer shell \`scratchwork dev\` uses, so
+  the published page renders identically. Default server: ${cfg.DEFAULT_SERVER}.
 
 dev arguments:
   path           Directory to serve, or a file inside it to open.

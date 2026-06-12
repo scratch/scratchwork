@@ -8,6 +8,9 @@
     "build": "cd template && bun install && cd ../cli && bun run build",
     "build:template": "cd template && bun install && bun run build",
     "dev:template": "cd template && bun run dev",
-    "test": "cd cli && bun test"
+    "serve": "cd server && bun run start",
+    "test": "cd cli && bun test && cd ../server && bun test",
+    "test:cli": "cd cli && bun test",
+    "test:server": "cd server && bun test"
   }
 }

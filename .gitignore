@@ -1,1 +1,8 @@
 .DS_Store
+
+# Per-project publish metadata (server-assigned id, name, server). Written by
+# `scratchwork publish` into whatever directory you publish; not for committing.
+.scratchwork.json
+
+# Local publishing-server data dir (if you run the server from the repo root).
+.scratchwork-data/

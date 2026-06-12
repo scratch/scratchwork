@@ -1,0 +1,49 @@
+# Cloudflare Workers config for the Scratchwork publishing server.
+#
+# Deploy in three steps:
+#   1. wrangler r2 bucket create scratchwork
+#   2. wrangler secret put SCRATCHWORK_TOKEN     # the deploy token clients send
+#   3. wrangler deploy
+#
+# That's it — one R2 bucket and one secret. No D1, no KV, no extra services.
+
+name = "scratchwork"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+
+# Serve the worker on sndbx.sh (the zone's DNS already proxies through
+# Cloudflare, so a route is all that's needed).
+routes = [
+  { pattern = "sndbx.sh/*", zone_name = "sndbx.sh" }
+]
+
+# Object storage for project metadata + deploy files (the only binding needed).
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "scratchwork"
+
+[vars]
+# Optional knobs (uncomment to use):
+#
+# Serve each project at its own subdomain (<id>.scratchwork.dev) in addition to
+# the path form (scratchwork.dev/<id>/). Requires a wildcard DNS record and a
+# route for *.scratchwork.dev. Lets sites that use absolute (/foo) asset paths
+# render correctly.
+# BASE_DOMAIN = "scratchwork.dev"
+#
+# Compressed upload cap in bytes (default 25 MB).
+# MAX_DEPLOY_BYTES = "26214400"
+#
+# Uncompressed cap in bytes (default 100 MB) — a gzip-bomb guard. Decompression
+# aborts past this, so a tiny compressed bomb can't exhaust Worker memory.
+# MAX_UNCOMPRESSED_BYTES = "104857600"
+#
+# Override the base URL returned to clients (default: the request's origin).
+# PUBLIC_BASE_URL = "https://scratchwork.dev"
+#
+# Base URL where release binaries are hosted, for `curl .../install.sh | bash`.
+# SCRATCHWORK_DOWNLOAD_BASE = "https://github.com/scratchwork/scratchwork/releases/latest/download"
+
+# The deploy token is a SECRET, not a var. Set it with:
+#   wrangler secret put SCRATCHWORK_TOKEN
+# Omit it entirely to allow anonymous deploys (not recommended in production).

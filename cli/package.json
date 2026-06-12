@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "scratchwork dev — zero-dependency static dev server with hot reload for Scratchwork projects (Bun).",
+  "description": "scratchwork — zero-dependency Bun CLI: dev server with hot reload, publish to a Scratchwork server, scaffold, and eject.",
   "bin": {
     "scratchwork": "./scratchwork.js"
   },

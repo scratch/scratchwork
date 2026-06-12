@@ -31,14 +31,26 @@ scratchwork --version
 You can use the `scratchwork` CLI to publish any static website:
 
 ```sh
-# Publish all .html, .js, .css, .md, and image files in dir (defaults to .)
+# Publish a whole directory (.html, .js, .css, .md, images, fonts, …)
 scratchwork publish [dir]
 
-# Publish page.html
+# Publish a single file — it becomes the site's homepage
 scratchwork publish page.html
-
-# Publish page.md
 scratchwork publish page.md
+```
+
+Publishing uploads to [scratchwork.dev](https://scratchwork.dev) by default;
+point it elsewhere with `--server <url>`. Each publish prints the URL of your
+site (e.g. `https://scratchwork.dev/<id>/`), and re-publishing updates that same
+URL (the id is remembered in `.scratchwork.json`).
+
+Markdown is published with the **same renderer** `scratchwork dev` uses, so a
+published page renders exactly like it did locally.
+
+If your server requires a token, log in once and the CLI remembers it:
+
+```sh
+scratchwork login --server https://scratchwork.dev   # paste your token
 ```
 
 ## Working with Markdown
@@ -67,6 +79,21 @@ scratchwork create [path]
 ```
 
 When `template.html` is present in your project root directory it overrides the default Scratchwork template, which allows you to modify the default styling for rendered Markdown files.
+
+## Running your own server
+
+Scratchwork's server runs the same code locally (on Bun) and in production (on
+Cloudflare Workers), with zero runtime dependencies. To host published sites on
+your own machine:
+
+```sh
+cd server && bun run start          # serves on http://localhost:8787
+scratchwork publish ./docs --server http://localhost:8787
+```
+
+Deploying to Cloudflare is one bucket, one secret, and `wrangler deploy`. See
+[`server/README.md`](server/README.md) for the full guide and
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for how publishing works under the hood.
 
 ---
 

@@ -1,0 +1,17 @@
+{
+  "name": "scratchwork-server",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "The Scratchwork publishing server — one runtime-agnostic handler that runs locally on Bun (filesystem) and in production on Cloudflare Workers (R2). Zero runtime dependencies.",
+  "scripts": {
+    "start": "bun src/local.js",
+    "dev": "bun src/local.js --port 8787",
+    "cf:dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
