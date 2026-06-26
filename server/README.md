@@ -3,11 +3,13 @@
 The server that hosts sites published with `scratchwork publish`. One
 runtime-agnostic request handler ([`src/app.js`](src/app.js)) runs in two places:
 
-- **locally**, on Bun, backed by the filesystem — for development and self-hosting
-- **in production**, on Cloudflare Workers, backed by an R2 bucket
+- **locally**, on Bun, backed by the filesystem (blobs) and `bun:sqlite` (metadata)
+- **in production**, on Cloudflare Workers, backed by an R2 bucket (blobs) and a
+  D1 database (metadata)
 
-**Zero runtime dependencies.** No framework, no database, no auth library. The
-only dev dependency is `wrangler`, and only for deploying to Cloudflare.
+**Zero runtime dependencies.** No framework, no ORM. Both storage backends are
+platform built-ins (`bun:sqlite` / D1 — nothing to install). The only dev
+dependency is `wrangler`, and only for deploying to Cloudflare.
 
 ## Run it locally
 
@@ -34,14 +36,16 @@ SCRATCHWORK_TOKEN=$(openssl rand -hex 24) ./deploy.sh   # first deploy: pick & s
 ./deploy.sh                                             # every deploy after that
 ```
 
-[`deploy.sh`](deploy.sh) creates the R2 bucket if it's missing, deploys the
-Worker (with the routes from [`wrangler.toml`](wrangler.toml)), sets the deploy
-token when one is in the environment, and health-checks the result. It refuses
-to deploy a server that would end up with no token.
+[`deploy.sh`](deploy.sh) creates the R2 bucket and D1 database if they're
+missing, writes the database id into [`wrangler.toml`](wrangler.toml), applies
+the schema ([`src/db/schema.sql`](src/db/schema.sql)) and any migrations, deploys
+the Worker (with the routes from `wrangler.toml`), sets the deploy token when one
+is in the environment, and health-checks the result. It refuses to deploy a
+server that would end up with no token.
 
-That's the whole production footprint: a Worker and an R2 bucket. No D1, no KV,
-no Durable Objects. See [`wrangler.toml`](wrangler.toml) for optional settings
-(subdomain hosting, upload size cap, custom base URL).
+That's the whole production footprint: a Worker, an R2 bucket, and a D1 database.
+No KV, no Durable Objects. See [`wrangler.toml`](wrangler.toml) for optional
+settings (subdomain hosting, upload size cap, custom base URL).
 
 Clients then authenticate once and publish:
 

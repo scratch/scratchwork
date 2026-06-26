@@ -1,10 +1,12 @@
 # Cloudflare Workers config for the Scratchwork publishing server.
 #
-# Deploy with ./deploy.sh — it creates the R2 bucket if missing, deploys the
-# Worker, sets the SCRATCHWORK_TOKEN secret when one is in the environment,
-# and health-checks the result. Idempotent; run it as often as you like.
+# Deploy with ./deploy.sh — it creates the R2 bucket and D1 database if missing,
+# fills in the D1 database_id below, applies migrations, deploys the Worker, sets
+# the SCRATCHWORK_TOKEN secret when one is in the environment, and health-checks
+# the result. Idempotent; run it as often as you like.
 #
-# That's it — one R2 bucket and one secret. No D1, no KV, no extra services.
+# Two stateful bindings: one R2 bucket (deploy blobs) and one D1 database
+# (users, projects, sessions). Plus one secret. No KV, no extra services.
 
 name = "scratchwork"
 main = "src/worker.js"
@@ -16,10 +18,18 @@ routes = [
   { pattern = "sndbx.sh/*", zone_name = "sndbx.sh" }
 ]
 
-# Object storage for project metadata + deploy files (the only binding needed).
+# Object storage for deploy file blobs (deploys/<deployId>/<path>).
 [[r2_buckets]]
 binding = "FILES"
 bucket_name = "scratchwork"
+
+# Relational metadata: users, sessions, api keys, projects, share tokens.
+# deploy.sh creates the database and writes database_id here on first deploy;
+# leave it empty until then. Schema lives in src/db/schema.sql.
+[[d1_databases]]
+binding = "DB"
+database_name = "scratchwork"
+database_id = ""
 
 [vars]
 # Optional knobs (uncomment to use):

@@ -14,9 +14,10 @@
  * Auth is OFF by default (it's your machine). Set SCRATCHWORK_TOKEN to require a
  * bearer token, matching production.
  */
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createApp } from "./app.js";
 import { createFsStorage } from "./storage-fs.js";
+import { openSqliteDb } from "./db/migrate.js";
 
 const args = process.argv.slice(2);
 let port = process.env.PORT ? Number(process.env.PORT) : 8787;
@@ -56,8 +57,15 @@ const authTokens = (process.env.SCRATCHWORK_TOKEN || process.env.AUTH_TOKENS || 
   .map((s) => s.trim())
   .filter(Boolean);
 
+// The metadata database: a bun:sqlite file alongside the deploy blobs, migrated
+// to the current schema on startup. Same store the Worker gets from D1; the
+// auth/projects layers use it. Content serving doesn't touch it yet.
+const dbPath = join(resolve(dataDir), "scratchwork.sqlite");
+const { client: db } = await openSqliteDb(dbPath);
+
 const handle = createApp({
   storage: createFsStorage(resolve(dataDir)),
+  db,
   config: {
     authTokens,
     publicBaseUrl: publicBaseUrl || undefined,
@@ -72,6 +80,7 @@ const url = `http://localhost:${server.port}`;
 console.log(`\n  scratchwork server`);
 console.log(`  listening on  ${url}`);
 console.log(`  data dir      ${resolve(dataDir)}`);
+console.log(`  database      ${dbPath}`);
 console.log(`  auth          ${authTokens.length ? "bearer token required" : "off (open)"}`);
 console.log(`\n  publish to it:  scratchwork publish [dir] --server ${url}\n`);
 

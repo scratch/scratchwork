@@ -254,7 +254,17 @@ export function parseBlocks(text) {
     if (/^[-*+]\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^[-*+]\s+/.test(lines[i])) { items.push(lines[i].replace(/^[-*+]\s+/, "")); i++; }
-      blocks.push({ type: "ul", items });
+      // GFM task list items: "[ ] text" (unchecked) / "[x] text" (checked).
+      const tasks = items.map((it) => {
+        const m = it.match(/^\[([ xX])\]\s+(.*)$/);
+        return m ? { checked: m[1] !== " " } : null;
+      });
+      if (tasks.some(Boolean)) {
+        const stripped = items.map((it, j) => (tasks[j] ? it.replace(/^\[[ xX]\]\s+/, "") : it));
+        blocks.push({ type: "ul", items: stripped, tasks });
+      } else {
+        blocks.push({ type: "ul", items });
+      }
       continue;
     }
 

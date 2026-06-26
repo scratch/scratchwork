@@ -27,7 +27,11 @@ import { contentType, cacheControl, SECURITY_HEADERS, json, generateId } from ".
 
 const PROJECT_ID_RE = /^[a-z0-9]+$/i;
 
-export function createApp({ storage, config = {} }) {
+// `db` is the metadata database client (D1 in prod, bun:sqlite locally; see
+// db/client.js). It's accepted now as the seam for the auth, projects, and
+// authorization layers; the current deploy + content-serving paths don't use it
+// yet, so it may be null.
+export function createApp({ storage, db = null, config = {} }) {
   const authTokens = (config.authTokens || []).filter(Boolean);
   const authRequired = authTokens.length > 0;
   // Validate numeric config: a bad env var (NaN, ≤0) must not silently disable

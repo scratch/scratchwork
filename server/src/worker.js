@@ -10,6 +10,7 @@
  *
  * Env:
  *   FILES                 R2 bucket binding (wrangler.toml)
+ *   DB                    D1 database binding (wrangler.toml); metadata store
  *   SCRATCHWORK_TOKEN     comma-separated deploy token(s); omit to allow anyone
  *   BASE_DOMAIN           optional; enables <id>.<BASE_DOMAIN> subdomain hosting
  *   PUBLIC_BASE_URL       optional; overrides the base URL returned to clients
@@ -18,6 +19,7 @@
  */
 import { createApp } from "./app.js";
 import { createR2Storage } from "./storage-r2.js";
+import { createD1Client } from "./db/client.js";
 
 function tokens(env) {
   return (env.SCRATCHWORK_TOKEN || env.AUTH_TOKENS || "")
@@ -30,6 +32,10 @@ export default {
   async fetch(request, env) {
     const handle = createApp({
       storage: createR2Storage(env.FILES),
+      // The D1-backed metadata store. Bound here so the auth/projects layers can
+      // use it; the current content-serving path doesn't yet. Null when the
+      // binding is absent (e.g. `wrangler dev` without a configured database).
+      db: env.DB ? createD1Client(env.DB) : null,
       config: {
         authTokens: tokens(env),
         baseDomain: env.BASE_DOMAIN || undefined,

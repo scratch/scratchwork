@@ -223,7 +223,23 @@ function renderBlock(block, key, ctx) {
     case "ul":
     case "ol": {
       const Tag = block.type;
-      return e(Tag, { key: k }, block.items.map((item, j) => e("li", { key: "li" + j }, ...parseInline(item, ctx))));
+      const tasks = block.tasks;
+      return e(
+        Tag,
+        { key: k, className: tasks ? "scratchwork-task-list" : undefined },
+        block.items.map((item, j) => {
+          const task = tasks && tasks[j];
+          if (task) {
+            return e(
+              "li",
+              { key: "li" + j, className: "scratchwork-task" + (task.checked ? " is-checked" : "") },
+              e("input", { type: "checkbox", className: "scratchwork-task-checkbox", checked: task.checked, disabled: true }),
+              e("span", { className: "scratchwork-task-label" }, ...parseInline(item, ctx)),
+            );
+          }
+          return e("li", { key: "li" + j }, ...parseInline(item, ctx));
+        }),
+      );
     }
     case "code":
       return e(CodeBlock, { key: k, lang: block.lang, code: block.code });
