@@ -21,8 +21,31 @@ export async function loadComponent(name, base) {
   return null;
 }
 
+function stripInlineCodeSpans(line) {
+  let out = "";
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== "`") {
+      out += line[i++];
+      continue;
+    }
+
+    const start = i;
+    while (i < line.length && line[i] === "`") i++;
+    const ticks = line.slice(start, i);
+    const end = line.indexOf(ticks, i);
+    if (end === -1) {
+      out += ticks;
+      continue;
+    }
+    out += " ".repeat(end + ticks.length - start);
+    i = end + ticks.length;
+  }
+  return out;
+}
+
 // Walk the raw markdown collecting capitalized element names, skipping fenced
-// code blocks so component examples shown in ``` aren't loaded.
+// and inline code so component examples shown as code aren't loaded.
 export function collectComponentNames(text) {
   const names = new Set();
   const lines = text.split("\n");
@@ -30,9 +53,10 @@ export function collectComponentNames(text) {
   for (const line of lines) {
     if (/^\s*```/.test(line)) { inCode = !inCode; continue; }
     if (inCode) continue;
+    const searchable = stripInlineCodeSpans(line);
     const re = /<([A-Z][A-Za-z0-9]*)[\s/>]/g;
     let m;
-    while ((m = re.exec(line)) !== null) names.add(m[1]);
+    while ((m = re.exec(searchable)) !== null) names.add(m[1]);
   }
   return [...names];
 }

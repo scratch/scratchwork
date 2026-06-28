@@ -30,7 +30,10 @@ function hello(name) {
 ## React components, inline
 
 Scratchwork renders Markdown through a template that lets you drop React
-components right into the prose. Each `<Tag/>` maps to a file in `components/`:
+components right into the prose. Each embedded `<Tag/>` maps to a file in
+`components/`, in this case `components/Tag.js`.
+
+Components render inline, like this:
 
 <div style="display:flex; justify-content:center;">
   <Counter />

@@ -26,7 +26,6 @@
     "src/**/*.ts",
     "src/**/*.js",
     "../shared/src/**/*.ts",
-    "../shared/**/*.js",
-    "../template/dist/**/*.js"
+    "../shared/**/*.js"
   ]
 }
