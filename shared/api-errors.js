@@ -1,0 +1,52 @@
+/*
+ * Stable API error codes shared by the server (emitted in error responses as
+ * `{ error, code }`) and the CLI (which keys behavior off `code`, not the
+ * human-readable message). Keeping them in shared/ means both ends agree on the
+ * exact strings. Ported from the reference scratch API error set.
+ */
+export const ErrorCodes = {
+  // auth
+  NOT_AUTHENTICATED: "NOT_AUTHENTICATED",
+  UNAUTHORIZED_USER: "UNAUTHORIZED_USER",
+  ACCESS_REVOKED: "ACCESS_REVOKED",
+  INVALID_ORIGIN: "INVALID_ORIGIN",
+  INVALID_CONTENT_TYPE: "INVALID_CONTENT_TYPE",
+
+  // request
+  INVALID_REQUEST: "INVALID_REQUEST",
+
+  // projects
+  PROJECT_NAME_INVALID: "PROJECT_NAME_INVALID",
+  PROJECT_NAME_TAKEN: "PROJECT_NAME_TAKEN",
+  PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
+
+  // visibility
+  VISIBILITY_INVALID: "VISIBILITY_INVALID",
+  VISIBILITY_EXCEEDS_MAX: "VISIBILITY_EXCEEDS_MAX",
+
+  // deploys
+  INVALID_BUNDLE: "INVALID_BUNDLE",
+  DEPLOY_TOO_LARGE: "DEPLOY_TOO_LARGE",
+  EXTRACTED_TOO_LARGE: "EXTRACTED_TOO_LARGE",
+  TOO_MANY_FILES: "TOO_MANY_FILES",
+  INVALID_PATH: "INVALID_PATH",
+  EMPTY_DEPLOY: "EMPTY_DEPLOY",
+
+  // api keys
+  API_KEY_NOT_FOUND: "API_KEY_NOT_FOUND",
+
+  // share tokens
+  SHARE_TOKENS_DISABLED: "SHARE_TOKENS_DISABLED",
+  SHARE_TOKEN_NOT_FOUND: "SHARE_TOKEN_NOT_FOUND",
+  SHARE_TOKEN_LIMIT_EXCEEDED: "SHARE_TOKEN_LIMIT_EXCEEDED",
+  SHARE_TOKEN_NAME_INVALID: "SHARE_TOKEN_NAME_INVALID",
+  SHARE_TOKEN_DURATION_INVALID: "SHARE_TOKEN_DURATION_INVALID",
+  SHARE_TOKEN_ALREADY_REVOKED: "SHARE_TOKEN_ALREADY_REVOKED",
+};
+
+// Share-link durations the API accepts, and their lengths in seconds.
+export const SHARE_TOKEN_DURATION_SECONDS = {
+  "1d": 24 * 60 * 60,
+  "1w": 7 * 24 * 60 * 60,
+  "1m": 30 * 24 * 60 * 60,
+};

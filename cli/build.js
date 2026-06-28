@@ -3,8 +3,8 @@
  * Build the CLI into a standalone binary: cli/dist/scratchwork.
  *
  *   1. Build the renderer (template/dist/index.html + template/dist/shell.js).
- *   2. `bun build --compile` scratchwork.js into a single self-contained executable.
- *      scratchwork.js imports ../template/dist/shell.js (a literal dynamic import),
+ *   2. `bun build --compile` src/index.ts into a single self-contained executable.
+ *      src/shell.ts imports ../../template/dist/shell.js (a literal dynamic import),
  *      which the compiler embeds into the binary — so it runs anywhere, with no
  *      renderer source or dist on disk.
  *
@@ -22,10 +22,10 @@ const OUT_BIN = join(OUT_DIR, "scratchwork");
 // 1. Build the renderer shell the binary will embed.
 await buildDist();
 
-// 2. Compile scratchwork.js (which imports ../template/dist/shell.js) into a binary.
+// 2. Compile src/index.ts (which imports ../../template/dist/shell.js) into a binary.
 mkdirSync(OUT_DIR, { recursive: true });
 const proc = Bun.spawnSync(
-  ["bun", "build", join(here, "scratchwork.js"), "--compile", "--outfile", OUT_BIN],
+  ["bun", "build", join(here, "src", "index.ts"), "--compile", "--outfile", OUT_BIN],
   { cwd: here, stdout: "inherit", stderr: "inherit" },
 );
 if (!proc.success) {

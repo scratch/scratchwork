@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "allowArbitraryExtensions": true,
+    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "baseUrl": ".",
+    "checkJs": false,
+    "ignoreDeprecations": "6.0",
+    "lib": ["ESNext"],
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@effect/*": ["node_modules/@effect/*"],
+      "effect": ["node_modules/effect"],
+      "effect/*": ["node_modules/effect/*"]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ESNext",
+    "verbatimModuleSyntax": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.js",
+    "../shared/src/**/*.ts",
+    "../shared/**/*.js",
+    "../template/dist/**/*.js"
+  ]
+}

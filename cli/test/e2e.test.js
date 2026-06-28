@@ -1,7 +1,7 @@
 /*
  * End-to-end tests for `scratchwork dev`.
  *
- * These are real e2e tests: each one spawns the actual CLI (`bun scratchwork.js dev
+ * These are real e2e tests: each one spawns the actual CLI (`bun src/index.ts dev
  * <fixture>`) against a throwaway temp directory and drives it over HTTP, then
  * asserts on the real responses. Nothing is mocked.
  *
@@ -11,12 +11,12 @@
  *   2. makes one request to a specific URL;
  *   3. asserts what the server returned, classified into a few obvious kinds:
  *        • STATIC HTML  — an authored .html page, served as-is
- *        • SHELL        — a renderer index.html (which loads the .md client-side)
+ *        • SHELL        — a marked index.html file (which loads the .md client-side)
  *        • RAW          — a file served byte-for-byte (.md, .js, .css, …)
  *        • 404 / 403
  *
  * To tell SHELLs apart without a browser, the fixtures use tiny fake shells
- * whose body carries a unique marker (e.g. "shell@a" for a/index.html); the
+ * whose body carries a unique marker (e.g. "shell@a" for a marked a/index.html); the
  * assertion names the exact shell expected. Marker ids are chosen so none is a
  * prefix of another ("root", "a"), so substring assertions stay unambiguous.
  * The one exception is the embedded-fallback test, which
@@ -28,7 +28,7 @@
  *   (2) scratchwork dev dir           → root=dir, open /
  *   (3) /path/to/file → file.html | file/index.html  ⇒ served directly
  *   (4) /path/to/file → file.md   | file/index.md    ⇒ served via the nearest
- *       ancestor index.html shell (…/index.html up the tree, else the embedded
+ *       ancestor marked index.html shell (…/index.html up the tree, else the embedded
  *       shell baked into the CLI)
  *   (5) the served shell loads /path/to/file.md | /path/to/file/index.md
  *       (asserted server-side: the route serves a shell AND the raw .md is
@@ -43,18 +43,20 @@ import { fileURLToPath } from "node:url";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = join(TEST_DIR, "..");
-const SCRATCHWORK = join(CLI_DIR, "scratchwork.js");
+const SCRATCHWORK = join(CLI_DIR, "src", "index.ts");
 
 // ---------------------------------------------------------------------------
 // Markers used in fixtures / assertions
 // ---------------------------------------------------------------------------
 const RELOAD = "data-scratchwork-dev"; // the injected live-reload <script> tag
 const ENGINE = "BUNDLED ENGINE"; // appears only in the real (embedded) renderer
+const RENDERER_MARKER =
+  "<!-- scratchwork:markdown-renderer - tells Scratchwork this index.html renders Markdown routes. -->";
 
 // A tiny fake renderer shell tagged with `id`, e.g. fakeShell("a") → contains
 // "shell@a". Has a <body>…</body> so the reload client can be injected.
 const fakeShell = (id) =>
-  `<!doctype html><html><body><div id="root"></div><!-- shell@${id} --></body></html>`;
+  `${RENDERER_MARKER}\n<!doctype html><html><body><div id="root"></div><!-- shell@${id} --></body></html>`;
 
 // A static (authored) HTML page tagged with `id`.
 const staticPage = (id) => `<!doctype html><html><body><h1>static@${id}</h1></body></html>`;
@@ -113,6 +115,17 @@ async function httpGet(port, path) {
   };
 }
 
+async function httpGetNoRedirect(port, path) {
+  const res = await fetch(`http://localhost:${port}${path}`, {
+    redirect: "manual",
+  });
+  return {
+    status: res.status,
+    location: res.headers.get("location") || "",
+    body: await res.text(),
+  };
+}
+
 // Run `fn` against a live server for the given fixture. `argSubpath` lets a test
 // pass `dir/<subpath>` as the CLI argument (for the file-arg cases); omit it to
 // pass the directory itself.
@@ -147,9 +160,10 @@ async function runCli(args, cwd) {
 }
 
 // The embedded-fallback test relies on the renderer shell at
-// template/dist/shell.js (which `bun cli/scratchwork.js` loads when no index.html is
-// found). Build it once if absent so `bun test` works from a clean checkout.
-// (scratchwork.js would build it on demand too, but pre-building keeps tests fast.)
+// template/dist/shell.js (which `bun cli/src/index.ts` loads when no project
+// marked index.html is found). Build it once if absent so `bun test` works
+// from a clean checkout.
+// (src/index.ts would build it on demand too, but pre-building keeps tests fast.)
 const TEMPLATE_DIR = join(CLI_DIR, "..", "template");
 beforeAll(() => {
   if (existsSync(join(TEMPLATE_DIR, "dist", "shell.js"))) return;
@@ -205,6 +219,22 @@ describe("path argument → open URL → served content", () => {
 // (3) A route that resolves to HTML is served directly.
 // ===========================================================================
 describe("(3) static HTML served directly", () => {
+  test("/about.html → /about", async () => {
+    await withServer({ "about.html": staticPage("about") }, async ({ port }) => {
+      const res = await httpGetNoRedirect(port, "/about.html");
+      expect(res.status).toBe(308);
+      expect(res.location).toBe("/about");
+    });
+  });
+
+  test("/foo/index.html → /foo/", async () => {
+    await withServer({ "foo/index.html": staticPage("foo-index") }, async ({ port }) => {
+      const res = await httpGetNoRedirect(port, "/foo/index.html");
+      expect(res.status).toBe(308);
+      expect(res.location).toBe("/foo/");
+    });
+  });
+
   test("/about → about.html", async () => {
     await withServer(
       { "index.html": fakeShell("root"), "about.html": staticPage("about") },
@@ -254,10 +284,10 @@ describe("(3) static HTML served directly", () => {
 
 // ===========================================================================
 // (4) A route that resolves to markdown is served through the nearest ancestor
-//     index.html shell; (5) the matching raw .md is fetchable.
+//     marked index.html shell; (5) the matching raw .md is fetchable.
 // ===========================================================================
 describe("(4) markdown served through the nearest ancestor shell", () => {
-  test("/a/b/page → uses a/index.html (nearest), not the root shell", async () => {
+  test("/a/b/page → uses marked a/index.html (nearest), not the root shell", async () => {
     await withServer(
       {
         "index.html": fakeShell("root"),
@@ -267,7 +297,7 @@ describe("(4) markdown served through the nearest ancestor shell", () => {
       async ({ get }) => {
         const res = await get("/a/b/page");
         expect(res.status).toBe(200);
-        expect(res.body).toContain("shell@a"); // nearest ancestor (a/index.html)
+        expect(res.body).toContain("shell@a"); // nearest ancestor renderer
         expect(res.body).not.toContain("shell@root"); // not the root one
       },
     );
@@ -309,7 +339,7 @@ describe("(4) markdown served through the nearest ancestor shell", () => {
     );
   });
 
-  test("(4) embedded shell is used when no index.html exists anywhere", async () => {
+  test("(4) embedded shell is used when no marked index.html exists anywhere", async () => {
     await withServer({ "sub/page.md": "# orphan\n" }, async ({ get }) => {
       const res = await get("/sub/page");
       expect(res.status).toBe(200);
@@ -318,16 +348,17 @@ describe("(4) markdown served through the nearest ancestor shell", () => {
     });
   });
 
-  // template.html (what `scratchwork eject` writes) overrides the default template
-  // for rendered markdown, and beats an index.html at the same level.
-  test("template.html overrides the built-in template for markdown", async () => {
+  test("unmarked index.html remains static and does not become a markdown renderer", async () => {
     await withServer(
-      { "template.html": fakeShell("tpl"), "index.html": fakeShell("root"), "page.md": "# p\n" },
+      {
+        "index.html": staticPage("root"),
+        "page.md": "# p\n",
+      },
       async ({ get }) => {
         const res = await get("/page");
         expect(res.status).toBe(200);
-        expect(res.body).toContain("shell@tpl"); // template.html wins
-        expect(res.body).not.toContain("shell@root"); // …over index.html
+        expect(res.body).toContain(ENGINE);
+        expect(res.body).not.toContain("static@root");
       },
     );
   });
@@ -337,13 +368,13 @@ describe("(4) markdown served through the nearest ancestor shell", () => {
 // Resolution precedence for "/" (index.html before index.md).
 // ===========================================================================
 describe("root route", () => {
-  test("/ → index.html shell when present", async () => {
+  test("/ → index.html is served before index.md when present", async () => {
     await withServer(
-      { "index.html": fakeShell("root"), "index.md": "# home\n" },
+      { "index.html": staticPage("root"), "index.md": "# home\n" },
       async ({ get }) => {
         const res = await get("/");
         expect(res.status).toBe(200);
-        expect(res.body).toContain("shell@root");
+        expect(res.body).toContain("static@root");
       },
     );
   });
@@ -358,6 +389,7 @@ describe("raw file serving", () => {
     await withServer({ "index.html": fakeShell("root"), "components/X.js": js }, async ({ get }) => {
       const res = await get("/components/X.js");
       expect(res.status).toBe(200);
+      expect(res.type).toContain("text/javascript");
       expect(res.body).toBe(js);
     });
   });
@@ -371,6 +403,16 @@ describe("raw file serving", () => {
       expect(res.body).not.toContain(RELOAD);
     });
   });
+
+  test("a direct .md request falls back to file/index.md raw", async () => {
+    await withServer({ "index.html": fakeShell("root"), "about/index.md": "# about index\n" }, async ({ get }) => {
+      const res = await get("/about.md");
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("# about index\n");
+      expect(res.body).not.toContain("shell@");
+      expect(res.body).not.toContain(RELOAD);
+    });
+  });
 });
 
 // ===========================================================================
@@ -379,7 +421,11 @@ describe("raw file serving", () => {
 describe("hot reload", () => {
   test("the live-reload client is injected into static pages and shells", async () => {
     await withServer(
-      { "index.html": fakeShell("root"), "about.html": staticPage("about"), "doc.md": "# d\n" },
+      {
+        "index.html": fakeShell("root"),
+        "about.html": staticPage("about"),
+        "doc.md": "# d\n",
+      },
       async ({ get }) => {
         expect((await get("/about")).body).toContain(RELOAD); // static page
         expect((await get("/doc")).body).toContain(RELOAD); // shell page
@@ -468,33 +514,40 @@ describe("scratchwork create", () => {
 });
 
 // ===========================================================================
-// `scratchwork eject [file]` — writes the default renderer template to a file.
+// `scratchwork eject [file]` — writes the default markdown renderer to a file.
 // ===========================================================================
 describe("scratchwork eject", () => {
-  test("writes the real renderer template to template.html by default", async () => {
+  test("writes the real renderer to marked index.html by default", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-"));
     try {
       const { code, stdout } = await runCli(["eject"], dir);
       expect(code).toBe(0);
-      expect(stdout).toContain("template.html");
+      expect(stdout).toContain("index.html");
 
-      const html = readFileSync(join(dir, "template.html"), "utf8");
+      const html = readFileSync(join(dir, "index.html"), "utf8");
+      expect(html.startsWith(RENDERER_MARKER)).toBe(true);
       expect(html).toContain(ENGINE); // it's the real baked renderer, not a stub
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("an ejected template.html overrides the default when serving markdown", async () => {
+  test("an ejected marked index.html overrides the default when serving markdown", async () => {
     // The end-to-end contract from the docs: eject, tweak, and `scratchwork dev`
     // renders markdown through your copy. We tag the ejected file and assert the
     // tag shows up in the served page.
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-dev-"));
     try {
       expect((await runCli(["eject"], dir)).code).toBe(0);
-      // Mark the ejected template so we can tell it apart from the baked one.
-      const tpl = join(dir, "template.html");
-      writeFileSync(tpl, readFileSync(tpl, "utf8").replace("</body>", "<!-- EJECTED MARK --></body>"));
+      // Mark the ejected renderer so we can tell it apart from the baked one.
+      const renderer = join(dir, "index.html");
+      writeFileSync(
+        renderer,
+        readFileSync(renderer, "utf8").replace(
+          "</body>",
+          "<!-- EJECTED MARK --></body>",
+        ),
+      );
       writeFileSync(join(dir, "page.md"), "# p\n");
 
       const proc = spawnServer(dir);
@@ -502,7 +555,7 @@ describe("scratchwork eject", () => {
         const { port } = await waitForReady(proc);
         const res = await httpGet(port, "/page");
         expect(res.status).toBe(200);
-        expect(res.body).toContain("EJECTED MARK"); // served through the ejected template
+        expect(res.body).toContain("EJECTED MARK"); // served through the ejected renderer
       } finally {
         proc.kill();
         await proc.exited;
@@ -515,11 +568,11 @@ describe("scratchwork eject", () => {
   test("refuses to overwrite an existing file", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-clash-"));
     try {
-      writeFileSync(join(dir, "template.html"), "KEEP ME");
+      writeFileSync(join(dir, "index.html"), "KEEP ME");
       const { code, stderr } = await runCli(["eject"], dir);
       expect(code).toBe(1);
       expect(stderr).toContain("refusing to overwrite");
-      expect(readFileSync(join(dir, "template.html"), "utf8")).toBe("KEEP ME");
+      expect(readFileSync(join(dir, "index.html"), "utf8")).toBe("KEEP ME");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

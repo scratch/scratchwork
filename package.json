@@ -9,5 +9,9 @@
     "build:template": "cd template && bun install && bun run build",
     "dev:template": "cd template && bun run dev",
     "test": "cd cli && bun test"
+  },
+  "dependencies": {
+    "@effect/platform": "0.96.2",
+    "effect": "3.21.4"
   }
 }
