@@ -4,7 +4,10 @@ import * as Effect from "effect/Effect";
 import { contentType, defaultCacheControl } from "./content";
 import { SiteFileError, SiteFiles } from "./files";
 import { applyHtmlTransforms, type HtmlTransform } from "./html";
-import { nearestMarkdownRenderer } from "./renderer";
+import {
+  resolveMarkdownRenderer,
+  type MarkdownRenderer,
+} from "./renderer";
 import {
   parseRouteRequest,
   resolveRoute,
@@ -12,11 +15,42 @@ import {
   type ResolvedRoute,
 } from "./routing";
 
+export type RendererSource =
+  | {
+      readonly _tag: "Project";
+      readonly path: string;
+    }
+  | {
+      readonly _tag: "Fallback";
+    }
+  | {
+      readonly _tag: "None";
+    };
+
+export type SiteServeEvent =
+  | {
+      readonly _tag: "StaticHtmlServed";
+      readonly path: string;
+    }
+  | {
+      readonly _tag: "RawMarkdownServed";
+      readonly path: string;
+    }
+  | {
+      readonly _tag: "RenderedMarkdownServed";
+      readonly markdownPath: string;
+      readonly renderer: RendererSource;
+      readonly rendererHtml?: string;
+    };
+
 export interface SiteServeConfig<E = never, R = never> {
   readonly htmlTransforms?: ReadonlyArray<HtmlTransform<E, R>>;
   readonly rendererFallback: Effect.Effect<string | null, E, R>;
   readonly defaultFaviconSvg?: string;
   readonly cacheControl?: (path: string) => string;
+  readonly onServeEvent?: (
+    event: SiteServeEvent,
+  ) => Effect.Effect<void, E, SiteFiles | R>;
 }
 
 export function serveRequest<E, R>(
@@ -79,10 +113,14 @@ function respond<E, R>(
         });
 
       case "StaticHtml":
+        yield* emit(config, { _tag: "StaticHtmlServed", path: route.path });
         return yield* htmlFileResponse(route.path, "static", config);
 
       case "StaticAsset": {
         const files = yield* SiteFiles;
+        if (contentType(route.path) === contentType(".md")) {
+          yield* emit(config, { _tag: "RawMarkdownServed", path: route.path });
+        }
         return yield* files.fileResponse(route.path, {
           contentType: contentType(route.path),
           headers: {
@@ -92,17 +130,28 @@ function respond<E, R>(
       }
 
       case "RenderedMarkdown": {
-        const shell = yield* nearestMarkdownRenderer(
+        const renderer = yield* resolveMarkdownRenderer(
           route.rendererStartDir,
           config.rendererFallback,
         );
-        if (shell == null) {
+        yield* emit(config, {
+          _tag: "RenderedMarkdownServed",
+          markdownPath: route.markdownPath,
+          renderer: rendererSource(renderer),
+          rendererHtml: renderer?.html,
+        });
+        if (renderer == null) {
           return HttpServerResponse.text("No renderer shell available", {
             status: 500,
             contentType: "text/plain; charset=utf-8",
           });
         }
-        return yield* htmlTextResponse(shell, route.markdownPath, "renderer", config);
+        return yield* htmlTextResponse(
+          renderer.html,
+          route.markdownPath,
+          "renderer",
+          config,
+        );
       }
 
       case "DefaultFavicon":
@@ -123,6 +172,21 @@ function respond<E, R>(
         });
     }
   });
+}
+
+function emit<E, R>(
+  config: SiteServeConfig<E, R>,
+  event: SiteServeEvent,
+): Effect.Effect<void, E, SiteFiles | R> {
+  return config.onServeEvent ? config.onServeEvent(event) : Effect.void;
+}
+
+function rendererSource(renderer: MarkdownRenderer | null): RendererSource {
+  if (renderer == null) return { _tag: "None" };
+  if (renderer._tag === "Project") {
+    return { _tag: "Project", path: renderer.path };
+  }
+  return { _tag: "Fallback" };
 }
 
 function htmlFileResponse<E, R>(

@@ -77,8 +77,8 @@ function makeFixture(files) {
   return dir;
 }
 
-function spawnServer(arg) {
-  return Bun.spawn(["bun", SCRATCHWORK, "dev", arg, "--port", String(nextPort++)], {
+function spawnServer(arg, { port = nextPort++, args = [] } = {}) {
+  return Bun.spawn(["bun", SCRATCHWORK, "dev", arg, "--port", String(port), ...args], {
     env: { ...process.env, SCRATCHWORK_NO_OPEN: "1" }, // never pop a browser in tests
     stdout: "pipe",
     stderr: "inherit", // surface CLI crashes directly in the test output
@@ -98,7 +98,25 @@ async function waitForReady(proc, timeoutMs = 8000) {
       if (done) throw new Error(`scratchwork dev exited before it was ready:\n${buf}`);
       buf += dec.decode(value, { stream: true });
       const m = buf.match(/at\s+http:\/\/localhost:(\d+)(\S*)/);
-      if (m) return { port: Number(m[1]), openPath: m[2] };
+      if (m) return { port: Number(m[1]), openPath: m[2], output: buf };
+    }
+  } finally {
+    clearTimeout(killer);
+    reader.releaseLock();
+  }
+}
+
+async function readOutputUntil(proc, text, timeoutMs = 8000) {
+  const killer = setTimeout(() => proc.kill(), timeoutMs);
+  const reader = proc.stdout.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error(`scratchwork dev exited before output included ${text}:\n${buf}`);
+      buf += dec.decode(value, { stream: true });
+      if (buf.includes(text)) return buf;
     }
   } finally {
     clearTimeout(killer);
@@ -177,6 +195,127 @@ beforeAll(() => {
 // full round-trip: arg → announced openPath → GET openPath → assert content.
 // ===========================================================================
 describe("path argument → open URL → served content", () => {
+  test("probes upward when the requested port is already in use", async () => {
+    const dir = makeFixture({ "index.html": staticPage("root") });
+    const blocker = Bun.serve({
+      port: 0,
+      fetch: () => new Response("occupied"),
+    });
+    const requestedPort = blocker.port;
+    const proc = spawnServer(dir, { port: requestedPort });
+    try {
+      const { port, openPath } = await waitForReady(proc);
+      expect(port).toBeGreaterThan(requestedPort);
+      expect(openPath).toBe("/");
+      expect((await httpGet(port, "/")).body).toContain("static@root");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      blocker.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("prints Effect debug logs with --verbose", async () => {
+    const dir = makeFixture({ "index.html": staticPage("root") });
+    const proc = spawnServer(dir, { args: ["--verbose"] });
+    try {
+      const { output } = await waitForReady(proc);
+      expect(output).toContain("DEBUG");
+      expect(output).toContain("dev command starting");
+      expect(output).toContain("command: dev");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("logs a compact rendered markdown and component summary", async () => {
+    const dir = makeFixture({
+      "index.html": fakeShell("root"),
+      "index.md": "# home\n\n<Counter />\n<Missing />\n",
+      "components/Counter.js": "export default function Counter() { return null; }\n",
+    });
+    const proc = spawnServer(dir);
+    try {
+      const { port } = await waitForReady(proc);
+      expect((await httpGet(port, "/")).body).toContain("shell@root");
+
+      const output = await readOutputUntil(proc, "missing React component Missing");
+      expect(output).toContain("render");
+      expect(output).toContain("index.md via index.html");
+      expect(output).toContain(
+        "components index.md: Counter -> components/Counter.js; Missing missing",
+      );
+      expect(output).toContain(
+        "! missing React component Missing in index.md",
+      );
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("logs content changes without repeating component summaries", async () => {
+    const dir = makeFixture({
+      "index.html": fakeShell("root"),
+      "index.md": "# home\n\n<Counter />\n",
+      "components/Counter.js": "export default function Counter() { return null; }\n",
+    });
+    const proc = spawnServer(dir);
+    try {
+      const { port } = await waitForReady(proc);
+      expect((await httpGet(port, "/")).body).toContain("shell@root");
+      await readOutputUntil(proc, "components index.md");
+
+      writeFileSync(join(dir, "index.md"), "# home\n\n<Counter />\n<Missing />\n");
+
+      const output = await readOutputUntil(proc, "index.md -> refresh");
+      expect(output).toContain("changed");
+      expect(output).not.toContain("components index.md");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not repeat render or component summaries after component reloads", async () => {
+    const dir = makeFixture({
+      "index.html": fakeShell("root"),
+      "index.md": "# home\n\n<Counter />\n",
+      "components/Counter.js": "export default function Counter() { return null; }\n",
+      "done.html": staticPage("done"),
+    });
+    const proc = spawnServer(dir);
+    try {
+      const { port } = await waitForReady(proc);
+      expect((await httpGet(port, "/")).body).toContain("shell@root");
+      await readOutputUntil(proc, "components index.md");
+
+      writeFileSync(
+        join(dir, "components", "Counter.js"),
+        "export default function Counter() { return 'updated'; }\n",
+      );
+
+      const changed = await readOutputUntil(proc, "Counter.js -> reload");
+      expect(changed).toContain("changed");
+
+      expect((await httpGet(port, "/")).body).toContain("shell@root");
+      expect((await httpGet(port, "/done")).body).toContain("static@done");
+
+      const output = await readOutputUntil(proc, "html       done.html");
+      expect(output).not.toContain("render     index.md");
+      expect(output).not.toContain("components index.md");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("(2) `scratchwork dev dir` opens / and / serves the root page", async () => {
     await withServer(
       { "index.html": fakeShell("root"), "index.md": "# home\n" },
@@ -211,6 +350,28 @@ describe("path argument → open URL → served content", () => {
         expect((await get("/file.md")).body).toBe("# file\n"); // …which loads this
       },
       { argSubpath: "file.md" },
+    );
+  });
+
+  test("(1) `scratchwork dev dir/index.html` opens /", async () => {
+    await withServer(
+      { "index.html": staticPage("root") },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/");
+        expect((await get(openPath)).body).toContain("static@root");
+      },
+      { argSubpath: "index.html" },
+    );
+  });
+
+  test("(1) `scratchwork dev dir/index.md` opens /", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "index.md": "# home\n" },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/");
+        expect((await get(openPath)).body).toContain("shell@root");
+      },
+      { argSubpath: "index.md" },
     );
   });
 });

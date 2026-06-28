@@ -71,6 +71,9 @@ const devCommand = Command.make(
       Options.withDefault(DEFAULT_PORT),
       Options.withDescription("Starting port to probe upward from"),
     ),
+    verbose: Options.boolean("verbose").pipe(
+      Options.withDescription("Show Effect debug logs for the dev server"),
+    ),
   },
   runDev,
 ).pipe(Command.withDescription("Serve a project with hot reload"));

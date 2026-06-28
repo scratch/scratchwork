@@ -77,6 +77,7 @@ export interface ShareTokenRecord {
 export interface DevConfig {
   readonly path?: string;
   readonly port?: number;
+  readonly verbose?: boolean;
 }
 
 export interface PathConfig {
