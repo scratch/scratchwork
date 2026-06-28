@@ -4,7 +4,6 @@ import * as FileSystem from "@effect/platform/FileSystem";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -20,26 +19,15 @@ import {
 // (`bun cli/src/index.ts ...`) compare the generated module's source hash against
 // the current renderer source and rebuild automatically when it changed.
 
-const buildScript = fileURLToPath(
-  new URL("../../../renderer/build.js", import.meta.url),
-);
-const htmlPath = fileURLToPath(
-  new URL("../../../renderer/dist/index.html", import.meta.url),
-);
-const rendererRoot = fileURLToPath(
-  new URL("../../../renderer", import.meta.url),
-);
-const rendererShell = fileURLToPath(
-  new URL("../../../renderer/shell.js", import.meta.url),
-);
-const rendererPackageJson = fileURLToPath(
-  new URL("../../../renderer/package.json", import.meta.url),
-);
-const rendererLockfile = fileURLToPath(
-  new URL("../../../renderer/bun.lock", import.meta.url),
-);
-const rendererSrc = fileURLToPath(
-  new URL("../../../renderer/src", import.meta.url),
+const rendererRootUrl = new URL("../../../renderer/", import.meta.url);
+const rendererRoot = fileURLToPath(rendererRootUrl);
+const rendererPath = (path: string) => fileURLToPath(new URL(path, rendererRootUrl));
+
+const buildScript = rendererPath("build.js");
+const htmlPath = rendererPath("dist/index.html");
+const rendererSrc = rendererPath("src");
+const rendererRootFiles = ["build.js", "bun.lock", "package.json", "shell.js"].map(
+  rendererPath,
 );
 
 let currentShell = defaultRendererHtml;
@@ -51,7 +39,7 @@ export function loadShell(): Effect.Effect<
   CommandExecutor.CommandExecutor | FileSystem.FileSystem
 > {
   return Effect.gen(function* () {
-    const sourceHash = currentRendererSourceHash();
+    const sourceHash = yield* currentRendererSourceHash();
     if (sourceHash == null || sourceHash === currentSourceHash) {
       return currentShell;
     }
@@ -93,46 +81,56 @@ function buildShell(reason: string): Effect.Effect<
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
-function currentRendererSourceHash(): string | null {
-  try {
-    const files = rendererSourceFiles();
+function currentRendererSourceHash(): Effect.Effect<string | null, never, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const files = yield* rendererSourceFiles();
     if (files == null) return null;
     const hash = createHash("sha256");
     for (const file of files) {
       hash.update(relative(rendererRoot, file).split("\\").join("/"));
       hash.update("\0");
-      hash.update(readFileSync(file));
+      hash.update(yield* fs.readFile(file));
       hash.update("\0");
     }
     return hash.digest("hex");
-  } catch {
-    return null;
-  }
+  }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
-function rendererSourceFiles(): ReadonlyArray<string> | null {
-  if (
-    !existsSync(buildScript) ||
-    !existsSync(rendererLockfile) ||
-    !existsSync(rendererPackageJson) ||
-    !existsSync(rendererShell) ||
-    !existsSync(rendererSrc)
-  ) {
-    return null;
-  }
+function rendererSourceFiles(): Effect.Effect<ReadonlyArray<string> | null, never, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const required = [...rendererRootFiles, rendererSrc];
+    const exists = yield* Effect.forEach(required, (path) => fs.exists(path));
+    if (exists.some((present) => !present)) return null;
 
-  const files = [buildScript, rendererLockfile, rendererPackageJson, rendererShell];
-  const walk = (dir: string) => {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of entries) {
-      const abs = join(dir, entry.name);
-      if (entry.isDirectory()) walk(abs);
-      else if (entry.isFile()) files.push(abs);
-    }
-  };
-  walk(rendererSrc);
-  return files.sort((a, b) =>
-    relative(rendererRoot, a).localeCompare(relative(rendererRoot, b)),
-  );
+    const files = [...rendererRootFiles];
+    files.push(...(yield* collectFiles(rendererSrc)));
+    return files.sort((a, b) =>
+      relative(rendererRoot, a).localeCompare(relative(rendererRoot, b)),
+    );
+  }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+}
+
+function collectFiles(dir: string): Effect.Effect<ReadonlyArray<string>, never, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const entries = yield* fs.readDirectory(dir).pipe(
+      Effect.catchAll(() => Effect.succeed([] as Array<string>)),
+    );
+    entries.sort((a, b) => a.localeCompare(b));
+
+    const nested = yield* Effect.forEach(entries, (entry) =>
+      Effect.gen(function* () {
+        const abs = join(dir, entry);
+        const info = yield* fs.stat(abs).pipe(
+          Effect.catchAll(() => Effect.succeed(null)),
+        );
+        if (info == null) return [] as Array<string>;
+        if (info.type === "Directory") return [...(yield* collectFiles(abs))];
+        return info.type === "File" ? [abs] : [];
+      }),
+    );
+    return nested.flat();
+  });
 }

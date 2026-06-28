@@ -3,9 +3,10 @@
  * guard) and the credential → header logic.
  */
 import { test, expect, describe, afterEach } from "bun:test";
-import { waitForCallback, generateCallbackState, generateCliCode } from "../src/lib/auth-callback.js";
-import { buildHeaders } from "../src/lib/server-client.js";
-import { resolveAuth } from "../src/lib/config.js";
+import * as Effect from "effect/Effect";
+import { waitForCallback, generateCallbackState, generateCliCode } from "../src/lib/auth-callback.ts";
+import { buildHeaders } from "../src/lib/server-client.ts";
+import { resolveAuth } from "../src/lib/config.ts";
 
 let nextPort = 8455; // distinct port per test; avoid the real 8400
 
@@ -31,18 +32,18 @@ describe("resolveAuth (env)", () => {
     if (saved === undefined) delete process.env.SCRATCHWORK_TOKEN;
     else process.env.SCRATCHWORK_TOKEN = saved;
   });
-  test("scratchwork_ prefix → api_key; else bearer", () => {
+  test("scratchwork_ prefix → api_key; else bearer", async () => {
     process.env.SCRATCHWORK_TOKEN = "scratchwork_abc";
-    expect(resolveAuth("https://x")).toEqual({ token: "scratchwork_abc", type: "api_key" });
+    expect(await Effect.runPromise(resolveAuth("https://x"))).toEqual({ token: "scratchwork_abc", type: "api_key" });
     process.env.SCRATCHWORK_TOKEN = "deadbeef";
-    expect(resolveAuth("https://x")).toEqual({ token: "deadbeef", type: "bearer" });
+    expect(await Effect.runPromise(resolveAuth("https://x"))).toEqual({ token: "deadbeef", type: "bearer" });
   });
 });
 
 describe("waitForCallback", () => {
   test("resolves on matching state + token", async () => {
     const port = nextPort++;
-    const p = waitForCallback(port, "S1", 5000);
+    const p = Effect.runPromise(waitForCallback(port, "S1", 5000));
     await new Promise((r) => setTimeout(r, 80));
     const res = await fetch(`http://127.0.0.1:${port}/callback?state=S1&token=TOK&cf_token=CF`);
     expect(res.status).toBe(200);
@@ -51,7 +52,7 @@ describe("waitForCallback", () => {
 
   test("wrong state → 400 and keeps listening until the right one arrives", async () => {
     const port = nextPort++;
-    const p = waitForCallback(port, "S2", 5000);
+    const p = Effect.runPromise(waitForCallback(port, "S2", 5000));
     await new Promise((r) => setTimeout(r, 80));
     const bad = await fetch(`http://127.0.0.1:${port}/callback?state=WRONG&token=NOPE`);
     expect(bad.status).toBe(400);
@@ -63,7 +64,7 @@ describe("waitForCallback", () => {
 
   test("error param rejects", async () => {
     const port = nextPort++;
-    const p = waitForCallback(port, "S3", 5000);
+    const p = Effect.runPromise(waitForCallback(port, "S3", 5000));
     let rejectedWith = null;
     p.catch((e) => {
       rejectedWith = e.message;
@@ -77,7 +78,7 @@ describe("waitForCallback", () => {
 
   test("error with WRONG state does not abort (keeps listening)", async () => {
     const port = nextPort++;
-    const p = waitForCallback(port, "S4", 5000);
+    const p = Effect.runPromise(waitForCallback(port, "S4", 5000));
     let settled = null;
     p.then(() => (settled = "resolved"), () => (settled = "rejected"));
     await new Promise((r) => setTimeout(r, 100));

@@ -55,7 +55,7 @@ export function runDev(
       yield* startReloadWatcher(state).pipe(Effect.forkScoped);
 
       yield* printBanner(state, url);
-      yield* Effect.sync(() => openBrowser(url));
+      yield* openBrowser(url);
       return yield* Effect.never;
     }),
   ).pipe(Effect.annotateLogs("command", "dev"));

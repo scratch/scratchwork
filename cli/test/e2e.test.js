@@ -160,8 +160,8 @@ async function withServer(files, fn, { argSubpath } = {}) {
   }
 }
 
-// Run the CLI once to completion (for non-server commands like example and
-// --version). Returns { code, stdout, stderr }.
+// Run the CLI once to completion (for non-server commands like example,
+// template, and --version). Returns { code, stdout, stderr }.
 async function runCli(args, cwd) {
   const proc = Bun.spawn(["bun", SCRATCHWORK, ...args], {
     cwd,
@@ -614,6 +614,28 @@ describe("scratchwork --version", () => {
   });
 });
 
+describe("scratchwork --help", () => {
+  test("shows local project commands and omits server/account commands", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-help-"));
+    try {
+      const { code, stdout } = await runCli(["--help"], dir);
+      expect(code).toBe(0);
+      expect(stdout).toContain("dev");
+      expect(stdout).toContain("example");
+      expect(stdout).toContain("template");
+      expect(stdout).toContain("version");
+      expect(stdout).not.toContain("login");
+      expect(stdout).not.toContain("logout");
+      expect(stdout).not.toContain("whoami");
+      expect(stdout).not.toContain("publish");
+      expect(stdout).not.toContain("tokens");
+      expect(stdout).not.toContain("share");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ===========================================================================
 // `scratchwork example [path]` — writes runnable example content.
 // ===========================================================================
@@ -668,6 +690,68 @@ describe("scratchwork example", () => {
       expect(code).toBe(1);
       expect(stderr).toContain("refusing to overwrite");
       expect(readFileSync(join(dir, "index.md"), "utf8")).toBe("# mine\n"); // untouched
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ===========================================================================
+// `scratchwork template [file]` — writes the default Markdown renderer.
+// ===========================================================================
+describe("scratchwork template", () => {
+  test("writes the real renderer to marked index.html by default", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-template-"));
+    try {
+      const { code, stdout } = await runCli(["template"], dir);
+      expect(code).toBe(0);
+      expect(stdout).toContain("index.html");
+
+      const html = readFileSync(join(dir, "index.html"), "utf8");
+      expect(html.startsWith(RENDERER_MARKER)).toBe(true);
+      expect(html).toContain(ENGINE); // it's the real baked renderer, not a stub
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a copied marked index.html overrides the default when serving markdown", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-template-dev-"));
+    try {
+      expect((await runCli(["template"], dir)).code).toBe(0);
+      const renderer = join(dir, "index.html");
+      writeFileSync(
+        renderer,
+        readFileSync(renderer, "utf8").replace(
+          "</body>",
+          "<!-- TEMPLATE MARK --></body>",
+        ),
+      );
+      writeFileSync(join(dir, "page.md"), "# p\n");
+
+      const proc = spawnServer(dir);
+      try {
+        const { port } = await waitForReady(proc);
+        const res = await httpGet(port, "/page");
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("TEMPLATE MARK");
+      } finally {
+        proc.kill();
+        await proc.exited;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to overwrite an existing file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-template-clash-"));
+    try {
+      writeFileSync(join(dir, "index.html"), "KEEP ME");
+      const { code, stderr } = await runCli(["template"], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("refusing to overwrite");
+      expect(readFileSync(join(dir, "index.html"), "utf8")).toBe("KEEP ME");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

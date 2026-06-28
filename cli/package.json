@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "scratchwork — Bun CLI built with Effect: dev server with hot reload and example files.",
+  "description": "scratchwork — Bun CLI built with Effect: dev server with hot reload, example files, and template export.",
   "bin": {
     "scratchwork": "./src/index.ts"
   },

@@ -49,6 +49,13 @@ To use the docs page as a starting point for your own project, run:
 scratchwork example [path]
 ```
 
+To copy the default Markdown renderer into your project, run:
+
+```sh
+# Write the default renderer to index.html
+scratchwork template [file]
+```
+
 To customize Markdown rendering, add an `index.html` renderer file at or above the Markdown file and start it with Scratchwork's identifying comment:
 
 ```html

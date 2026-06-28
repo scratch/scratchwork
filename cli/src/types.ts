@@ -35,6 +35,10 @@ export interface PathConfig {
   readonly path?: string;
 }
 
+export interface TemplateConfig {
+  readonly file?: string;
+}
+
 export interface LoginConfig {
   readonly server?: string | null;
   readonly token?: string | null;
