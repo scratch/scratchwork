@@ -178,14 +178,14 @@ async function runCli(args, cwd) {
 }
 
 // The embedded-fallback test relies on the renderer shell at
-// template/dist/shell.js (which `bun cli/src/index.ts` loads when no project
+// renderer/dist/shell.js (which `bun cli/src/index.ts` loads when no project
 // marked index.html is found). Build it once if absent so `bun test` works
 // from a clean checkout.
 // (src/index.ts would build it on demand too, but pre-building keeps tests fast.)
-const TEMPLATE_DIR = join(CLI_DIR, "..", "template");
+const RENDERER_DIR = join(CLI_DIR, "..", "renderer");
 beforeAll(() => {
-  if (existsSync(join(TEMPLATE_DIR, "dist", "shell.js"))) return;
-  const r = Bun.spawnSync(["bun", "build.js"], { cwd: TEMPLATE_DIR, stdout: "pipe", stderr: "pipe" });
+  if (existsSync(join(RENDERER_DIR, "dist", "shell.js"))) return;
+  const r = Bun.spawnSync(["bun", "build.js"], { cwd: RENDERER_DIR, stdout: "pipe", stderr: "pipe" });
   if (!r.success) throw new Error(`failed to build renderer shell:\n${r.stderr.toString()}`);
 });
 

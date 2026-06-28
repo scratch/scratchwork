@@ -18,28 +18,28 @@ import {
 // Production CLI builds import the generated shared module above, so Bun embeds
 // the renderer HTML directly into the standalone binary. Source runs
 // (`bun cli/src/index.ts ...`) compare the generated module's source hash against
-// the current template source and rebuild automatically when it changed.
+// the current renderer source and rebuild automatically when it changed.
 
 const buildScript = fileURLToPath(
-  new URL("../../../template/build.js", import.meta.url),
+  new URL("../../../renderer/build.js", import.meta.url),
 );
 const htmlPath = fileURLToPath(
-  new URL("../../../template/dist/index.html", import.meta.url),
+  new URL("../../../renderer/dist/index.html", import.meta.url),
 );
-const templateRoot = fileURLToPath(
-  new URL("../../../template", import.meta.url),
+const rendererRoot = fileURLToPath(
+  new URL("../../../renderer", import.meta.url),
 );
-const templateShell = fileURLToPath(
-  new URL("../../../template/shell.js", import.meta.url),
+const rendererShell = fileURLToPath(
+  new URL("../../../renderer/shell.js", import.meta.url),
 );
-const templatePackageJson = fileURLToPath(
-  new URL("../../../template/package.json", import.meta.url),
+const rendererPackageJson = fileURLToPath(
+  new URL("../../../renderer/package.json", import.meta.url),
 );
-const templateLockfile = fileURLToPath(
-  new URL("../../../template/bun.lock", import.meta.url),
+const rendererLockfile = fileURLToPath(
+  new URL("../../../renderer/bun.lock", import.meta.url),
 );
-const templateSrc = fileURLToPath(
-  new URL("../../../template/src", import.meta.url),
+const rendererSrc = fileURLToPath(
+  new URL("../../../renderer/src", import.meta.url),
 );
 
 let currentShell = defaultRendererHtml;
@@ -51,12 +51,12 @@ export function loadShell(): Effect.Effect<
   CommandExecutor.CommandExecutor | FileSystem.FileSystem
 > {
   return Effect.gen(function* () {
-    const sourceHash = currentTemplateSourceHash();
+    const sourceHash = currentRendererSourceHash();
     if (sourceHash == null || sourceHash === currentSourceHash) {
       return currentShell;
     }
 
-    const html = yield* buildShell("template source changed");
+    const html = yield* buildShell("renderer source changed");
     if (html == null) return null;
     currentShell = html;
     currentSourceHash = sourceHash;
@@ -93,13 +93,13 @@ function buildShell(reason: string): Effect.Effect<
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
-function currentTemplateSourceHash(): string | null {
+function currentRendererSourceHash(): string | null {
   try {
-    const files = templateSourceFiles();
+    const files = rendererSourceFiles();
     if (files == null) return null;
     const hash = createHash("sha256");
     for (const file of files) {
-      hash.update(relative(templateRoot, file).split("\\").join("/"));
+      hash.update(relative(rendererRoot, file).split("\\").join("/"));
       hash.update("\0");
       hash.update(readFileSync(file));
       hash.update("\0");
@@ -110,18 +110,18 @@ function currentTemplateSourceHash(): string | null {
   }
 }
 
-function templateSourceFiles(): ReadonlyArray<string> | null {
+function rendererSourceFiles(): ReadonlyArray<string> | null {
   if (
     !existsSync(buildScript) ||
-    !existsSync(templateLockfile) ||
-    !existsSync(templatePackageJson) ||
-    !existsSync(templateShell) ||
-    !existsSync(templateSrc)
+    !existsSync(rendererLockfile) ||
+    !existsSync(rendererPackageJson) ||
+    !existsSync(rendererShell) ||
+    !existsSync(rendererSrc)
   ) {
     return null;
   }
 
-  const files = [buildScript, templateLockfile, templatePackageJson, templateShell];
+  const files = [buildScript, rendererLockfile, rendererPackageJson, rendererShell];
   const walk = (dir: string) => {
     const entries = readdirSync(dir, { withFileTypes: true });
     entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -131,8 +131,8 @@ function templateSourceFiles(): ReadonlyArray<string> | null {
       else if (entry.isFile()) files.push(abs);
     }
   };
-  walk(templateSrc);
+  walk(rendererSrc);
   return files.sort((a, b) =>
-    relative(templateRoot, a).localeCompare(relative(templateRoot, b)),
+    relative(rendererRoot, a).localeCompare(relative(rendererRoot, b)),
   );
 }

@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Scratchwork — the single-file Markdown renderer (template/) and the scratchwork dev CLI (cli/).",
+  "description": "Scratchwork — the single-file Markdown renderer (renderer/) and the scratchwork dev CLI (cli/).",
   "scripts": {
-    "build": "cd template && bun install && cd ../cli && bun run build",
-    "build:template": "cd template && bun install && bun run build",
-    "dev:template": "cd template && bun run dev",
+    "build": "cd renderer && bun install && cd ../cli && bun run build",
+    "build:renderer": "cd renderer && bun install && bun run build",
+    "dev:renderer": "cd renderer && bun run dev",
     "test": "cd cli && bun test"
   },
   "dependencies": {

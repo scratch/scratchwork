@@ -49,19 +49,19 @@ components. Branding lives with the project content instead:
   and uses it directly in `index.md`, plus a `MadeWithScratchwork` component
   under `docs/components/`.
 - The `scratchwork dev` server serves the Scratchwork figure mark as the **default
-  favicon** when a project ships none of its own (see `../cli/scratchwork.js` and
-  `../cli/assets/figure.svg`).
+  favicon** when a project ships none of its own (see `../cli/src/dev/server.ts`
+  and `../cli/assets/figure.svg`).
 
 ## Build
 
 One step. `build.js` esbuild-bundles the engine in memory, then assembles the
 single-file artifact — formatted theme (`src/prose.css`) + formatted page shell
-(`shell.js`) + minified engine — and writes two outputs into `dist/`:
+(`shell.js`) + minified engine — and writes:
 
 - **`dist/index.html`** — the single-file renderer, served as a file.
-- **`dist/shell.js`** — the same HTML as an importable JS module
-  (`export default "<html>"`), so the CLI can embed the shell into its standalone
-  binary via a literal import.
+- **`dist/shell.js`** — the same HTML as an importable JS module.
+- **`../shared/src/site/default-renderer.generated.js`** — the generated module
+  imported by the CLI so Bun embeds the renderer in standalone builds.
 
 ```bash
 bun install
@@ -72,11 +72,10 @@ bun run dev     # same, then watch src/ + shell.js and preview the sample (:5180
 Override the dev port with `PORT=4321 bun run dev`. `dist/` is gitignored.
 
 `build.js` also **exports** `assemble()` (returns the HTML string, no writes) and
-`buildDist()` (writes both `dist/` artifacts). The CLI's build
-(`../cli/build.js`) imports `buildDist()` to produce the shell, then compiles
-`scratchwork.js` — which loads `../renderer/dist/shell.js` — into a standalone
-binary. See the root `package.json`'s `build` script, which builds the renderer
-and the CLI in one step.
+`buildDist()` (writes `dist/` plus the shared generated module). The CLI's build
+(`../cli/build.js`) imports `buildDist()` before compiling the standalone binary.
+See the root `package.json`'s `build` script, which builds the renderer and the
+CLI in one step.
 
 ## Files
 

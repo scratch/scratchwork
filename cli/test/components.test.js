@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { collectComponentNames } from "../../template/src/components.js";
+import { collectComponentNames } from "../../renderer/src/components.js";
 
 describe("collectComponentNames", () => {
   test("ignores component-like tags inside inline code", () => {
