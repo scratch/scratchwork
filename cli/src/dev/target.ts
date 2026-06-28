@@ -1,0 +1,55 @@
+import * as FileSystem from "@effect/platform/FileSystem";
+import type { PlatformError } from "@effect/platform/Error";
+import * as Path from "@effect/platform/Path";
+import * as Effect from "effect/Effect";
+import { CliError } from "../errors";
+import type { DevTarget } from "./types";
+
+/** Converts the CLI path argument into the server root and browser path to open. */
+export function resolveDevTarget(
+  pathArg: string,
+): Effect.Effect<
+  DevTarget,
+  PlatformError | CliError,
+  FileSystem.FileSystem | Path.Path
+> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const paths = yield* Path.Path;
+    const target = paths.resolve(process.cwd(), pathArg);
+    if (!(yield* fs.exists(target))) {
+      return yield* noSuchFile(target);
+    }
+    const info = yield* fs.stat(target);
+
+    if (info.type === "Directory") return { root: target, openPath: "/" };
+    if (info.type === "File") {
+      return {
+        root: paths.dirname(target),
+        openPath: openPathForFile(paths.basename(target)),
+      };
+    }
+    return yield* noSuchFile(target);
+  });
+}
+
+/** Builds the extensionless browser path for a file passed to `scratchwork dev`. */
+function openPathForFile(filename: string): string {
+  const lower = filename.toLowerCase();
+  const route = lower.endsWith(".html")
+    ? filename.slice(0, -".html".length)
+    : lower.endsWith(".md")
+      ? filename.slice(0, -".md".length)
+      : filename;
+  return route.toLowerCase() === "index" ? "/" : `/${route}`;
+}
+
+/** Creates the user-facing CLI error for invalid dev targets. */
+function noSuchFile(path: string): Effect.Effect<never, CliError> {
+  return Effect.fail(
+    new CliError({
+      code: 1,
+      message: `scratchwork dev: no such file or directory: ${path}`,
+    }),
+  );
+}
