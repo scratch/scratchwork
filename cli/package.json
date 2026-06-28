@@ -9,7 +9,9 @@
   },
   "scripts": {
     "build": "bun build.js",
-    "test": "bun test",
+    "check": "bun run typecheck && bun test",
+    "lint": "bun run typecheck",
+    "test": "bun run check",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

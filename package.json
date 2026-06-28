@@ -7,8 +7,11 @@
   "scripts": {
     "build": "cd renderer && bun install && cd ../cli && bun run build",
     "build:renderer": "cd renderer && bun install && bun run build",
+    "check": "cd cli && bun run check",
     "dev:renderer": "cd renderer && bun run dev",
-    "test": "cd cli && bun test"
+    "lint": "cd cli && bun run lint",
+    "test": "cd cli && bun run test",
+    "typecheck": "cd cli && bun run typecheck"
   },
   "dependencies": {
     "@effect/platform": "0.96.2",
