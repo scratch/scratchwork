@@ -84,7 +84,7 @@ export interface PathConfig {
   readonly path?: string;
 }
 
-export interface EjectConfig {
+export interface TemplateConfig {
   readonly file?: string;
 }
 

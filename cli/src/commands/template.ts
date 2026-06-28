@@ -7,14 +7,14 @@ import * as Effect from "effect/Effect";
 import { CliError } from "../errors";
 import { loadShell } from "../renderer/default";
 import { markMarkdownRenderer } from "../renderer/renderer";
-import type { EjectConfig } from "../types";
+import type { TemplateConfig } from "../types";
 
-// `scratchwork eject [file]` - write the default markdown renderer to a file
+// `scratchwork template [file]` - write the default markdown renderer to a file
 // (default index.html). When index.html starts with the renderer marker, it
 // overrides the built-in renderer for rendered Markdown.
-export function runEject({
+export function runTemplate({
   file: dest = "index.html",
-}: EjectConfig): Effect.Effect<
+}: TemplateConfig): Effect.Effect<
   void,
   PlatformError | CliError,
   CommandExecutor.CommandExecutor | FileSystem.FileSystem | Path.Path
@@ -27,7 +27,7 @@ export function runEject({
 
     if (exists) {
       yield* Console.error(
-        `scratchwork eject: refusing to overwrite existing file: ${dest}`,
+        `scratchwork template: refusing to overwrite existing file: ${dest}`,
       );
       return yield* Effect.fail(new CliError({ code: 1 }));
     }
@@ -35,7 +35,7 @@ export function runEject({
     const html = yield* loadShell();
     if (html == null) {
       yield* Console.error(
-        "scratchwork eject: could not load the default renderer (renderer build failed)",
+        "scratchwork template: could not load the default renderer (renderer build failed)",
       );
       return yield* Effect.fail(new CliError({ code: 1 }));
     }

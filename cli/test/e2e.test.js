@@ -160,7 +160,7 @@ async function withServer(files, fn, { argSubpath } = {}) {
   }
 }
 
-// Run the CLI once to completion (for the non-server commands: create, eject,
+// Run the CLI once to completion (for the non-server commands: example, template,
 // --version). Returns { code, stdout, stderr }.
 async function runCli(args, cwd) {
   const proc = Bun.spawn(["bun", SCRATCHWORK, ...args], {
@@ -615,17 +615,17 @@ describe("scratchwork --version", () => {
 });
 
 // ===========================================================================
-// `scratchwork create [path]` — scaffolds a runnable starter project.
+// `scratchwork example [path]` — writes runnable example content.
 // ===========================================================================
-describe("scratchwork create", () => {
-  test("scaffolds example .md + components into the target dir", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratchwork-create-"));
+describe("scratchwork example", () => {
+  test("writes example .md + components into the target dir", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-example-"));
     try {
-      const { code, stdout } = await runCli(["create", "site"], dir);
+      const { code, stdout } = await runCli(["example", "site"], dir);
       expect(code).toBe(0);
-      expect(stdout).toContain("Created a Scratchwork project");
+      expect(stdout).toContain("Wrote Scratchwork example files");
 
-      // The scaffold lands on disk…
+      // The example lands on disk…
       expect(existsSync(join(dir, "site", "index.md"))).toBe(true);
       expect(existsSync(join(dir, "site", "components", "Counter.js"))).toBe(true);
 
@@ -637,19 +637,19 @@ describe("scratchwork create", () => {
     }
   });
 
-  test("the scaffolded project actually serves through `scratchwork dev`", async () => {
-    // create → then dev the result → the root page renders via a shell and the
-    // scaffolded index.md is fetchable raw.
-    const dir = mkdtempSync(join(tmpdir(), "scratchwork-create-dev-"));
+  test("the example project actually serves through `scratchwork dev`", async () => {
+    // example → then dev the result → the root page renders via a shell and the
+    // example index.md is fetchable raw.
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-example-dev-"));
     try {
-      expect((await runCli(["create", "."], dir)).code).toBe(0);
+      expect((await runCli(["example", "."], dir)).code).toBe(0);
       const proc = spawnServer(dir);
       try {
         const { port } = await waitForReady(proc);
         expect((await httpGet(port, "/")).status).toBe(200); // root renders (baked shell)
         const md = await httpGet(port, "/index.md");
         expect(md.status).toBe(200);
-        expect(md.body).toContain("<Counter />"); // the scaffolded content, raw
+        expect(md.body).toContain("<Counter />"); // the example content, raw
         expect((await httpGet(port, "/components/Counter.js")).status).toBe(200);
       } finally {
         proc.kill();
@@ -661,10 +661,10 @@ describe("scratchwork create", () => {
   });
 
   test("refuses to overwrite existing files", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratchwork-create-clash-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-example-clash-"));
     try {
       writeFileSync(join(dir, "index.md"), "# mine\n");
-      const { code, stderr } = await runCli(["create", "."], dir);
+      const { code, stderr } = await runCli(["example", "."], dir);
       expect(code).toBe(1);
       expect(stderr).toContain("refusing to overwrite");
       expect(readFileSync(join(dir, "index.md"), "utf8")).toBe("# mine\n"); // untouched
@@ -675,13 +675,13 @@ describe("scratchwork create", () => {
 });
 
 // ===========================================================================
-// `scratchwork eject [file]` — writes the default markdown renderer to a file.
+// `scratchwork template [file]` — writes the default Markdown renderer to a file.
 // ===========================================================================
-describe("scratchwork eject", () => {
+describe("scratchwork template", () => {
   test("writes the real renderer to marked index.html by default", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-template-"));
     try {
-      const { code, stdout } = await runCli(["eject"], dir);
+      const { code, stdout } = await runCli(["template"], dir);
       expect(code).toBe(0);
       expect(stdout).toContain("index.html");
 
@@ -693,20 +693,20 @@ describe("scratchwork eject", () => {
     }
   });
 
-  test("an ejected marked index.html overrides the default when serving markdown", async () => {
-    // The end-to-end contract from the docs: eject, tweak, and `scratchwork dev`
-    // renders markdown through your copy. We tag the ejected file and assert the
+  test("a copied marked index.html overrides the default when serving markdown", async () => {
+    // The end-to-end contract from the docs: template, tweak, and `scratchwork dev`
+    // renders markdown through your copy. We tag the template file and assert the
     // tag shows up in the served page.
-    const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-dev-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-template-dev-"));
     try {
-      expect((await runCli(["eject"], dir)).code).toBe(0);
-      // Mark the ejected renderer so we can tell it apart from the baked one.
+      expect((await runCli(["template"], dir)).code).toBe(0);
+      // Mark the copied renderer so we can tell it apart from the baked one.
       const renderer = join(dir, "index.html");
       writeFileSync(
         renderer,
         readFileSync(renderer, "utf8").replace(
           "</body>",
-          "<!-- EJECTED MARK --></body>",
+          "<!-- TEMPLATE MARK --></body>",
         ),
       );
       writeFileSync(join(dir, "page.md"), "# p\n");
@@ -716,7 +716,7 @@ describe("scratchwork eject", () => {
         const { port } = await waitForReady(proc);
         const res = await httpGet(port, "/page");
         expect(res.status).toBe(200);
-        expect(res.body).toContain("EJECTED MARK"); // served through the ejected renderer
+        expect(res.body).toContain("TEMPLATE MARK"); // served through the copied renderer
       } finally {
         proc.kill();
         await proc.exited;
@@ -727,10 +727,10 @@ describe("scratchwork eject", () => {
   });
 
   test("refuses to overwrite an existing file", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "scratchwork-eject-clash-"));
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-template-clash-"));
     try {
       writeFileSync(join(dir, "index.html"), "KEEP ME");
-      const { code, stderr } = await runCli(["eject"], dir);
+      const { code, stderr } = await runCli(["template"], dir);
       expect(code).toBe(1);
       expect(stderr).toContain("refusing to overwrite");
       expect(readFileSync(join(dir, "index.html"), "utf8")).toBe("KEEP ME");

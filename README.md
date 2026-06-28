@@ -56,14 +56,14 @@ You can add the template directly to your project with:
 
 ```sh
 # Write the default template to template.html
-scratchwork eject template.html
+scratchwork template template.html
 ```
 
 To use the docs page as a starting point for your own project, use:
 
 ```sh
-# Create a new project with example Markdown and React content
-scratchwork create [path]
+# Write example Markdown and React content
+scratchwork example [path]
 ```
 
 When `template.html` is present in your project root directory it overrides the default Scratchwork template, which allows you to modify the default styling for rendered Markdown files.

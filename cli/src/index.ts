@@ -13,9 +13,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import pkg from "../package.json";
 import { runLogin, runLogout, runWhoami } from "./commands/auth";
-import { runCreate } from "./commands/create";
+import { runExample } from "./commands/example";
 import { DEFAULT_PORT, runDev } from "./commands/dev";
-import { runEject } from "./commands/eject";
+import { runTemplate } from "./commands/template";
 import { runPublish } from "./commands/publish";
 import { runShareCreate, runShareList, runShareRevoke } from "./commands/share";
 import {
@@ -108,21 +108,21 @@ const publishCommand = Command.make(
   Command.withDescription("Publish a static site to a Scratchwork server"),
 );
 
-const createCommand = Command.make(
-  "create",
+const exampleCommand = Command.make(
+  "example",
   {
     path: pathArg("path"),
   },
-  runCreate,
-).pipe(Command.withDescription("Scaffold a new Scratchwork project"));
+  runExample,
+).pipe(Command.withDescription("Write example Markdown and React files"));
 
-const ejectCommand = Command.make(
-  "eject",
+const templateCommand = Command.make(
+  "template",
   {
     file: pathArg("file", "index.html"),
   },
-  runEject,
-).pipe(Command.withDescription("Write the default markdown renderer"));
+  runTemplate,
+).pipe(Command.withDescription("Write the default Markdown HTML template"));
 
 // ---------------------------------------------------------------------------
 // Account commands
@@ -268,8 +268,8 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
   Command.withSubcommands([
     devCommand,
     publishCommand,
-    createCommand,
-    ejectCommand,
+    exampleCommand,
+    templateCommand,
     loginCommand,
     logoutCommand,
     whoamiCommand,

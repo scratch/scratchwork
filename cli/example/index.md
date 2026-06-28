@@ -8,7 +8,7 @@ lang: "en"
 
 # My Scratchwork project
 
-Welcome! This page was scaffolded by `scratchwork create`. It's plain Markdown —
+Welcome! This page was written by `scratchwork example`. It's plain Markdown —
 edit `index.md` and the page hot-reloads while `scratchwork dev` is running.
 
 ## Markdown, the usual way
