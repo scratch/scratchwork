@@ -15,15 +15,6 @@ import pkg from "../package.json";
 import { runLogin, runLogout, runWhoami } from "./commands/auth";
 import { runExample } from "./commands/example";
 import { DEFAULT_PORT, runDev } from "./commands/dev";
-import { runTemplate } from "./commands/template";
-import { runPublish } from "./commands/publish";
-import { runShareCreate, runShareList, runShareRevoke } from "./commands/share";
-import {
-  runTokenCreate,
-  runTokenList,
-  runTokenRevoke,
-  runTokenUse,
-} from "./commands/tokens";
 import { CliError, ExitError } from "./errors";
 import * as cfg from "./lib/config.js";
 
@@ -46,16 +37,13 @@ const handler =
 const pathArg = (name = "path", fallback = ".") =>
   Args.text({ name }).pipe(Args.withDefault(fallback));
 
-const optionalArg = (name: string) =>
-  Args.text({ name }).pipe(Args.withDefault(null));
-
 const optionalText = (name: string) =>
   Options.text(name).pipe(Options.withDefault(null));
 
 const serverOption = () =>
   optionalText("server").pipe(
     Options.withDescription(
-      `Server URL (default: project config, then ${cfg.DEFAULT_SERVER})`,
+      `Server URL (default: global config, then ${cfg.DEFAULT_SERVER})`,
     ),
   );
 
@@ -78,36 +66,6 @@ const devCommand = Command.make(
   runDev,
 ).pipe(Command.withDescription("Serve a project with hot reload"));
 
-const publishCommand = Command.make(
-  "publish",
-  {
-    path: pathArg("path"),
-    server: serverOption(),
-    name: optionalText("name").pipe(Options.withDescription("Project name")),
-    visibility: optionalText("visibility").pipe(
-      Options.withDescription(
-        "Accounts visibility: public, private, @domain.com, email@x.com, or comma-separated",
-      ),
-    ),
-    private: Options.boolean("private").pipe(
-      Options.withDescription("Publish privately on accounts servers"),
-    ),
-    unlisted: Options.boolean("unlisted").pipe(
-      Options.withDescription("Mark the project unlisted on legacy servers"),
-    ),
-    noOpen: Options.boolean("no-open").pipe(
-      Options.withAlias("n"),
-      Options.withDescription("Do not open the published URL in a browser"),
-    ),
-    dryRun: Options.boolean("dry-run").pipe(
-      Options.withDescription("Show what would be uploaded without uploading"),
-    ),
-  },
-  handler(runPublish),
-).pipe(
-  Command.withDescription("Publish a static site to a Scratchwork server"),
-);
-
 const exampleCommand = Command.make(
   "example",
   {
@@ -115,14 +73,6 @@ const exampleCommand = Command.make(
   },
   runExample,
 ).pipe(Command.withDescription("Write example Markdown and React files"));
-
-const templateCommand = Command.make(
-  "template",
-  {
-    file: pathArg("file", "index.html"),
-  },
-  runTemplate,
-).pipe(Command.withDescription("Write the default Markdown HTML template"));
 
 // ---------------------------------------------------------------------------
 // Account commands
@@ -154,111 +104,6 @@ const whoamiCommand = Command.make(
   handler(runWhoami),
 ).pipe(Command.withDescription("Show who you are logged in as"));
 
-// ---------------------------------------------------------------------------
-// Token subcommands
-// ---------------------------------------------------------------------------
-const tokenListCommand = Command.make(
-  "list",
-  {
-    server: serverOption(),
-  },
-  handler(runTokenList),
-).pipe(Command.withDescription("List your API tokens"));
-
-const tokenCreateCommand = Command.make(
-  "create",
-  {
-    name: Args.text({ name: "name" }).pipe(Args.withDescription("Token name")),
-    server: serverOption(),
-    expires: Options.integer("expires").pipe(
-      Options.withDefault(null),
-      Options.withDescription("Days until expiry"),
-    ),
-  },
-  handler(runTokenCreate),
-).pipe(Command.withDescription("Create an API token"));
-
-const tokenRevokeCommand = Command.make(
-  "revoke",
-  {
-    id: Args.text({ name: "id" }).pipe(
-      Args.withDescription("Token id or name"),
-    ),
-    server: serverOption(),
-  },
-  handler(runTokenRevoke),
-).pipe(Command.withDescription("Revoke an API token"));
-
-const tokenUseCommand = Command.make(
-  "use",
-  {
-    token: Args.text({ name: "token" }).pipe(
-      Args.withDescription("Existing scratchwork_ API token"),
-    ),
-    server: serverOption(),
-  },
-  handler(runTokenUse),
-).pipe(Command.withDescription("Store an existing API token"));
-
-const tokensCommand = Command.make("tokens").pipe(
-  Command.withDescription("Manage API tokens for CI"),
-  Command.withSubcommands([
-    tokenListCommand,
-    tokenCreateCommand,
-    tokenRevokeCommand,
-    tokenUseCommand,
-  ]),
-);
-
-// ---------------------------------------------------------------------------
-// Share-link subcommands
-// ---------------------------------------------------------------------------
-const shareCreateCommand = Command.make(
-  "create",
-  {
-    project: optionalArg("project"),
-    server: serverOption(),
-    name: optionalText("name").pipe(
-      Options.withDescription("Share link label"),
-    ),
-    duration: Options.text("duration").pipe(
-      Options.withDefault("1w"),
-      Options.withDescription("Duration such as 1d, 1w, or 1m"),
-    ),
-  },
-  handler(runShareCreate),
-).pipe(Command.withDescription("Create a share link"));
-
-const shareListCommand = Command.make(
-  "list",
-  {
-    project: optionalArg("project"),
-    server: serverOption(),
-  },
-  handler(runShareList),
-).pipe(Command.withDescription("List a project's share links"));
-
-const shareRevokeCommand = Command.make(
-  "revoke",
-  {
-    id: Args.text({ name: "tokenId" }).pipe(
-      Args.withDescription("Share token id"),
-    ),
-    project: optionalArg("project"),
-    server: serverOption(),
-  },
-  handler(runShareRevoke),
-).pipe(Command.withDescription("Revoke a share link"));
-
-const shareCommand = Command.make("share").pipe(
-  Command.withDescription("Manage revocable share links"),
-  Command.withSubcommands([
-    shareCreateCommand,
-    shareListCommand,
-    shareRevokeCommand,
-  ]),
-);
-
 const versionCommand = Command.make("version", {}, () =>
   Effect.sync(() => console.log(pkg.version)),
 ).pipe(Command.withDescription("Print the version"));
@@ -267,14 +112,10 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
   Command.withDescription("CLI for Scratchwork projects"),
   Command.withSubcommands([
     devCommand,
-    publishCommand,
     exampleCommand,
-    templateCommand,
     loginCommand,
     logoutCommand,
     whoamiCommand,
-    tokensCommand,
-    shareCommand,
     versionCommand,
   ]),
 );

@@ -1,5 +1,5 @@
 /*
- * Thin client for the Scratchwork server API. Just fetch() — no dependencies.
+ * Thin client for the Scratchwork auth API. Just fetch() — no dependencies.
  * One place builds auth headers; everything else is a small wrapper.
  *
  * Auth (buildHeaders): a stored/CI credential is { token, type, cfToken }.
@@ -60,39 +60,6 @@ async function apiFetch(serverUrl, path, { method = "GET", auth, json: jsonBody 
   return parsed;
 }
 
-// POST a gzipped bundle. Returns the server's JSON { id, url, version, ... }.
-export async function deploy({ serverUrl, auth, name, id, visibility, bundle, timeoutMs = 120000 }) {
-  const qs = new URLSearchParams();
-  if (name) qs.set("name", name);
-  if (id) qs.set("id", id);
-  if (visibility) qs.set("visibility", visibility);
-  const url = `${base(serverUrl)}/api/deploy?${qs.toString()}`;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let res;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-scratchwork-bundle+gzip", ...buildHeaders(auth) },
-      body: bundle,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err.name === "AbortError") throw new ApiError("Upload timed out", 0);
-    throw new ApiError(`Could not reach ${serverUrl}: ${err.message}`, 0);
-  } finally {
-    clearTimeout(timer);
-  }
-
-  const body = await parse(res);
-  if (!res.ok) {
-    const msg = body && typeof body === "object" && body.error ? body.error : `Deploy failed (${res.status})`;
-    throw new ApiError(msg, res.status, body);
-  }
-  return body;
-}
-
 // GET /api/whoami — { authRequired, authenticated, user? }.
 export async function whoami({ serverUrl, auth }) {
   return apiFetch(serverUrl, "/api/whoami", { auth });
@@ -102,21 +69,6 @@ export async function whoami({ serverUrl, auth }) {
 export async function getCurrentUser({ serverUrl, auth }) {
   return apiFetch(serverUrl, "/api/me", { auth });
 }
-
-// ---- API keys (CI tokens) ----
-export const listTokens = ({ serverUrl, auth }) => apiFetch(serverUrl, "/api/tokens", { auth });
-export const createToken = ({ serverUrl, auth, name, expiresDays }) =>
-  apiFetch(serverUrl, "/api/tokens", { method: "POST", auth, json: { name, expires_days: expiresDays } });
-export const revokeToken = ({ serverUrl, auth, id }) =>
-  apiFetch(serverUrl, `/api/tokens/${encodeURIComponent(id)}`, { method: "DELETE", auth });
-
-// ---- share tokens ----
-export const listShareTokens = ({ serverUrl, auth, project }) =>
-  apiFetch(serverUrl, `/api/projects/${encodeURIComponent(project)}/share-tokens`, { auth });
-export const createShareToken = ({ serverUrl, auth, project, name, duration }) =>
-  apiFetch(serverUrl, `/api/projects/${encodeURIComponent(project)}/share-tokens`, { method: "POST", auth, json: { name, duration } });
-export const revokeShareToken = ({ serverUrl, auth, project, id }) =>
-  apiFetch(serverUrl, `/api/projects/${encodeURIComponent(project)}/share-tokens/${encodeURIComponent(id)}`, { method: "DELETE", auth });
 
 // ---- device flow (fallback poll-based login) ----
 export const startDeviceAuth = ({ serverUrl }) => apiFetch(serverUrl, "/api/login/device/start", { method: "POST", json: {} });

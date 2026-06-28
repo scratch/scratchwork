@@ -2,21 +2,17 @@
  * CLI configuration + credentials, kept deliberately small.
  *
  *   ~/.config/scratchwork/credentials.json   per-server credentials (mode 0600)
- *   ~/.config/scratchwork/config.json        global defaults (e.g. default server)
- *   <project>/.scratchwork.json              per-project: { id, name, server }
+ *   ~/.config/scratchwork/config.json        global defaults (e.g. server)
  *
  * A credentials entry is { token, type?, cfToken?, user? }:
  *   - type "session"  → sent as Authorization: Bearer (browser/device login)
- *   - type "api_key"  → sent as X-Api-Key (CI tokens)
+ *   - type "api_key"  → sent as X-Api-Key (CI/env tokens)
  *   - legacy entries (just { token }) are treated as bearer, so old single-token
  *     servers keep working.
  *
- * The per-project file is what makes re-publishing land on the SAME URL: it
- * remembers the server-assigned project id. Honors XDG_CONFIG_HOME.
- *
  * Zero dependencies — node:fs + node:os only.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -81,13 +77,6 @@ export function clearCredentials(serverUrl) {
   }
 }
 
-// Token to use for a server: env var wins (CI-friendly), then stored creds.
-export function resolveToken(serverUrl) {
-  if (process.env.SCRATCHWORK_TOKEN) return process.env.SCRATCHWORK_TOKEN;
-  const creds = loadCredentials(serverUrl);
-  return creds ? creds.token : null;
-}
-
 // Full auth to use for a server: { token, type, cfToken } or null. The env var
 // wins (CI). An env token prefixed "scratchwork_" is an API key (X-Api-Key);
 // anything else is a legacy/session bearer token. Stored creds carry their type.
@@ -111,25 +100,10 @@ export function saveGlobalConfig(cfg) {
   writeJsonSecure(globalConfigPath(), cfg);
 }
 
-// ---- per-project config -----------------------------------------------------
-
-export function projectConfigPath(dir) {
-  return join(dir, ".scratchwork.json");
-}
-
-export function loadProjectConfig(dir) {
-  return readJson(projectConfigPath(dir)) || {};
-}
-
-export function saveProjectConfig(dir, cfg) {
-  writeFileSync(projectConfigPath(dir), JSON.stringify(cfg, null, 2) + "\n");
-}
-
-// Resolve the server URL for a publish, by priority:
-//   1. explicit flag  2. project config  3. global default  4. DEFAULT_SERVER
-export function resolveServerUrl({ flag, projectConfig } = {}) {
+// Resolve the server URL by priority:
+//   1. explicit flag  2. global default  3. DEFAULT_SERVER
+export function resolveServerUrl({ flag } = {}) {
   if (flag) return flag.replace(/\/+$/, "");
-  if (projectConfig && projectConfig.server) return projectConfig.server.replace(/\/+$/, "");
   const g = loadGlobalConfig();
   if (g.server) return String(g.server).replace(/\/+$/, "");
   return DEFAULT_SERVER;

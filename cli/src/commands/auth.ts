@@ -31,7 +31,7 @@ export async function runLogin({ server: serverFlag = null, token: tokenFlag = n
     exit(1);
   }
   if (!info.authRequired) {
-    console.log(`\n  ${serverUrl} is open — no login needed to publish.\n`);
+    console.log(`\n  ${serverUrl} is open — no login needed.\n`);
     return;
   }
 

@@ -5,7 +5,7 @@
  *   1. Build the renderer (renderer/dist/* + shared generated renderer module).
  *   2. `bun build --compile` src/index.ts into a single self-contained executable.
  *      src/renderer/default.ts imports the generated shared module, which the
- *      compiler embeds into the binary, so it runs anywhere with no template
+ *      compiler embeds into the binary, so it runs anywhere with no renderer
  *      source or dist on disk.
  *
  * Requires the renderer's deps to be installed (cd ../renderer && bun install).
