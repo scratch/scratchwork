@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import pkg from "../package.json";
 import { runExample } from "./commands/example";
+import { runLogin } from "./commands/login";
 import { DEFAULT_PORT, runDev } from "./commands/dev";
 import { runPublish } from "./commands/publish";
 import { runTemplate } from "./commands/template";
@@ -77,6 +78,17 @@ const publishCommand = Command.make(
   runPublish,
 ).pipe(Command.withDescription("Publish a static site to a Scratchwork server"));
 
+const loginCommand = Command.make(
+  "login",
+  {
+    server: Options.text("server").pipe(
+      Options.withDefault(""),
+      Options.withDescription("Scratchwork server URL"),
+    ),
+  },
+  runLogin,
+).pipe(Command.withDescription("Authenticate with a Scratchwork server"));
+
 const versionCommand = Command.make("version", {}, () =>
   Console.log(pkg.version),
 ).pipe(Command.withDescription("Print the version"));
@@ -86,6 +98,7 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
   Command.withSubcommands([
     devCommand,
     exampleCommand,
+    loginCommand,
     publishCommand,
     templateCommand,
     versionCommand,

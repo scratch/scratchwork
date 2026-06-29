@@ -16,6 +16,68 @@ bun run server
 
 By default the server listens on `3001` and stores published bundles under `.scratchwork-data/`.
 
+## Google OAuth
+
+Auth is disabled by default for local development. Enable the publish and viewing wall with Google OAuth:
+
+```sh
+SCRATCHWORK_AUTH=google
+SCRATCHWORK_GOOGLE_CLIENT_ID=...
+SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
+SCRATCHWORK_SESSION_SECRET=use-a-long-random-string
+```
+
+Deploy scripts load environment values from files and the shell. Precedence is:
+
+1. Shell environment
+2. Explicit `--env path/to/file`
+3. Deploy package `.env`, such as `server/deploy-cloudflare/.env`
+4. Shared `server/.env`
+5. Built-in defaults
+
+Start from the example file:
+
+```sh
+cp server/.env.example server/.env
+```
+
+Then deploy with either auto-loaded env files or an explicit file:
+
+```sh
+bun run deploy:aws
+bun run deploy:cloudflare
+
+bun run deploy:aws --env server/.env
+bun run deploy:cloudflare --env server/.env
+```
+
+Configure your Google OAuth app with this redirect URI:
+
+```txt
+https://your-scratchwork-server.example/auth/callback/google
+```
+
+For local testing, use:
+
+```txt
+http://localhost:3001/auth/callback/google
+```
+
+Optional restrictions:
+
+```sh
+SCRATCHWORK_AUTH_ALLOWED_EMAILS=alice@example.com,bob@example.com
+SCRATCHWORK_AUTH_ALLOWED_DOMAINS=example.com,yc.com
+SCRATCHWORK_AUTH_SESSION_SECONDS=2592000
+```
+
+CLI users authenticate once per server:
+
+```sh
+scratchwork login --server https://your-scratchwork-server.example
+scratchwork publish index.html
+```
+
 ## AWS
 
 Deploy to AWS Lambda + S3:
@@ -39,6 +101,10 @@ SCRATCHWORK_AWS_FUNCTION_NAME=scratchwork-server
 SCRATCHWORK_AWS_ROLE_NAME=scratchwork-server-lambda-role
 SCRATCHWORK_S3_BUCKET=my-existing-bucket
 SCRATCHWORK_PUBLIC_URL=https://your-host.example
+SCRATCHWORK_AUTH=google
+SCRATCHWORK_GOOGLE_CLIENT_ID=...
+SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
+SCRATCHWORK_SESSION_SECRET=use-a-long-random-string
 ```
 
 ## Cloudflare
@@ -58,6 +124,12 @@ SCRATCHWORK_CLOUDFLARE_WORKER_NAME=scratchwork-server
 SCRATCHWORK_R2_BUCKET=scratchwork-sites
 SCRATCHWORK_PUBLIC_URL=https://your-worker.example
 SCRATCHWORK_CLOUDFLARE_SKIP_BUCKET_CREATE=1
+SCRATCHWORK_AUTH=google
+SCRATCHWORK_GOOGLE_CLIENT_ID=...
+SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
+SCRATCHWORK_SESSION_SECRET=use-a-long-random-string
 ```
+
+Cloudflare deploy writes non-secret auth values into the generated Wrangler config and uploads `SCRATCHWORK_GOOGLE_CLIENT_SECRET` plus `SCRATCHWORK_SESSION_SECRET` with `wrangler secret put`. AWS deploy sends `SCRATCHWORK_*` values to Lambda environment variables.
 
 Set `SCRATCHWORK_PUBLIC_URL=https://your-host.example` behind a custom domain or proxy so publish responses return the public URL.

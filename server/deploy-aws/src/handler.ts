@@ -1,5 +1,5 @@
 import * as HttpApp from "@effect/platform/HttpApp";
-import { app, makeServerConfigLayer, type EnvVars } from "@scratchwork/server-core";
+import { AuthLive, app, makeServerConfigLayer, type EnvVars } from "@scratchwork/server-core";
 import * as Layer from "effect/Layer";
 import type {
   APIGatewayProxyEventV2,
@@ -9,7 +9,10 @@ import type {
 import { AwsObjectStorageLive } from "./storage";
 
 const env = process.env as EnvVars;
-const MainLayer = Layer.mergeAll(makeServerConfigLayer(env), AwsObjectStorageLive(env));
+const MainLayer = Layer.provideMerge(
+  Layer.mergeAll(AwsObjectStorageLive(env), AuthLive),
+  makeServerConfigLayer(env),
+);
 const web = HttpApp.toWebHandlerLayer(app, MainLayer);
 
 export async function handler(
@@ -72,7 +75,10 @@ function firstHeader(headers: APIGatewayProxyEventV2["headers"], name: string): 
 
 function getSetCookie(headers: Headers): ReadonlyArray<string> {
   const withCookies = headers as Headers & { readonly getSetCookie?: () => ReadonlyArray<string> };
-  return withCookies.getSetCookie?.() ?? [];
+  const cookies = withCookies.getSetCookie?.();
+  if (cookies != null && cookies.length > 0) return cookies;
+  const cookie = headers.get("set-cookie");
+  return cookie == null ? [] : [cookie];
 }
 
 function isTextResponse(contentType: string): boolean {

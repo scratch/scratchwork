@@ -21,6 +21,7 @@
   "include": [
     "src/**/*.ts",
     "scripts/**/*.ts",
+    "../scripts/**/*.ts",
     "../core/src/**/*.ts",
     "../../shared/src/**/*.ts",
     "../../shared/**/*.js"

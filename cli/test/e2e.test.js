@@ -622,10 +622,10 @@ describe("scratchwork --help", () => {
       expect(code).toBe(0);
       expect(stdout).toContain("dev");
       expect(stdout).toContain("example");
+      expect(stdout).toContain("login");
       expect(stdout).toContain("publish");
       expect(stdout).toContain("template");
       expect(stdout).toContain("version");
-      expect(stdout).not.toContain("login");
       expect(stdout).not.toContain("logout");
       expect(stdout).not.toContain("whoami");
       expect(stdout).not.toContain("tokens");
@@ -639,15 +639,19 @@ describe("scratchwork --help", () => {
 describe("scratchwork publish", () => {
   test("reuses .scratchwork.json server and omits publish metadata from the bundle", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-publish-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-config-"));
     const port = nextPort++;
     const serverUrl = `http://localhost:${port}`;
     const token = "tokentokentoken1";
+    const authToken = "signed-auth-token";
     let publishBody;
+    let authorization;
 
     const server = Bun.serve({
       port,
       async fetch(request) {
         expect(new URL(request.url).pathname).toBe("/api/publish");
+        authorization = request.headers.get("authorization");
         publishBody = await request.json();
         return Response.json({
           slug: "savedslug",
@@ -658,6 +662,24 @@ describe("scratchwork publish", () => {
     });
 
     try {
+      mkdirSync(join(configDir, "scratchwork"), { recursive: true });
+      writeFileSync(
+        join(configDir, "scratchwork", "auth.json"),
+        `${JSON.stringify(
+          {
+            version: 1,
+            servers: {
+              [serverUrl]: {
+                token: authToken,
+                email: "founder@example.com",
+                updatedAt: "2026-06-29T00:00:00.000Z",
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+      );
       writeFileSync(join(dir, "index.html"), staticPage("publish"));
       writeFileSync(
         join(dir, ".scratchwork.json"),
@@ -675,18 +697,64 @@ describe("scratchwork publish", () => {
       );
 
       const { code, stdout, stderr } = await runCli(["publish", "index.html"], dir, {
-        env: { SCRATCHWORK_SERVER_URL: "" },
+        env: { SCRATCHWORK_SERVER_URL: "", XDG_CONFIG_HOME: configDir },
       });
 
       expect(code).toBe(0);
       expect(stderr).toBe("");
       expect(stdout).toContain(`${serverUrl}/savedslug/`);
+      expect(authorization).toBe(`Bearer ${authToken}`);
       expect(publishBody.slug).toBe("savedslug");
       expect(publishBody.token).toBe(token);
       expect(publishBody.bundle.files.map((file) => file.path)).toEqual(["index.html"]);
     } finally {
       server.stop(true);
       rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("scratchwork login", () => {
+  test("accepts the local callback and stores the returned token", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-login-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-login-config-"));
+    const serverUrl = "http://localhost:3999";
+    const proc = Bun.spawn(["bun", SCRATCHWORK, "login", "--server", serverUrl], {
+      cwd: dir,
+      env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", XDG_CONFIG_HOME: configDir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    try {
+      const output = await readOutputUntil(proc, "cli_redirect=");
+      const loginMatch = output.match(/https?:\/\/\S+\/auth\/login\?\S+/);
+      expect(loginMatch).not.toBeNull();
+      const login = new URL(loginMatch[0]);
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      callback.searchParams.set("token", "login-token");
+      callback.searchParams.set("server", serverUrl);
+      callback.searchParams.set("email", "founder@example.com");
+
+      const response = await fetch(callback);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("login complete");
+
+      const [stderr, code] = await Promise.all([
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(code).toBe(0);
+      expect(stderr).toBe("");
+
+      const auth = JSON.parse(readFileSync(join(configDir, "scratchwork", "auth.json"), "utf8"));
+      expect(auth.servers[serverUrl].token).toBe("login-token");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
     }
   });
 });

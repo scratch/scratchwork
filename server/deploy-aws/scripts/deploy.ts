@@ -2,6 +2,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { definedEnv, loadDeployEnv } from "../../scripts/env";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
@@ -11,11 +12,13 @@ const trustPolicyPath = join(dist, "lambda-trust-policy.json");
 const s3PolicyPath = join(dist, "s3-policy.json");
 const environmentPath = join(dist, "environment.json");
 
-const env = process.env;
+const loadedEnv = await loadDeployEnv({ packageRoot: root, argv: Bun.argv.slice(2), processEnv: process.env });
+const env = loadedEnv.env;
 const region = env.AWS_REGION ?? env.AWS_DEFAULT_REGION ?? env.SCRATCHWORK_S3_REGION ?? "us-east-1";
 const storageRegion = env.SCRATCHWORK_S3_REGION ?? region;
 const functionName = env.SCRATCHWORK_AWS_FUNCTION_NAME ?? "scratchwork-server";
 const roleName = env.SCRATCHWORK_AWS_ROLE_NAME ?? `${functionName}-lambda-role`;
+const commandEnv = definedEnv(env);
 
 await mkdir(dist, { recursive: true });
 await run("bun", ["run", "build"], { cwd: root });
@@ -108,13 +111,12 @@ async function ensureRole(role: string, bucket: string): Promise<string> {
 }
 
 async function writeEnvironment(bucket: string, bucketRegion: string): Promise<void> {
-  const variables: Record<string, string> = {
-    SCRATCHWORK_S3_BUCKET: bucket,
-    SCRATCHWORK_S3_REGION: bucketRegion,
-  };
-  copyEnv(variables, "SCRATCHWORK_PUBLIC_URL");
-  copyEnv(variables, "SCRATCHWORK_S3_ENDPOINT");
-  copyEnv(variables, "SCRATCHWORK_S3_FORCE_PATH_STYLE");
+  const variables: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key.startsWith("SCRATCHWORK_") && value != null && value !== "") variables[key] = value;
+  }
+  variables.SCRATCHWORK_S3_BUCKET = bucket;
+  variables.SCRATCHWORK_S3_REGION = bucketRegion;
 
   await writeFile(environmentPath, JSON.stringify({ Variables: variables }));
 }
@@ -233,11 +235,6 @@ async function addPermission(
   throw new Error(`Could not add Lambda Function URL permission ${statementId}`);
 }
 
-function copyEnv(target: Record<string, string>, key: string): void {
-  const value = env[key];
-  if (value != null && value !== "") target[key] = value;
-}
-
 async function awsText(args: ReadonlyArray<string>, options: RunOptions = {}): Promise<string> {
   const result = await aws(args, { ...options, capture: true });
   return result.ok ? result.stdout.trim() : "";
@@ -262,6 +259,7 @@ interface RunResult {
 async function run(command: string, args: ReadonlyArray<string>, options: RunOptions = {}): Promise<RunResult> {
   const proc = Bun.spawn([command, ...args], {
     cwd: options.cwd,
+    env: commandEnv,
     stdout: options.capture ? "pipe" : "inherit",
     stderr: options.capture || options.allowFailure ? "pipe" : "inherit",
   });

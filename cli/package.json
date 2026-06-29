@@ -24,7 +24,6 @@
     "effect": "3.21.4"
   },
   "files": [
-    "assets",
     "example",
     "src"
   ],

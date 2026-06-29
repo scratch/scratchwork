@@ -24,6 +24,7 @@ scratchwork dev [path]
 To publish to a running Scratchwork server:
 
 ```sh
+scratchwork login --server https://your-scratchwork-server.example
 scratchwork publish [path]
 ```
 
@@ -77,6 +78,7 @@ bun run server
 Then publish a directory or file:
 
 ```sh
+scratchwork login --server http://localhost:3001
 scratchwork publish index.html
 ```
 
@@ -90,6 +92,13 @@ bun run deploy:cloudflare
 ```
 
 Cloud runtime dependencies live in `server/deploy-aws` and `server/deploy-cloudflare`. See `server/README.md` for cloud setup details.
+
+Deploy secrets can be loaded from `server/.env` or an explicit env file:
+
+```sh
+cp server/.env.example server/.env
+bun run deploy:cloudflare --env server/.env
+```
 
 ---
 

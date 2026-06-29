@@ -4,7 +4,7 @@ import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import * as Effect from "effect/Effect";
 import { serveRequest } from "../../../shared/src/site/serve";
-import FIGURE_SVG from "../../assets/figure.svg" with { type: "text" };
+import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
 import { CliError, errorMessage } from "../errors";
 import { bakedShell } from "../renderer/default";
 import * as SiteFilesLive from "../serve/file-system-site-files";

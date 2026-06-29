@@ -7,6 +7,8 @@ import { decodePublishBundle, type PublishBundle } from "../../../shared/src/pub
 import { SiteFileError } from "../../../shared/src/site/files";
 import { servePath } from "../../../shared/src/site/serve";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
+import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
+import { Auth, AuthError } from "./auth";
 import { bundleSiteFilesLayer } from "./bundle-site-files";
 import { ServerConfig } from "./config";
 import { ObjectStorage, StorageError } from "./storage";
@@ -15,7 +17,6 @@ const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 const SLUG_LENGTH = 10;
 const TOKEN_BYTES = 32;
 const NO_STORE = "no-store, must-revalidate";
-const DEFAULT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#311b1e"/><path d="M19 42c8-2 13-8 15-20 7 4 11 11 11 19" fill="none" stroke="#f3e4a1" stroke-width="6" stroke-linecap="round"/><circle cx="24" cy="25" r="4" fill="#da752f"/></svg>`;
 
 interface PublishRequest {
   readonly bundle: PublishBundle;
@@ -28,6 +29,8 @@ interface PublishedSiteRecord {
   readonly version: 1;
   readonly slug: string;
   readonly tokenHash: string;
+  readonly ownerId?: string;
+  readonly ownerEmail?: string;
   readonly bundle: PublishBundle;
   readonly openPath: string;
   readonly createdAt: string;
@@ -39,13 +42,15 @@ class HttpError extends Data.TaggedError("HttpError")<{
   readonly message: string;
 }> {}
 
-export const app: HttpApp.Default<never, ServerConfig | ObjectStorage> =
+export const app: HttpApp.Default<never, ServerConfig | ObjectStorage | Auth> =
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     return yield* handleRequest(request).pipe(
       Effect.catchAll((error) =>
         error instanceof HttpError
           ? jsonResponse({ error: error.message }, error.status)
+          : error instanceof AuthError
+            ? jsonResponse({ error: error.message }, error.status)
           : jsonResponse({ error: errorMessage(error) }, 500),
       ),
     );
@@ -53,12 +58,36 @@ export const app: HttpApp.Default<never, ServerConfig | ObjectStorage> =
 
 function handleRequest(
   request: HttpServerRequest.HttpServerRequest,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | StorageError, ServerConfig | ObjectStorage> {
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | StorageError, ServerConfig | ObjectStorage | Auth> {
   return Effect.gen(function* () {
     const url = new URL(request.url, "http://scratchwork.local");
 
+    if (url.pathname === "/auth/login") {
+      const auth = yield* Auth;
+      const config = yield* ServerConfig;
+      return yield* auth.login(request, url, publicBaseUrl(request, config.publicUrl));
+    }
+
+    if (url.pathname === "/auth/callback/google" || url.pathname === "/auth/google/callback") {
+      const auth = yield* Auth;
+      const config = yield* ServerConfig;
+      return yield* auth.callback(url, publicBaseUrl(request, config.publicUrl));
+    }
+
+    if (url.pathname === "/auth/logout") {
+      const auth = yield* Auth;
+      const config = yield* ServerConfig;
+      return auth.logout(publicBaseUrl(request, config.publicUrl));
+    }
+
     if (url.pathname === "/health") {
       return yield* jsonResponse({ ok: true }, 200);
+    }
+
+    if (url.pathname === "/api/me") {
+      const auth = yield* Auth;
+      const user = yield* auth.currentUser(request);
+      return yield* jsonResponse({ authenticated: user != null, user }, 200);
     }
 
     if (url.pathname === "/api/publish") {
@@ -76,14 +105,16 @@ function handleRequest(
       return yield* Effect.fail(new HttpError({ status: 405, message: "Method not allowed" }));
     }
 
-    return yield* servePublishedSite(url);
+    return yield* servePublishedSite(request, url);
   });
 }
 
 function publish(
   request: HttpServerRequest.HttpServerRequest,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | StorageError, ServerConfig | ObjectStorage> {
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | StorageError, ServerConfig | ObjectStorage | Auth> {
   return Effect.gen(function* () {
+    const auth = yield* Auth;
+    const user = yield* auth.requireUser(request);
     const body = yield* request.json.pipe(
       Effect.mapError(() => new HttpError({ status: 400, message: "Invalid JSON body" })),
     );
@@ -113,6 +144,8 @@ function publish(
       version: 1,
       slug,
       tokenHash: requestTokenHash ?? (yield* tokenHash(token)),
+      ownerId: user?.id,
+      ownerEmail: user?.email,
       bundle: publishRequest.bundle,
       openPath: publishRequest.openPath,
       createdAt: existing?.createdAt ?? now,
@@ -127,8 +160,9 @@ function publish(
 }
 
 function servePublishedSite(
+  request: HttpServerRequest.HttpServerRequest,
   url: URL,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | StorageError, ObjectStorage> {
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | StorageError, ServerConfig | ObjectStorage | Auth> {
   return Effect.gen(function* () {
     const match = /^\/([^/]+)(\/.*)?$/.exec(url.pathname);
     if (match == null) {
@@ -147,6 +181,12 @@ function servePublishedSite(
       return yield* Effect.fail(new HttpError({ status: 404, message: "Not found" }));
     }
 
+    const auth = yield* Auth;
+    if (auth.enabled && (yield* auth.currentUser(request)) == null) {
+      const config = yield* ServerConfig;
+      return auth.loginRedirect(url, publicBaseUrl(request, config.publicUrl));
+    }
+
     const rest = match[2];
     if (rest == null) {
       return HttpServerResponse.redirect(`/${slug}/`, { status: 308 });
@@ -154,7 +194,7 @@ function servePublishedSite(
 
     return yield* servePath(rest, url.search, {
       cacheControl: () => NO_STORE,
-      defaultFaviconSvg: DEFAULT_FAVICON_SVG,
+      defaultFaviconSvg: FIGURE_SVG,
       pathPrefix: `/${slug}`,
       rendererFallback: Effect.succeed(defaultRendererHtml),
     }).pipe(
@@ -236,6 +276,8 @@ function isPublishedSiteRecord(value: unknown): value is PublishedSiteRecord {
   if (!isRecord(value) || value.version !== 1) return false;
   if (typeof value.slug !== "string" || !safeSlug(value.slug)) return false;
   if (typeof value.tokenHash !== "string") return false;
+  if (value.ownerId != null && typeof value.ownerId !== "string") return false;
+  if (value.ownerEmail != null && typeof value.ownerEmail !== "string") return false;
   if (typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") return false;
   if (typeof value.openPath !== "string") return false;
   return decodePublishBundle(value.bundle) != null;

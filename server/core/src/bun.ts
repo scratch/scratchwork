@@ -7,6 +7,7 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { app } from "./app";
+import { AuthLive } from "./auth";
 import { ServerConfig, ServerConfigLive } from "./config";
 import { LocalObjectStorageLive } from "./storage";
 
@@ -19,7 +20,10 @@ const BaseLayer = Layer.mergeAll(
   ServerConfigLive,
 );
 
-const MainLayer = Layer.provideMerge(LocalObjectStorageLive(storageDirectory), BaseLayer);
+const MainLayer = Layer.provideMerge(
+  Layer.mergeAll(LocalObjectStorageLive(storageDirectory), AuthLive),
+  BaseLayer,
+);
 
 const program = Effect.scoped(
   Effect.gen(function* () {

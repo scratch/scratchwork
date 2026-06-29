@@ -5,6 +5,7 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import { bytesToBase64, PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
+import { readAuthToken } from "../auth";
 import { resolveDevTarget } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
 import type { PublishConfig } from "../types";
@@ -53,12 +54,13 @@ export function runPublish(
     }
 
     const bundle = yield* createBundle(target.root);
+    const authToken = yield* readAuthToken(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     const response = yield* postPublish(server, {
       bundle,
       openPath: target.openPath,
       slug,
       token,
-    });
+    }, authToken);
 
     yield* writeMetadata(target.root, server, response).pipe(Effect.catchAll(() => Effect.void));
     yield* printResult(response, bundle);
@@ -142,12 +144,15 @@ function postPublish(
     readonly slug?: string;
     readonly token?: string;
   },
+  authToken: string | undefined,
 ): Effect.Effect<PublishResponse, CliError> {
   return Effect.tryPromise({
     try: async () => {
       const response = await fetch(publishEndpoint(server), {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: authToken == null
+          ? { "content-type": "application/json" }
+          : { "authorization": `Bearer ${authToken}`, "content-type": "application/json" },
         body: JSON.stringify(body),
       });
       const text = await response.text();
@@ -156,7 +161,9 @@ function postPublish(
         const message = isRecord(json) && typeof json.error === "string" ? json.error : text;
         throw new CliError({
           code: 1,
-          message: `scratchwork publish: ${message || `server returned ${response.status}`}`,
+          message: response.status === 401
+            ? `scratchwork publish: authentication required. Run \`scratchwork login --server ${server}\`.`
+            : `scratchwork publish: ${message || `server returned ${response.status}`}`,
         });
       }
 

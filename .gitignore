@@ -2,6 +2,11 @@
 node_modules/
 dist/
 
+# Local environment files. Keep .env.example files committed.
+**/.env
+**/.env.*
+!**/.env.example
+
 # Per-project publish metadata (server-assigned id, name, server). Written by
 # `scratchwork publish` into whatever directory you publish; not for committing.
 .scratchwork.json

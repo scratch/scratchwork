@@ -13,7 +13,7 @@
   "scripts": {
     "start": "bun src/bun.ts",
     "dev": "bun src/bun.ts",
-    "check": "bun run typecheck",
+    "check": "bun run typecheck && bun test",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

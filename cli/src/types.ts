@@ -19,6 +19,10 @@ export interface PublishConfig {
   readonly token?: string;
 }
 
+export interface LoginConfig {
+  readonly server?: string;
+}
+
 export interface ReloadPayload {
   readonly path: string;
   readonly ext: string;
