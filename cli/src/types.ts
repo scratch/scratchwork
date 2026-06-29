@@ -1,30 +1,3 @@
-export type AuthType = "api_key" | "session" | "bearer";
-
-export interface Auth {
-  readonly token: string;
-  readonly type: AuthType;
-  readonly cfToken?: string;
-}
-
-export interface User {
-  readonly id: string;
-  readonly email: string;
-  readonly name?: string;
-  readonly slug?: string;
-}
-
-export interface WhoamiResult {
-  readonly mode?: string;
-  readonly authRequired: boolean;
-  readonly authenticated: boolean;
-  readonly user?: User;
-}
-
-export interface CallbackResult {
-  readonly token: string;
-  readonly cfToken?: string;
-}
-
 export interface DevConfig {
   readonly path?: string;
   readonly port?: number;
@@ -39,13 +12,11 @@ export interface TemplateConfig {
   readonly file?: string;
 }
 
-export interface LoginConfig {
-  readonly server?: string | null;
-  readonly token?: string | null;
-}
-
-export interface ServerConfig {
-  readonly server?: string | null;
+export interface PublishConfig {
+  readonly path?: string;
+  readonly server?: string;
+  readonly slug?: string;
+  readonly token?: string;
 }
 
 export interface ReloadPayload {

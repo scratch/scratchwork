@@ -615,19 +615,19 @@ describe("scratchwork --version", () => {
 });
 
 describe("scratchwork --help", () => {
-  test("shows local project commands and omits server/account commands", async () => {
+  test("shows local project commands and omits account commands", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-help-"));
     try {
       const { code, stdout } = await runCli(["--help"], dir);
       expect(code).toBe(0);
       expect(stdout).toContain("dev");
       expect(stdout).toContain("example");
+      expect(stdout).toContain("publish");
       expect(stdout).toContain("template");
       expect(stdout).toContain("version");
       expect(stdout).not.toContain("login");
       expect(stdout).not.toContain("logout");
       expect(stdout).not.toContain("whoami");
-      expect(stdout).not.toContain("publish");
       expect(stdout).not.toContain("tokens");
       expect(stdout).not.toContain("share");
     } finally {

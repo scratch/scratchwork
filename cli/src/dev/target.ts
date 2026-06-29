@@ -8,6 +8,7 @@ import type { DevTarget } from "./types";
 /** Converts the CLI path argument into the server root and browser path to open. */
 export function resolveDevTarget(
   pathArg: string,
+  command = "dev",
 ): Effect.Effect<
   DevTarget,
   PlatformError | CliError,
@@ -18,7 +19,7 @@ export function resolveDevTarget(
     const paths = yield* Path.Path;
     const target = paths.resolve(process.cwd(), pathArg);
     if (!(yield* fs.exists(target))) {
-      return yield* noSuchFile(target);
+      return yield* noSuchFile(command, target);
     }
     const info = yield* fs.stat(target);
 
@@ -29,7 +30,7 @@ export function resolveDevTarget(
         openPath: openPathForFile(paths.basename(target)),
       };
     }
-    return yield* noSuchFile(target);
+    return yield* noSuchFile(command, target);
   });
 }
 
@@ -45,11 +46,11 @@ function openPathForFile(filename: string): string {
 }
 
 /** Creates the user-facing CLI error for invalid dev targets. */
-function noSuchFile(path: string): Effect.Effect<never, CliError> {
+function noSuchFile(command: string, path: string): Effect.Effect<never, CliError> {
   return Effect.fail(
     new CliError({
       code: 1,
-      message: `scratchwork dev: no such file or directory: ${path}`,
+      message: `scratchwork ${command}: no such file or directory: ${path}`,
     }),
   );
 }

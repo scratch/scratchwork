@@ -21,7 +21,11 @@ scratchwork --version
 scratchwork dev [path]
 ```
 
-Publishing and hosted sharing are being rebuilt.
+To publish to a running Scratchwork server:
+
+```sh
+scratchwork publish [path]
+```
 
 ## Local development
 
@@ -61,6 +65,24 @@ To customize Markdown rendering, add an `index.html` renderer file at or above t
 ```html
 <!-- scratchwork:markdown-renderer - tells Scratchwork this index.html renders Markdown routes. -->
 ```
+
+## Publishing
+
+Run the publishing server locally:
+
+```sh
+cd server
+bun install
+bun run start
+```
+
+Then publish a directory or file:
+
+```sh
+scratchwork publish index.html
+```
+
+The server stores the bundle in local object storage by default, returns a random slug URL such as `/abc123defg/`, and returns a token. The CLI saves the slug and token in `.scratchwork.json` so the next `scratchwork publish` republishes the same URL. The server can also use S3 or R2; see `server/README.md`.
 
 ---
 

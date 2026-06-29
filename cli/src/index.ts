@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import pkg from "../package.json";
 import { runExample } from "./commands/example";
 import { DEFAULT_PORT, runDev } from "./commands/dev";
+import { runPublish } from "./commands/publish";
 import { runTemplate } from "./commands/template";
 import { CliError } from "./errors";
 
@@ -56,6 +57,26 @@ const templateCommand = Command.make(
   runTemplate,
 ).pipe(Command.withDescription("Write the default Markdown HTML template"));
 
+const publishCommand = Command.make(
+  "publish",
+  {
+    path: pathArg("path"),
+    server: Options.text("server").pipe(
+      Options.withDefault(process.env.SCRATCHWORK_SERVER_URL ?? "http://localhost:3001"),
+      Options.withDescription("Scratchwork server URL"),
+    ),
+    slug: Options.text("slug").pipe(
+      Options.withDefault(""),
+      Options.withDescription("Existing slug to republish"),
+    ),
+    token: Options.text("token").pipe(
+      Options.withDefault(""),
+      Options.withDescription("Publish token for an existing slug"),
+    ),
+  },
+  runPublish,
+).pipe(Command.withDescription("Publish a static site to a Scratchwork server"));
+
 const versionCommand = Command.make("version", {}, () =>
   Console.log(pkg.version),
 ).pipe(Command.withDescription("Print the version"));
@@ -65,6 +86,7 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
   Command.withSubcommands([
     devCommand,
     exampleCommand,
+    publishCommand,
     templateCommand,
     versionCommand,
   ]),

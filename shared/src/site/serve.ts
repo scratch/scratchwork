@@ -48,6 +48,7 @@ export interface SiteServeConfig<E = never, R = never> {
   readonly rendererFallback: Effect.Effect<string | null, E, R>;
   readonly defaultFaviconSvg?: string;
   readonly cacheControl?: (path: string) => string;
+  readonly pathPrefix?: string;
   readonly onServeEvent?: (
     event: SiteServeEvent,
   ) => Effect.Effect<void, E, SiteFiles | R>;
@@ -108,7 +109,7 @@ function respond<E, R>(
   return Effect.gen(function* () {
     switch (route._tag) {
       case "Redirect":
-        return HttpServerResponse.redirect(route.location, {
+        return HttpServerResponse.redirect(prefixedLocation(route.location, config.pathPrefix), {
           status: route.status,
         });
 
@@ -227,6 +228,12 @@ function cacheControlFor<E, R>(
   config: SiteServeConfig<E, R>,
 ): string {
   return config.cacheControl ? config.cacheControl(path) : defaultCacheControl(path);
+}
+
+function prefixedLocation(location: string, pathPrefix: string | undefined): string {
+  if (pathPrefix == null || pathPrefix === "" || pathPrefix === "/") return location;
+  const prefix = `/${pathPrefix.replace(/^\/+|\/+$/g, "")}`;
+  return `${prefix}${location.startsWith("/") ? location : `/${location}`}`;
 }
 
 function forbiddenResponse(): HttpServerResponse.HttpServerResponse {
