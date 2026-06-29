@@ -3,12 +3,10 @@ import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import { createHash, randomBytes } from "node:crypto";
-import { decodePublishBundle, type PublishBundle } from "../../shared/src/publish/bundle";
-import { SiteFileError } from "../../shared/src/site/files";
-import { servePath } from "../../shared/src/site/serve";
-import { defaultRendererHtml } from "../../shared/src/site/default-renderer.generated.js";
-import FIGURE_SVG from "../../cli/assets/figure.svg" with { type: "text" };
+import { decodePublishBundle, type PublishBundle } from "../../../shared/src/publish/bundle";
+import { SiteFileError } from "../../../shared/src/site/files";
+import { servePath } from "../../../shared/src/site/serve";
+import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import { bundleSiteFilesLayer } from "./bundle-site-files";
 import { ServerConfig } from "./config";
 import { ObjectStorage, StorageError } from "./storage";
@@ -17,6 +15,7 @@ const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 const SLUG_LENGTH = 10;
 const TOKEN_BYTES = 32;
 const NO_STORE = "no-store, must-revalidate";
+const DEFAULT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#311b1e"/><path d="M19 42c8-2 13-8 15-20 7 4 11 11 11 19" fill="none" stroke="#f3e4a1" stroke-width="6" stroke-linecap="round"/><circle cx="24" cy="25" r="4" fill="#da752f"/></svg>`;
 
 interface PublishRequest {
   readonly bundle: PublishBundle;
@@ -93,10 +92,11 @@ function publish(
 
     const slug = publishRequest.slug ?? (yield* randomAvailableSlug());
     const token = publishRequest.token ?? randomToken();
+    const requestTokenHash = publishRequest.token == null ? undefined : yield* tokenHash(publishRequest.token);
     const existing = yield* loadSite(slug);
 
     if (publishRequest.slug != null) {
-      if (publishRequest.token == null) {
+      if (requestTokenHash == null) {
         return yield* Effect.fail(
           new HttpError({ status: 400, message: "A token is required to republish a slug" }),
         );
@@ -104,7 +104,7 @@ function publish(
       if (existing == null) {
         return yield* Effect.fail(new HttpError({ status: 404, message: "Slug not found" }));
       }
-      if (existing.tokenHash !== tokenHash(publishRequest.token)) {
+      if (existing.tokenHash !== requestTokenHash) {
         return yield* Effect.fail(new HttpError({ status: 403, message: "Invalid publish token" }));
       }
     }
@@ -112,7 +112,7 @@ function publish(
     const record: PublishedSiteRecord = {
       version: 1,
       slug,
-      tokenHash: tokenHash(token),
+      tokenHash: requestTokenHash ?? (yield* tokenHash(token)),
       bundle: publishRequest.bundle,
       openPath: publishRequest.openPath,
       createdAt: existing?.createdAt ?? now,
@@ -154,7 +154,7 @@ function servePublishedSite(
 
     return yield* servePath(rest, url.search, {
       cacheControl: () => NO_STORE,
-      defaultFaviconSvg: FIGURE_SVG,
+      defaultFaviconSvg: DEFAULT_FAVICON_SVG,
       pathPrefix: `/${slug}`,
       rendererFallback: Effect.succeed(defaultRendererHtml),
     }).pipe(
@@ -253,10 +253,11 @@ function publicBaseUrl(
   configuredPublicUrl: string | undefined,
 ): string {
   if (configuredPublicUrl != null) return configuredPublicUrl;
+  const requestUrl = new URL(request.url, "http://scratchwork.local");
   const forwardedProto = request.headers["x-forwarded-proto"];
-  const proto = forwardedProto?.split(",")[0]?.trim() || "http";
+  const proto = forwardedProto?.split(",")[0]?.trim() || requestUrl.protocol.replace(/:$/, "") || "http";
   const forwardedHost = request.headers["x-forwarded-host"];
-  const host = forwardedHost?.split(",")[0]?.trim() || request.headers.host || "localhost:3001";
+  const host = forwardedHost?.split(",")[0]?.trim() || request.headers.host || requestUrl.host || "localhost:3001";
   return `${proto}://${host}`;
 }
 
@@ -288,11 +289,48 @@ function randomSlug(): string {
 }
 
 function randomToken(): string {
-  return randomBytes(TOKEN_BYTES).toString("base64url");
+  return base64Url(randomBytes(TOKEN_BYTES));
 }
 
-function tokenHash(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+function tokenHash(token: string): Effect.Effect<string, StorageError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const bytes = new TextEncoder().encode(token);
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      return hex(new Uint8Array(digest));
+    },
+    catch: (cause) => new StorageError({ message: "Could not hash publish token", cause }),
+  });
+}
+
+function randomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+function base64Url(bytes: Uint8Array): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let output = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const a = bytes[index];
+    const b = bytes[index + 1] ?? 0;
+    const c = bytes[index + 2] ?? 0;
+    const triplet = (a << 16) | (b << 8) | c;
+    output += alphabet[(triplet >> 18) & 63];
+    output += alphabet[(triplet >> 12) & 63];
+    if (index + 1 < bytes.length) output += alphabet[(triplet >> 6) & 63];
+    if (index + 2 < bytes.length) output += alphabet[triplet & 63];
+  }
+  return output;
+}
+
+function hex(bytes: Uint8Array): string {
+  let output = "";
+  for (const byte of bytes) {
+    output += byte.toString(16).padStart(2, "0");
+  }
+  return output;
 }
 
 function safeSlug(slug: string): boolean {

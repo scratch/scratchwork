@@ -1,10 +1,10 @@
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { base64ToBytes, type PublishBundle } from "../../shared/src/publish/bundle";
-import { contentType } from "../../shared/src/site/content";
-import { SiteFileError, SiteFiles } from "../../shared/src/site/files";
-import type { SitePath } from "../../shared/src/site/paths";
+import { base64ToBytes, type PublishBundle } from "../../../shared/src/publish/bundle";
+import { contentType } from "../../../shared/src/site/content";
+import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
+import type { SitePath } from "../../../shared/src/site/paths";
 
 export function bundleSiteFilesLayer(bundle: PublishBundle): Layer.Layer<SiteFiles> {
   const files = new Map<SitePath, Uint8Array>();

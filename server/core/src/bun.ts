@@ -7,8 +7,10 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { app } from "./app";
-import { ServerConfig, ServerConfigLive, type StorageConfig } from "./config";
-import { ObjectStorageLive } from "./storage";
+import { ServerConfig, ServerConfigLive } from "./config";
+import { LocalObjectStorageLive } from "./storage";
+
+const storageDirectory = process.env.SCRATCHWORK_STORAGE_DIR ?? ".scratchwork-data";
 
 const BaseLayer = Layer.mergeAll(
   BunHttpServer.layerContext,
@@ -17,7 +19,7 @@ const BaseLayer = Layer.mergeAll(
   ServerConfigLive,
 );
 
-const MainLayer = Layer.provideMerge(ObjectStorageLive, BaseLayer);
+const MainLayer = Layer.provideMerge(LocalObjectStorageLive(storageDirectory), BaseLayer);
 
 const program = Effect.scoped(
   Effect.gen(function* () {
@@ -28,7 +30,7 @@ const program = Effect.scoped(
       [
         "scratchwork server",
         `listening  http://localhost:${config.port}`,
-        `storage    ${storageLabel(config.storage)}`,
+        `storage    local:${storageDirectory}`,
       ].join("\n"),
     );
     return yield* Effect.never;
@@ -36,7 +38,3 @@ const program = Effect.scoped(
 );
 
 program.pipe(Effect.provide(MainLayer), BunRuntime.runMain);
-
-function storageLabel(storage: StorageConfig): string {
-  return storage._tag === "Local" ? `local:${storage.directory}` : `s3:${storage.bucket}`;
-}

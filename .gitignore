@@ -1,5 +1,6 @@
 .DS_Store
 node_modules/
+dist/
 
 # Per-project publish metadata (server-assigned id, name, server). Written by
 # `scratchwork publish` into whatever directory you publish; not for committing.

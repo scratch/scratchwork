@@ -8,7 +8,7 @@ Specifically, Scratchwork is:
 
 1. A CLI for serving static websites locally with hot reload
 2. A Markdown renderer that supports React components
-3. Shared routing/rendering logic for the future server
+3. A publishing server that can run locally or on Cloudflare
 
 ## Quick start
 
@@ -71,9 +71,7 @@ To customize Markdown rendering, add an `index.html` renderer file at or above t
 Run the publishing server locally:
 
 ```sh
-cd server
-bun install
-bun run start
+bun run server
 ```
 
 Then publish a directory or file:
@@ -82,7 +80,15 @@ Then publish a directory or file:
 scratchwork publish index.html
 ```
 
-The server stores the bundle in local object storage by default, returns a random slug URL such as `/abc123defg/`, and returns a token. The CLI saves the slug and token in `.scratchwork.json` so the next `scratchwork publish` republishes the same URL. The server can also use S3 or R2; see `server/README.md`.
+The server stores the bundle in local object storage by default, returns a random slug URL such as `/abc123defg/`, and returns a token. The CLI saves the slug and token in `.scratchwork.json` so the next `scratchwork publish` republishes the same URL.
+
+Deploy the server with one command:
+
+```sh
+bun run deploy:cloudflare
+```
+
+Cloudflare runtime dependencies live in `server/deploy-cloudflare`. See `server/README.md` for cloud setup details.
 
 ---
 

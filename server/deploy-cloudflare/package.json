@@ -1,0 +1,21 @@
+{
+  "name": "@scratchwork/server-deploy-cloudflare",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Cloudflare Worker + R2 deployment package for the Scratchwork server.",
+  "scripts": {
+    "check": "bun run typecheck",
+    "deploy": "bun scripts/deploy.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@effect/platform": "0.96.2",
+    "@scratchwork/server-core": "workspace:*",
+    "effect": "3.21.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^6.0.3"
+  }
+}

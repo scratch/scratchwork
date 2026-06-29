@@ -6,7 +6,7 @@
     "baseUrl": ".",
     "checkJs": false,
     "ignoreDeprecations": "6.0",
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM"],
     "module": "Preserve",
     "moduleDetection": "force",
     "moduleResolution": "bundler",
@@ -20,7 +20,7 @@
   },
   "include": [
     "src/**/*.ts",
-    "../shared/src/**/*.ts",
-    "../shared/**/*.js"
+    "../../shared/src/**/*.ts",
+    "../../shared/**/*.js"
   ]
 }

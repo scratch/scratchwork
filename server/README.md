@@ -1,37 +1,37 @@
-# Scratchwork Server
+# Scratchwork Server Packages
 
 Effect-native publishing server for `scratchwork publish`.
+
+The server is split into two packages:
+
+1. `core`: platform-neutral HTTP app, config, storage contract, and local Bun runner
+2. `deploy-cloudflare`: Cloudflare Worker adapter backed by R2
 
 ## Local
 
 ```sh
-cd server
-bun install
-bun run start
+bun run server
 ```
 
 By default the server listens on `3001` and stores published bundles under `.scratchwork-data/`.
 
-## S3
+## Cloudflare
+
+Deploy to Cloudflare Workers + R2:
 
 ```sh
-SCRATCHWORK_STORAGE=s3 \
-SCRATCHWORK_S3_BUCKET=my-bucket \
-SCRATCHWORK_S3_REGION=us-east-1 \
-AWS_ACCESS_KEY_ID=... \
-AWS_SECRET_ACCESS_KEY=... \
-bun run start
+bun run deploy:cloudflare
 ```
 
-## R2
+The deploy command uses the `wrangler` CLI credentials in your environment. It creates the R2 bucket if needed, writes a generated Wrangler config under `server/deploy-cloudflare/dist/`, and deploys the Worker.
+
+Optional environment variables:
 
 ```sh
-SCRATCHWORK_STORAGE=r2 \
-R2_BUCKET=my-bucket \
-R2_ACCOUNT_ID=... \
-AWS_ACCESS_KEY_ID=... \
-AWS_SECRET_ACCESS_KEY=... \
-bun run start
+SCRATCHWORK_CLOUDFLARE_WORKER_NAME=scratchwork-server
+SCRATCHWORK_R2_BUCKET=scratchwork-sites
+SCRATCHWORK_PUBLIC_URL=https://your-worker.example
+SCRATCHWORK_CLOUDFLARE_SKIP_BUCKET_CREATE=1
 ```
 
-Set `SCRATCHWORK_PUBLIC_URL=https://your-host.example` behind a proxy so publish responses return the public URL.
+Set `SCRATCHWORK_PUBLIC_URL=https://your-host.example` behind a custom domain or proxy so publish responses return the public URL.
