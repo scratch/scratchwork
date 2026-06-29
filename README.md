@@ -8,7 +8,7 @@ Specifically, Scratchwork is:
 
 1. A CLI for serving static websites locally with hot reload
 2. A Markdown renderer that supports React components
-3. A publishing server that can run locally or on Cloudflare
+3. A publishing server that can run locally, on AWS, or on Cloudflare
 
 ## Quick start
 
@@ -85,10 +85,11 @@ The server stores the bundle in local object storage by default, returns a rando
 Deploy the server with one command:
 
 ```sh
+bun run deploy:aws
 bun run deploy:cloudflare
 ```
 
-Cloudflare runtime dependencies live in `server/deploy-cloudflare`. See `server/README.md` for cloud setup details.
+Cloud runtime dependencies live in `server/deploy-aws` and `server/deploy-cloudflare`. See `server/README.md` for cloud setup details.
 
 ---
 

@@ -8,7 +8,8 @@
     "start": "cd core && bun run start",
     "dev": "cd core && bun run dev",
     "check": "bun run typecheck",
+    "deploy:aws": "cd deploy-aws && bun run deploy",
     "deploy:cloudflare": "cd deploy-cloudflare && bun run deploy",
-    "typecheck": "cd core && bun run typecheck && cd ../deploy-cloudflare && bun run typecheck"
+    "typecheck": "cd core && bun run typecheck && cd ../deploy-aws && bun run typecheck && cd ../deploy-cloudflare && bun run typecheck"
   }
 }

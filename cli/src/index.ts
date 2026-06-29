@@ -62,7 +62,7 @@ const publishCommand = Command.make(
   {
     path: pathArg("path"),
     server: Options.text("server").pipe(
-      Options.withDefault(process.env.SCRATCHWORK_SERVER_URL ?? "http://localhost:3001"),
+      Options.withDefault(""),
       Options.withDescription("Scratchwork server URL"),
     ),
     slug: Options.text("slug").pipe(

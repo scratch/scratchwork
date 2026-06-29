@@ -31,11 +31,17 @@ export function runPublish(
   config: PublishConfig,
 ): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
-    const server = normalizeServerUrl(config.server || process.env.SCRATCHWORK_SERVER_URL || DEFAULT_SERVER);
     const target = yield* resolveDevTarget(config.path ?? ".", "publish");
-    const metadata = yield* readMetadata(target.root, server);
-    const slug = nonEmpty(config.slug) ?? metadata?.slug;
-    const token = nonEmpty(config.token) ?? metadata?.token;
+    const metadata = yield* readMetadata(target.root);
+    const server = normalizeServerUrl(
+      nonEmpty(config.server) ??
+        nonEmpty(process.env.SCRATCHWORK_SERVER_URL) ??
+        metadata?.server ??
+        DEFAULT_SERVER,
+    );
+    const reusableMetadata = metadata?.server === server ? metadata : null;
+    const slug = nonEmpty(config.slug) ?? reusableMetadata?.slug;
+    const token = nonEmpty(config.token) ?? reusableMetadata?.token;
 
     if ((slug == null) !== (token == null)) {
       return yield* Effect.fail(
@@ -111,6 +117,7 @@ function collectFiles(
             : yield* collectFiles(root, relativePath);
         }
         if (info.type !== "File") return [] as ReadonlyArray<SitePath>;
+        if (relativePath === METADATA_FILE) return [] as ReadonlyArray<SitePath>;
         if (!isSafeSitePath(relativePath)) {
           return yield* Effect.fail(
             new CliError({
@@ -174,7 +181,6 @@ function postPublish(
 
 function readMetadata(
   root: string,
-  server: string,
 ): Effect.Effect<PublishMetadata | null, never, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -184,7 +190,7 @@ function readMetadata(
 
     const text = yield* fs.readFileString(path).pipe(Effect.catchAll(() => Effect.succeed("")));
     const metadata = decodeMetadata(parseJson(text));
-    return metadata?.server === server ? metadata : null;
+    return metadata;
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
@@ -255,8 +261,10 @@ function decodeMetadata(value: unknown): PublishMetadata | null {
   ) {
     return null;
   }
+  const server = tryNormalizeServerUrl(value.server);
+  if (server == null) return null;
   return {
-    server: value.server,
+    server,
     slug: value.slug,
     token: value.token,
     url: value.url,
@@ -274,6 +282,14 @@ function parseJson(text: string): unknown {
 
 function nonEmpty(value: string | undefined): string | undefined {
   return value == null || value === "" ? undefined : value;
+}
+
+function tryNormalizeServerUrl(value: string): string | null {
+  try {
+    return normalizeServerUrl(value);
+  } catch {
+    return null;
+  }
 }
 
 function formatBytes(bytes: number): string {

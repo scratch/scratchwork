@@ -162,10 +162,10 @@ async function withServer(files, fn, { argSubpath } = {}) {
 
 // Run the CLI once to completion (for non-server commands like example,
 // template, and --version). Returns { code, stdout, stderr }.
-async function runCli(args, cwd) {
+async function runCli(args, cwd, { env = {} } = {}) {
   const proc = Bun.spawn(["bun", SCRATCHWORK, ...args], {
     cwd,
-    env: { ...process.env, SCRATCHWORK_NO_OPEN: "1" },
+    env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -631,6 +631,61 @@ describe("scratchwork --help", () => {
       expect(stdout).not.toContain("tokens");
       expect(stdout).not.toContain("share");
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("scratchwork publish", () => {
+  test("reuses .scratchwork.json server and omits publish metadata from the bundle", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-publish-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const token = "tokentokentoken1";
+    let publishBody;
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        expect(new URL(request.url).pathname).toBe("/api/publish");
+        publishBody = await request.json();
+        return Response.json({
+          slug: "savedslug",
+          token,
+          url: `${serverUrl}/savedslug/`,
+        });
+      },
+    });
+
+    try {
+      writeFileSync(join(dir, "index.html"), staticPage("publish"));
+      writeFileSync(
+        join(dir, ".scratchwork.json"),
+        `${JSON.stringify(
+          {
+            server: serverUrl,
+            slug: "savedslug",
+            token,
+            url: `${serverUrl}/savedslug/`,
+            updatedAt: "2026-06-29T00:00:00.000Z",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const { code, stdout, stderr } = await runCli(["publish", "index.html"], dir, {
+        env: { SCRATCHWORK_SERVER_URL: "" },
+      });
+
+      expect(code).toBe(0);
+      expect(stderr).toBe("");
+      expect(stdout).toContain(`${serverUrl}/savedslug/`);
+      expect(publishBody.slug).toBe("savedslug");
+      expect(publishBody.token).toBe(token);
+      expect(publishBody.bundle.files.map((file) => file.path)).toEqual(["index.html"]);
+    } finally {
+      server.stop(true);
       rmSync(dir, { recursive: true, force: true });
     }
   });
