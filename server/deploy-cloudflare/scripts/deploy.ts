@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyEnv, definedEnv, loadDeployEnv } from "../../scripts/env";
+import { createRunner } from "../../scripts/proc";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
@@ -19,9 +20,10 @@ const route = env.SCRATCHWORK_CLOUDFLARE_ROUTE;
 const zoneName = env.SCRATCHWORK_CLOUDFLARE_ZONE_NAME;
 const publicUrl = env.SCRATCHWORK_PUBLIC_URL ?? (customDomain == null || customDomain === "" ? undefined : `https://${customDomain}`);
 const compatibilityDate = env.SCRATCHWORK_CLOUDFLARE_COMPATIBILITY_DATE ?? "2026-06-01";
+const { run } = createRunner(commandEnv);
 
 await mkdir(dist, { recursive: true });
-validateAuthEnv();
+validateDeploymentAuth();
 await buildWorker();
 await writeConfig();
 await ensureBucket();
@@ -32,6 +34,7 @@ await putSecret("SCRATCHWORK_SESSION_SECRET");
 console.log(`scratchwork Cloudflare Worker deployed: ${workerName}`);
 console.log("publish with: scratchwork publish --server https://<your-worker-domain>");
 
+/** Writes the generated Wrangler config consumed by the deploy command. */
 async function writeConfig(): Promise<void> {
   const vars: Record<string, string> = {};
   copyEnv(vars, env, "SCRATCHWORK_AUTH");
@@ -63,10 +66,12 @@ async function writeConfig(): Promise<void> {
   );
 }
 
+/** Bundles the Worker entrypoint for Cloudflare's no-bundle deploy path. */
 async function buildWorker(): Promise<void> {
   await run("bun", ["build", "src/worker.ts", "--target=browser", "--format=esm", `--outfile=${workerPath}`], { cwd: root });
 }
 
+/** Builds optional custom-domain and route entries for Wrangler. */
 function cloudflareRoutes(): ReadonlyArray<Record<string, string | boolean>> {
   const routes: Array<Record<string, string | boolean>> = [];
   if (customDomain != null && customDomain !== "") {
@@ -78,6 +83,7 @@ function cloudflareRoutes(): ReadonlyArray<Record<string, string | boolean>> {
   return routes;
 }
 
+/** Infers the Cloudflare zone name from a route pattern unless configured. */
 function zoneFor(pattern: string): Record<string, string> {
   const configured = zoneName?.trim();
   if (configured) return { zone_name: configured };
@@ -86,13 +92,18 @@ function zoneFor(pattern: string): Record<string, string> {
   return labels.length >= 2 ? { zone_name: labels.slice(-2).join(".") } : {};
 }
 
-function validateAuthEnv(): void {
-  if ((env.SCRATCHWORK_AUTH ?? "").toLowerCase() !== "google") return;
+/** Refuses accidental public deploys and validates required Google auth secrets. */
+function validateDeploymentAuth(): void {
+  if ((env.SCRATCHWORK_AUTH ?? "").toLowerCase() !== "google") {
+    if (env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH === "1") return;
+    throw new Error("Cloudflare deploys require SCRATCHWORK_AUTH=google or explicit SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1");
+  }
   for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
     if (!env[key]) throw new Error(`${key} is required when SCRATCHWORK_AUTH=google`);
   }
 }
 
+/** Uploads one configured secret to Wrangler without printing its value. */
 async function putSecret(key: string): Promise<void> {
   const value = env[key];
   if (value == null || value === "") return;
@@ -109,6 +120,7 @@ async function putSecret(key: string): Promise<void> {
   if (exitCode !== 0) throw new Error(`wrangler secret put ${key} failed with exit code ${exitCode}`);
 }
 
+/** Creates the configured R2 bucket unless bucket creation is explicitly skipped. */
 async function ensureBucket(): Promise<void> {
   if (env.SCRATCHWORK_CLOUDFLARE_SKIP_BUCKET_CREATE === "1") return;
   const result = await run("wrangler", ["r2", "bucket", "create", bucketName], {
@@ -121,42 +133,7 @@ async function ensureBucket(): Promise<void> {
   throw new Error(`Could not create R2 bucket ${bucketName}`);
 }
 
+/** Detects Wrangler's bucket-exists message across stdout and stderr. */
 function alreadyExists(value: string): boolean {
   return value.toLowerCase().includes("already exists");
-}
-
-interface RunOptions {
-  readonly allowFailure?: boolean;
-  readonly capture?: boolean;
-  readonly cwd?: string;
-}
-
-interface RunResult {
-  readonly ok: boolean;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-async function run(command: string, args: ReadonlyArray<string>, options: RunOptions = {}): Promise<RunResult> {
-  const proc = Bun.spawn([command, ...args], {
-    cwd: options.cwd,
-    env: commandEnv,
-    stdout: options.capture ? "pipe" : "inherit",
-    stderr: options.capture || options.allowFailure ? "pipe" : "inherit",
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    read(proc.stdout),
-    read(proc.stderr),
-    proc.exited,
-  ]);
-  if (exitCode !== 0 && !options.allowFailure) {
-    if (stderr) process.stderr.write(stderr);
-    throw new Error(`${command} ${args.join(" ")} failed with exit code ${exitCode}`);
-  }
-  return { ok: exitCode === 0, stdout, stderr };
-}
-
-async function read(stream: ReadableStream<Uint8Array> | null | undefined): Promise<string> {
-  if (stream == null) return "";
-  return new Response(stream).text();
 }

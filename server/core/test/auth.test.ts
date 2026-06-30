@@ -14,7 +14,7 @@ const googleConfig: Extract<AuthConfig, { readonly _tag: "Google" }> = {
   _tag: "Google",
   clientId: "google-client-id",
   clientSecret: "google-client-secret",
-  sessionSecret: "session-secret-session-secret",
+  sessionSecret: "session-secret-session-secret-32-bytes",
   allowedEmails: new Set(),
   allowedDomains: new Set(),
   sessionTtlSeconds: 60,
@@ -43,6 +43,15 @@ describe("Auth", () => {
 
     expect(currentUser).toBeNull();
   });
+
+  test("does not accept cookie sessions for API publish auth", async () => {
+    const token = await Effect.runPromise(createSessionToken(user, googleConfig));
+    const auth = makeAuth(googleConfig);
+
+    await expect(
+      Effect.runPromise(auth.requireApiUser(request({ cookie: `scratchwork_session=${encodeURIComponent(token)}` }))),
+    ).rejects.toThrow("Authentication required");
+  });
 });
 
 describe("readServerConfig", () => {
@@ -52,7 +61,7 @@ describe("readServerConfig", () => {
         SCRATCHWORK_AUTH: "google",
         SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
         SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
-        SCRATCHWORK_SESSION_SECRET: "session-secret",
+        SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
         SCRATCHWORK_AUTH_ALLOWED_DOMAINS: "example.com, yc.com",
       }),
     );

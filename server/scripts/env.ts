@@ -19,6 +19,7 @@ export interface LoadedDeployEnv {
   readonly files: ReadonlyArray<string>;
 }
 
+/** Loads deploy environment files and overlays shell values with final precedence. */
 export async function loadDeployEnv(options: LoadDeployEnvOptions): Promise<LoadedDeployEnv> {
   const processEnv = options.processEnv ?? process.env;
   const packageRoot = resolve(options.packageRoot);
@@ -55,11 +56,13 @@ export async function loadDeployEnv(options: LoadDeployEnvOptions): Promise<Load
   };
 }
 
+/** Copies one defined environment value into a concrete string map. */
 export function copyEnv(target: Record<string, string>, env: DeployEnv, key: string): void {
   const value = env[key];
   if (value != null && value !== "") target[key] = value;
 }
 
+/** Drops undefined values so the result can be passed to spawned commands. */
 export function definedEnv(env: DeployEnv): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
@@ -68,6 +71,7 @@ export function definedEnv(env: DeployEnv): Record<string, string> {
   return result;
 }
 
+/** Extracts the optional `--env` argument from deploy script argv. */
 function envFileArg(argv: ReadonlyArray<string>): string | undefined {
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -77,6 +81,7 @@ function envFileArg(argv: ReadonlyArray<string>): string | undefined {
   return undefined;
 }
 
+/** Reads and parses one dotenv file, returning null when it does not exist. */
 async function readEnvFile(path: string): Promise<Record<string, string> | null> {
   let text: string;
   try {
@@ -88,6 +93,7 @@ async function readEnvFile(path: string): Promise<Record<string, string> | null>
   return parseDotenv(text);
 }
 
+/** Resolves an explicit env file against allowed roots and requires it to exist. */
 async function readExplicitEnvFile(path: string, roots: ReadonlyArray<string>): Promise<LoadedEnvFile> {
   const candidates = isAbsolute(path) ? [path] : roots.map((root) => resolve(root, path));
   for (const candidate of unique(candidates)) {
@@ -97,10 +103,12 @@ async function readExplicitEnvFile(path: string, roots: ReadonlyArray<string>): 
   throw new Error(`Env file not found: ${path}`);
 }
 
+/** Preserves first-seen order while removing duplicate candidate paths. */
 function unique(values: ReadonlyArray<string>): ReadonlyArray<string> {
   return [...new Set(values)];
 }
 
+/** Parses the small dotenv subset supported by deploy scripts. */
 function parseDotenv(text: string): Record<string, string> {
   const values: Record<string, string> = {};
   for (const rawLine of text.split(/\r?\n/)) {
@@ -116,6 +124,7 @@ function parseDotenv(text: string): Record<string, string> {
   return values;
 }
 
+/** Unquotes and unescapes one dotenv value. */
 function parseValue(value: string): string {
   if (value.startsWith('"') && value.endsWith('"')) {
     return value.slice(1, -1).replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\");

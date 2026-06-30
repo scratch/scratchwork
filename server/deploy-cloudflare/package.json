@@ -4,8 +4,14 @@
   "type": "module",
   "private": true,
   "description": "Cloudflare Worker + R2 deployment package for the Scratchwork server.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./d1-db": "./src/d1-db.ts",
+    "./r2-storage": "./src/r2-storage.ts",
+    "./worker": "./src/worker.ts"
+  },
   "scripts": {
-    "check": "bun run typecheck",
+    "check": "bun run typecheck && bun test",
     "deploy": "bun scripts/deploy.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

@@ -4,13 +4,21 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { base64UrlToBytes, bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import { errorMessage, isRecord, parseJson } from "../../../shared/src/util/json";
 import { ServerConfig, type AuthConfig } from "./config";
+import { verifyGoogleIdToken, type GoogleIdTokenClaims } from "./google-jwt";
+import { timingSafeEqual } from "./tokens";
 
 const COOKIE_NAME = "scratchwork_session";
+const SECURE_COOKIE_NAME = "__Host-scratchwork_session";
+const OAUTH_STATE_COOKIE_NAME = "scratchwork_oauth_state";
+const SECURE_OAUTH_STATE_COOKIE_NAME = "__Host-scratchwork_oauth_state";
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SESSION_VERSION = 1;
 const STATE_TTL_SECONDS = 10 * 60;
+const REDIRECT_MAX_LENGTH = 2048;
 
 export interface AuthUser {
   readonly id: string;
@@ -31,6 +39,7 @@ interface OAuthState {
   readonly version: typeof SESSION_VERSION;
   readonly returnTo: string;
   readonly cliRedirect?: string;
+  readonly nonce: string;
   readonly expiresAt: number;
 }
 
@@ -40,20 +49,10 @@ interface GoogleTokenResponse {
   readonly error_description?: string;
 }
 
-interface GoogleIdTokenClaims {
-  readonly iss?: string;
-  readonly aud?: string;
-  readonly sub?: string;
-  readonly email?: string;
-  readonly email_verified?: boolean | string;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly exp?: number;
-}
-
 export class AuthError extends Data.TaggedError("AuthError")<{
   readonly status: number;
   readonly message: string;
+  readonly cause?: unknown;
 }> {}
 
 export interface AuthShape {
@@ -64,12 +63,16 @@ export interface AuthShape {
   readonly requireUser: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<AuthUser | null, AuthError>;
+  readonly requireApiUser: (
+    request: HttpServerRequest.HttpServerRequest,
+  ) => Effect.Effect<AuthUser | null, AuthError>;
   readonly login: (
     request: HttpServerRequest.HttpServerRequest,
     url: URL,
     baseUrl: string,
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError>;
   readonly callback: (
+    request: HttpServerRequest.HttpServerRequest,
     url: URL,
     baseUrl: string,
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError>;
@@ -84,12 +87,14 @@ export const AuthLive: Layer.Layer<Auth, never, ServerConfig> = Layer.effect(
   Effect.map(ServerConfig, (config) => makeAuth(config.auth)),
 );
 
+/** Creates the auth service implementation for disabled or Google auth modes. */
 export function makeAuth(config: AuthConfig): AuthShape {
   if (config._tag === "Disabled") {
     return Auth.of({
       enabled: false,
       currentUser: () => Effect.succeed(null),
       requireUser: () => Effect.succeed(null),
+      requireApiUser: () => Effect.succeed(null),
       login: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
       callback: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
       logout: () => HttpServerResponse.redirect("/", { status: 302 }),
@@ -116,15 +121,27 @@ export function makeAuth(config: AuthConfig): AuthShape {
         return user;
       }),
 
+    requireApiUser: (request) =>
+      Effect.gen(function* () {
+        const token = bearerToken(request);
+        const user = token == null ? null : yield* verifySessionToken(token, config);
+        if (user == null) {
+          return yield* Effect.fail(new AuthError({ status: 401, message: "Authentication required" }));
+        }
+        return user;
+      }),
+
     login: (_request, url, baseUrl) =>
       Effect.gen(function* () {
         const returnTo = safeReturnTo(url.searchParams.get("returnTo")) ?? "/";
         const cliRedirect = safeCliRedirect(url.searchParams.get("cli_redirect"));
+        const nonce = randomNonce();
         const state = yield* signValue(
           {
             version: SESSION_VERSION,
             returnTo,
             cliRedirect,
+            nonce,
             expiresAt: epochSeconds() + STATE_TTL_SECONDS,
           } satisfies OAuthState,
           config.sessionSecret,
@@ -136,11 +153,17 @@ export function makeAuth(config: AuthConfig): AuthShape {
         authUrl.searchParams.set("response_type", "code");
         authUrl.searchParams.set("scope", "openid email profile");
         authUrl.searchParams.set("state", state);
+        authUrl.searchParams.set("nonce", nonce);
         authUrl.searchParams.set("prompt", "select_account");
-        return HttpServerResponse.redirect(authUrl, { status: 302 });
+        return HttpServerResponse.redirect(authUrl, {
+          status: 302,
+          headers: {
+            "set-cookie": oauthStateCookie(state, baseUrl),
+          },
+        });
       }),
 
-    callback: (url, baseUrl) =>
+    callback: (request, url, baseUrl) =>
       Effect.gen(function* () {
         const error = url.searchParams.get("error");
         if (error != null) {
@@ -154,13 +177,16 @@ export function makeAuth(config: AuthConfig): AuthShape {
         if (!code || !stateToken) {
           return yield* Effect.fail(new AuthError({ status: 400, message: "Missing OAuth callback parameters" }));
         }
+        if (oauthStateToken(request, baseUrl) !== stateToken) {
+          return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid OAuth state cookie" }));
+        }
 
         const state = yield* verifySignedValue<OAuthState>(stateToken, config.sessionSecret);
         if (!isOAuthState(state) || state.expiresAt < epochSeconds()) {
           return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid or expired OAuth state" }));
         }
 
-        const user = yield* exchangeGoogleCode(code, callbackUrl(baseUrl), config);
+        const user = yield* exchangeGoogleCode(code, callbackUrl(baseUrl), state.nonce, config);
         const token = yield* createSessionToken(user, config);
 
         if (state.cliRedirect != null) {
@@ -195,6 +221,7 @@ export function makeAuth(config: AuthConfig): AuthShape {
   });
 }
 
+/** Signs a portable session token for browser cookies and CLI bearer auth. */
 export function createSessionToken(
   user: AuthUser,
   config: Extract<AuthConfig, { readonly _tag: "Google" }>,
@@ -212,6 +239,7 @@ export function createSessionToken(
   );
 }
 
+/** Reads bearer or cookie credentials and verifies the contained session token. */
 function verifySessionTokenFromRequest(
   request: HttpServerRequest.HttpServerRequest,
   config: Extract<AuthConfig, { readonly _tag: "Google" }>,
@@ -220,6 +248,7 @@ function verifySessionTokenFromRequest(
   return token == null ? Effect.succeed(null) : verifySessionToken(token, config);
 }
 
+/** Verifies one signed session token and applies current allow-list rules. */
 function verifySessionToken(
   token: string,
   config: Extract<AuthConfig, { readonly _tag: "Google" }>,
@@ -232,13 +261,16 @@ function verifySessionToken(
   });
 }
 
+/** Exchanges a Google OAuth code and verifies the returned ID token. */
 function exchangeGoogleCode(
   code: string,
   redirectUri: string,
+  nonce: string,
   config: Extract<AuthConfig, { readonly _tag: "Google" }>,
 ): Effect.Effect<AuthUser, AuthError> {
-  return Effect.tryPromise({
-    try: async () => {
+  return Effect.gen(function* () {
+    const idToken = yield* Effect.tryPromise({
+      try: async () => {
       const body = new URLSearchParams({
         client_id: config.clientId,
         client_secret: config.clientSecret,
@@ -246,43 +278,45 @@ function exchangeGoogleCode(
         grant_type: "authorization_code",
         redirect_uri: redirectUri,
       });
-      const response = await fetch(GOOGLE_TOKEN_URL, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      const json = (await response.json().catch(() => null)) as GoogleTokenResponse | null;
-      if (!response.ok || json == null || json.id_token == null) {
-        throw new AuthError({
-          status: 401,
-          message: json?.error_description ?? json?.error ?? "Google token exchange failed",
+        const response = await fetch(GOOGLE_TOKEN_URL, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body,
         });
-      }
-      const claims = decodeGoogleIdToken(json.id_token);
-      const user = userFromClaims(claims, config);
-      if (user == null) {
-        throw new AuthError({ status: 403, message: "Google account is not allowed" });
-      }
-      return user;
-    },
-    catch: (cause) =>
-      cause instanceof AuthError
-        ? cause
-        : new AuthError({ status: 500, message: errorMessage(cause) }),
+        const json = (await response.json().catch(() => null)) as GoogleTokenResponse | null;
+        if (!response.ok || json == null || json.id_token == null) {
+          throw new AuthError({
+            status: 401,
+            message: json?.error_description ?? json?.error ?? "Google token exchange failed",
+          });
+        }
+        return json.id_token;
+      },
+      catch: (cause) =>
+        cause instanceof AuthError
+          ? cause
+          : new AuthError({ status: 500, message: errorMessage(cause) }),
+    });
+
+    const claims = yield* verifyGoogleIdToken(idToken, {
+      clientId: config.clientId,
+      expectedNonce: nonce,
+    }).pipe(
+      Effect.mapError((cause) => new AuthError({ status: 401, message: cause.message, cause })),
+    );
+    const user = userFromClaims(claims, config);
+    if (user == null) {
+      return yield* Effect.fail(new AuthError({ status: 403, message: "Google account is not allowed" }));
+    }
+    return user;
   });
 }
 
+/** Converts verified Google claims into the auth user shape. */
 function userFromClaims(
   claims: GoogleIdTokenClaims,
   config: Extract<AuthConfig, { readonly _tag: "Google" }>,
 ): AuthUser | null {
-  if (claims.aud !== config.clientId) return null;
-  if (claims.iss !== "https://accounts.google.com" && claims.iss !== "accounts.google.com") return null;
-  if (typeof claims.exp !== "number" || claims.exp < epochSeconds()) return null;
-  if (typeof claims.sub !== "string" || claims.sub === "") return null;
-  if (typeof claims.email !== "string" || claims.email === "") return null;
-  if (claims.email_verified !== true && claims.email_verified !== "true") return null;
-
   const user: AuthUser = {
     id: claims.sub,
     email: claims.email.toLowerCase(),
@@ -292,6 +326,7 @@ function userFromClaims(
   return allowedUser(user, config) ? user : null;
 }
 
+/** Checks whether a verified Google user passes email/domain allow lists. */
 function allowedUser(user: AuthUser, config: Extract<AuthConfig, { readonly _tag: "Google" }>): boolean {
   if (config.allowedEmails.size === 0 && config.allowedDomains.size === 0) return true;
   if (config.allowedEmails.has(user.email.toLowerCase())) return true;
@@ -299,16 +334,11 @@ function allowedUser(user: AuthUser, config: Extract<AuthConfig, { readonly _tag
   return domain != null && config.allowedDomains.has(domain);
 }
 
-function decodeGoogleIdToken(token: string): GoogleIdTokenClaims {
-  const [, payload] = token.split(".");
-  if (payload == null) return {};
-  return parseJson(new TextDecoder().decode(base64UrlToBytes(payload))) as GoogleIdTokenClaims;
-}
-
+/** Signs arbitrary JSON as a compact HMAC token. */
 function signValue(value: unknown, secret: string): Effect.Effect<string, AuthError> {
   return Effect.tryPromise({
     try: async () => {
-      const payload = base64Url(new TextEncoder().encode(JSON.stringify(value)));
+      const payload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(value)));
       const signature = await hmac(payload, secret);
       return `${payload}.${signature}`;
     },
@@ -316,6 +346,7 @@ function signValue(value: unknown, secret: string): Effect.Effect<string, AuthEr
   });
 }
 
+/** Verifies and decodes a compact HMAC JSON token. */
 function verifySignedValue<A>(token: string, secret: string): Effect.Effect<A, AuthError> {
   return Effect.tryPromise({
     try: async () => {
@@ -323,12 +354,15 @@ function verifySignedValue<A>(token: string, secret: string): Effect.Effect<A, A
       if (!payload || !signature) throw new Error("invalid token");
       const expected = await hmac(payload, secret);
       if (!timingSafeEqual(signature, expected)) throw new Error("invalid token signature");
-      return parseJson(new TextDecoder().decode(base64UrlToBytes(payload))) as A;
+      const bytes = base64UrlToBytes(payload);
+      if (bytes == null) throw new Error("invalid token payload");
+      return parseJson(new TextDecoder().decode(bytes)) as A;
     },
     catch: () => new AuthError({ status: 401, message: "Invalid auth token" }),
   });
 }
 
+/** Computes a base64url HMAC signature for signed auth values. */
 async function hmac(value: string, secret: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -338,9 +372,10 @@ async function hmac(value: string, secret: string): Promise<string> {
     ["sign"],
   );
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  return base64Url(new Uint8Array(signature));
+  return bytesToBase64Url(new Uint8Array(signature));
 }
 
+/** Extracts a bearer token from the Authorization header. */
 function bearerToken(request: HttpServerRequest.HttpServerRequest): string | undefined {
   const header = request.headers.authorization ?? request.headers.Authorization;
   if (header == null) return undefined;
@@ -348,30 +383,62 @@ function bearerToken(request: HttpServerRequest.HttpServerRequest): string | und
   return match?.[1];
 }
 
+/** Extracts the session token from either secure or local-dev cookie names. */
 function cookieToken(request: HttpServerRequest.HttpServerRequest): string | undefined {
+  return cookieValue(request, [COOKIE_NAME, SECURE_COOKIE_NAME]);
+}
+
+/** Extracts the browser-bound OAuth state cookie for the current origin mode. */
+function oauthStateToken(request: HttpServerRequest.HttpServerRequest, baseUrl: string): string | undefined {
+  return cookieValue(request, [oauthStateCookieName(baseUrl)]);
+}
+
+/** Finds and decodes the first matching cookie value from the request. */
+function cookieValue(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): string | undefined {
   const header = request.headers.cookie;
   if (header == null) return undefined;
   for (const part of header.split(";")) {
     const [name, ...valueParts] = part.trim().split("=");
-    if (name === COOKIE_NAME) return decodeURIComponent(valueParts.join("="));
+    if (names.includes(name)) {
+      try {
+        return decodeURIComponent(valueParts.join("="));
+      } catch {
+        return undefined;
+      }
+    }
   }
   return undefined;
 }
 
+/** Builds the Set-Cookie header for a session token. */
 function sessionCookie(token: string, baseUrl: string, ttlSeconds: number): string {
+  const secure = secureCookie(baseUrl);
   return [
-    `${COOKIE_NAME}=${encodeURIComponent(token)}`,
+    `${cookieName(baseUrl)}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${ttlSeconds}`,
+    secure,
+  ].filter(Boolean).join("; ");
+}
+
+/** Builds the browser-bound OAuth state cookie. */
+function oauthStateCookie(state: string, baseUrl: string): string {
+  return [
+    `${oauthStateCookieName(baseUrl)}=${encodeURIComponent(state)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${STATE_TTL_SECONDS}`,
     secureCookie(baseUrl),
   ].filter(Boolean).join("; ");
 }
 
+/** Builds the Set-Cookie header that clears the session token. */
 function clearSessionCookie(baseUrl: string): string {
   return [
-    `${COOKIE_NAME}=`,
+    `${cookieName(baseUrl)}=`,
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
@@ -380,41 +447,68 @@ function clearSessionCookie(baseUrl: string): string {
   ].filter(Boolean).join("; ");
 }
 
+/** Returns the Secure cookie attribute when the public origin is HTTPS. */
 function secureCookie(baseUrl: string): string {
   return baseUrl.startsWith("https://") ? "Secure" : "";
 }
 
-function safeReturnTo(value: string | null): string | null {
-  if (value == null || value === "") return null;
-  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\0")) return null;
-  return value;
+/** Chooses the session cookie name for HTTPS or local HTTP. */
+function cookieName(baseUrl: string): string {
+  return baseUrl.startsWith("https://") ? SECURE_COOKIE_NAME : COOKIE_NAME;
 }
 
+/** Chooses the OAuth state cookie name for HTTPS or local HTTP. */
+function oauthStateCookieName(baseUrl: string): string {
+  return baseUrl.startsWith("https://") ? SECURE_OAUTH_STATE_COOKIE_NAME : OAUTH_STATE_COOKIE_NAME;
+}
+
+/** Sanitizes a post-login redirect path to stay on the server origin. */
+function safeReturnTo(value: string | null): string | null {
+  if (value == null || value === "") return null;
+  if (value.length > REDIRECT_MAX_LENGTH) return null;
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  if (/[\\\0\r\n\x00-\x1f\x7f]/.test(value)) return null;
+  try {
+    const decoded = decodeURIComponent(value);
+    if (!decoded.startsWith("/") || decoded.startsWith("//") || /[\\\0\r\n\x00-\x1f\x7f]/.test(decoded)) return null;
+    const url = new URL(decoded, "https://scratchwork.invalid");
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Accepts only loopback HTTP callbacks generated by the CLI login flow. */
 function safeCliRedirect(value: string | null): string | undefined {
   if (value == null || value === "") return undefined;
   try {
     const url = new URL(value);
-    const local = url.hostname === "127.0.0.1" || url.hostname === "localhost";
-    return local && (url.protocol === "http:" || url.protocol === "https:") ? url.toString() : undefined;
+    const local = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+    const safe = local && url.protocol === "http:" && url.username === "" && url.password === "" && url.port !== "";
+    return safe ? url.toString() : undefined;
   } catch {
     return undefined;
   }
 }
 
+/** Builds the configured Google OAuth callback URL. */
 function callbackUrl(baseUrl: string): string {
   return `${baseUrl}/auth/callback/google`;
 }
 
+/** Checks the decoded OAuth state token shape. */
 function isOAuthState(value: unknown): value is OAuthState {
   return (
     isRecord(value) &&
     value.version === SESSION_VERSION &&
     typeof value.returnTo === "string" &&
+    typeof value.nonce === "string" &&
     typeof value.expiresAt === "number" &&
     (value.cliRedirect == null || typeof value.cliRedirect === "string")
   );
 }
 
+/** Checks the decoded session token payload shape. */
 function isSessionPayload(value: unknown): value is SessionPayload {
   return (
     isRecord(value) &&
@@ -428,69 +522,14 @@ function isSessionPayload(value: unknown): value is SessionPayload {
   );
 }
 
-function base64Url(bytes: Uint8Array): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  let output = "";
-  for (let index = 0; index < bytes.length; index += 3) {
-    const a = bytes[index];
-    const b = bytes[index + 1] ?? 0;
-    const c = bytes[index + 2] ?? 0;
-    const triplet = (a << 16) | (b << 8) | c;
-    output += alphabet[(triplet >> 18) & 63];
-    output += alphabet[(triplet >> 12) & 63];
-    if (index + 1 < bytes.length) output += alphabet[(triplet >> 6) & 63];
-    if (index + 2 < bytes.length) output += alphabet[triplet & 63];
-  }
-  return output;
-}
-
-function base64UrlToBytes(value: string): Uint8Array {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const padding = padded.endsWith("==") ? 2 : padded.endsWith("=") ? 1 : 0;
-  const bytes = new Uint8Array(Math.floor((padded.length * 3) / 4) - padding);
-  let byteIndex = 0;
-  for (let index = 0; index < padded.length; index += 4) {
-    const a = alphabet.indexOf(padded[index]);
-    const b = alphabet.indexOf(padded[index + 1]);
-    const c = padded[index + 2] === "=" ? 0 : alphabet.indexOf(padded[index + 2]);
-    const d = padded[index + 3] === "=" ? 0 : alphabet.indexOf(padded[index + 3]);
-    const triplet = (a << 18) | (b << 12) | (c << 6) | d;
-    if (byteIndex < bytes.length) bytes[byteIndex++] = (triplet >> 16) & 255;
-    if (byteIndex < bytes.length) bytes[byteIndex++] = (triplet >> 8) & 255;
-    if (byteIndex < bytes.length) bytes[byteIndex++] = triplet & 255;
-  }
-  return bytes;
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let index = 0; index < a.length; index++) {
-    diff |= a.charCodeAt(index) ^ b.charCodeAt(index);
-  }
-  return diff === 0;
-}
-
+/** Returns the current Unix timestamp in seconds. */
 function epochSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  const message = (error as { readonly message?: unknown })?.message;
-  return typeof message === "string" ? message : String(error);
+/** Generates a base64url nonce for OAuth state and ID-token binding. */
+function randomNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
 }

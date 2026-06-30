@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { definedEnv, loadDeployEnv } from "../../scripts/env";
+import { createRunner, type RunOptions, type RunResult } from "../../scripts/proc";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
@@ -19,8 +20,10 @@ const storageRegion = env.SCRATCHWORK_S3_REGION ?? region;
 const functionName = env.SCRATCHWORK_AWS_FUNCTION_NAME ?? "scratchwork-server";
 const roleName = env.SCRATCHWORK_AWS_ROLE_NAME ?? `${functionName}-lambda-role`;
 const commandEnv = definedEnv(env);
+const { run } = createRunner(commandEnv);
 
 await mkdir(dist, { recursive: true });
+validateDeploymentAuth();
 await run("bun", ["run", "build"], { cwd: root });
 await rm(zipPath, { force: true });
 await run("zip", ["-j", zipPath, handlerPath], { cwd: root });
@@ -37,6 +40,7 @@ const url = await ensureFunctionUrl(functionName);
 console.log(`scratchwork AWS server deployed: ${url}`);
 console.log(`publish with: scratchwork publish --server ${url}`);
 
+/** Creates the S3 bucket when it does not already exist. */
 async function ensureBucket(bucket: string, bucketRegion: string): Promise<void> {
   const exists = await aws(["s3api", "head-bucket", "--bucket", bucket], { allowFailure: true });
   if (exists.ok) return;
@@ -48,6 +52,19 @@ async function ensureBucket(bucket: string, bucketRegion: string): Promise<void>
   await aws(args);
 }
 
+/** Refuses accidental public deploys and validates required Google auth secrets. */
+function validateDeploymentAuth(): void {
+  if ((env.SCRATCHWORK_AUTH ?? "").toLowerCase() === "google") {
+    for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
+      if (!env[key]) throw new Error(`${key} is required when SCRATCHWORK_AUTH=google`);
+    }
+    return;
+  }
+  if (env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH === "1") return;
+  throw new Error("AWS deploys require SCRATCHWORK_AUTH=google or explicit SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1");
+}
+
+/** Creates or updates the Lambda execution role and bucket access policy. */
 async function ensureRole(role: string, bucket: string): Promise<string> {
   const roleExists = await aws(["iam", "get-role", "--role-name", role], { allowFailure: true });
   if (!roleExists.ok) {
@@ -110,6 +127,7 @@ async function ensureRole(role: string, bucket: string): Promise<string> {
   return awsText(["iam", "get-role", "--role-name", role, "--query", "Role.Arn", "--output", "text"]);
 }
 
+/** Writes the Lambda environment JSON passed to AWS CLI. */
 async function writeEnvironment(bucket: string, bucketRegion: string): Promise<void> {
   const variables: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
@@ -121,6 +139,7 @@ async function writeEnvironment(bucket: string, bucketRegion: string): Promise<v
   await writeFile(environmentPath, JSON.stringify({ Variables: variables }));
 }
 
+/** Creates the Lambda or updates its code and configuration in place. */
 async function upsertFunction(name: string, roleArn: string): Promise<void> {
   const exists = await aws(["lambda", "get-function", "--function-name", name], { allowFailure: true });
   if (exists.ok) {
@@ -174,6 +193,7 @@ async function upsertFunction(name: string, roleArn: string): Promise<void> {
   await aws(["lambda", "wait", "function-active", "--function-name", name]);
 }
 
+/** Creates or returns the public Lambda Function URL. */
 async function ensureFunctionUrl(name: string): Promise<string> {
   const existing = await awsText(
     ["lambda", "get-function-url-config", "--function-name", name, "--query", "FunctionUrl", "--output", "text"],
@@ -189,6 +209,7 @@ async function ensureFunctionUrl(name: string): Promise<string> {
   return awsText(["lambda", "get-function-url-config", "--function-name", name, "--query", "FunctionUrl", "--output", "text"]);
 }
 
+/** Ensures public invoke permissions exist for the Function URL. */
 async function ensureFunctionUrlPermission(name: string): Promise<void> {
   await addPermission(
     name,
@@ -211,6 +232,7 @@ async function ensureFunctionUrlPermission(name: string): Promise<void> {
   );
 }
 
+/** Adds one Lambda permission statement, ignoring already-existing statements. */
 async function addPermission(
   name: string,
   statementId: string,
@@ -235,51 +257,18 @@ async function addPermission(
   throw new Error(`Could not add Lambda Function URL permission ${statementId}`);
 }
 
+/** Runs an AWS CLI command and returns trimmed stdout on success. */
 async function awsText(args: ReadonlyArray<string>, options: RunOptions = {}): Promise<string> {
   const result = await aws(args, { ...options, capture: true });
   return result.ok ? result.stdout.trim() : "";
 }
 
+/** Runs an AWS CLI command in the configured region. */
 async function aws(args: ReadonlyArray<string>, options: RunOptions = {}): Promise<RunResult> {
   return run("aws", ["--region", region, ...args], options);
 }
 
-interface RunOptions {
-  readonly allowFailure?: boolean;
-  readonly capture?: boolean;
-  readonly cwd?: string;
-}
-
-interface RunResult {
-  readonly ok: boolean;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-async function run(command: string, args: ReadonlyArray<string>, options: RunOptions = {}): Promise<RunResult> {
-  const proc = Bun.spawn([command, ...args], {
-    cwd: options.cwd,
-    env: commandEnv,
-    stdout: options.capture ? "pipe" : "inherit",
-    stderr: options.capture || options.allowFailure ? "pipe" : "inherit",
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    read(proc.stdout),
-    read(proc.stderr),
-    proc.exited,
-  ]);
-  if (exitCode !== 0 && !options.allowFailure) {
-    if (stderr) process.stderr.write(stderr);
-    throw new Error(`${command} ${args.join(" ")} failed with exit code ${exitCode}`);
-  }
-  return { ok: exitCode === 0, stdout, stderr };
-}
-
-async function read(stream: ReadableStream<Uint8Array> | null | undefined): Promise<string> {
-  if (stream == null) return "";
-  return new Response(stream).text();
-}
-
+/** Waits for IAM role propagation before creating the Lambda. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
