@@ -48,6 +48,7 @@ export interface SiteServeConfig<E = never, R = never> {
   readonly rendererFallback: Effect.Effect<string | null, E, R>;
   readonly defaultFaviconSvg?: string;
   readonly cacheControl?: (path: string) => string;
+  readonly headers?: (path: string, contentType: string) => Record<string, string>;
   readonly pathPrefix?: string;
   readonly onServeEvent?: (
     event: SiteServeEvent,
@@ -124,9 +125,7 @@ function respond<E, R>(
         }
         return yield* files.fileResponse(route.path, {
           contentType: contentType(route.path),
-          headers: {
-            "Cache-Control": cacheControlFor(route.path, config),
-          },
+          headers: responseHeaders(route.path, contentType(route.path), config),
         });
       }
 
@@ -158,9 +157,7 @@ function respond<E, R>(
       case "DefaultFavicon":
         return HttpServerResponse.text(config.defaultFaviconSvg ?? "", {
           contentType: "image/svg+xml",
-          headers: {
-            "Cache-Control": cacheControlFor("favicon.svg", config),
-          },
+          headers: responseHeaders("favicon.svg", "image/svg+xml", config),
         });
 
       case "Forbidden":
@@ -216,11 +213,20 @@ function htmlTextResponse<E, R>(
     const transformed = yield* applyHtmlTransforms(html, { path, kind }, config.htmlTransforms ?? []);
     return HttpServerResponse.text(transformed, {
       contentType: contentType(".html"),
-      headers: {
-        "Cache-Control": cacheControlFor(path, config),
-      },
+      headers: responseHeaders(path, contentType(".html"), config),
     });
   });
+}
+
+function responseHeaders<E, R>(
+  path: string,
+  responseContentType: string,
+  config: SiteServeConfig<E, R>,
+): Record<string, string> {
+  return {
+    ...(config.headers ? config.headers(path, responseContentType) : {}),
+    "Cache-Control": cacheControlFor(path, config),
+  };
 }
 
 function cacheControlFor<E, R>(

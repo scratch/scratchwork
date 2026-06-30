@@ -34,6 +34,7 @@ export class ServerConfigError extends Data.TaggedError("ServerConfigError")<{
   readonly message: string;
 }> {}
 
+/** Builds a ServerConfig layer from an explicit environment map. */
 export function makeServerConfigLayer(
   env: EnvVars,
 ): Layer.Layer<ServerConfig, ServerConfigError> {
@@ -43,6 +44,7 @@ export function makeServerConfigLayer(
 export const ServerConfigLive: Layer.Layer<ServerConfig, ServerConfigError> =
   makeServerConfigLayer(readProcessEnv());
 
+/** Parses all server runtime configuration from environment variables. */
 export function readServerConfig(
   env: EnvVars,
 ): Effect.Effect<ServerConfigShape, ServerConfigError> {
@@ -58,12 +60,31 @@ export function readServerConfig(
 
     return {
       port,
-      publicUrl: trimTrailingSlash(env.SCRATCHWORK_PUBLIC_URL),
+      publicUrl: yield* readPublicUrl(env.SCRATCHWORK_PUBLIC_URL),
       auth: yield* readAuthConfig(env),
     };
   });
 }
 
+/** Validates and normalizes the configured public origin. */
+function readPublicUrl(value: string | undefined): Effect.Effect<string | undefined, ServerConfigError> {
+  if (value == null || value === "") return Effect.succeed(undefined);
+  try {
+    const url = new URL(value);
+    if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
+      return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_PUBLIC_URL must be an origin, such as https://example.com" }));
+    }
+    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+      return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_PUBLIC_URL must use https, except loopback http for local development" }));
+    }
+    return Effect.succeed(url.origin);
+  } catch {
+    return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_PUBLIC_URL must be a valid URL" }));
+  }
+}
+
+/** Parses disabled or Google auth settings from environment variables. */
 function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigError> {
   const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
   const clientId = env.SCRATCHWORK_GOOGLE_CLIENT_ID ?? env.GOOGLE_CLIENT_ID;
@@ -82,6 +103,13 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
       }),
     );
   }
+  if (new TextEncoder().encode(sessionSecret).byteLength < 32) {
+    return Effect.fail(
+      new ServerConfigError({
+        message: "SCRATCHWORK_SESSION_SECRET must be at least 32 bytes",
+      }),
+    );
+  }
 
   return Effect.succeed({
     _tag: "Google",
@@ -94,6 +122,7 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
   });
 }
 
+/** Reads process.env when available without assuming a Node-like global. */
 function readProcessEnv(): EnvVars {
   const processLike = globalThis as typeof globalThis & {
     readonly process?: { readonly env?: EnvVars };
@@ -101,17 +130,20 @@ function readProcessEnv(): EnvVars {
   return processLike.process?.env ?? {};
 }
 
+/** Parses a valid TCP port number. */
 function parsePort(value: string): number | null {
   const port = Number(value);
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
 }
 
+/** Parses an optional positive integer environment value. */
 function parsePositiveInteger(value: string | undefined): number | null {
   if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
+/** Converts a comma-separated allow-list to a lowercase set. */
 function csvSet(value: string | undefined): ReadonlySet<string> {
   if (value == null || value === "") return new Set();
   return new Set(
@@ -120,9 +152,4 @@ function csvSet(value: string | undefined): ReadonlySet<string> {
       .map((item) => item.trim().toLowerCase())
       .filter((item) => item !== ""),
   );
-}
-
-function trimTrailingSlash(value: string | undefined): string | undefined {
-  if (value == null || value === "") return undefined;
-  return value.replace(/\/+$/, "");
 }

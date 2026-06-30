@@ -1,5 +1,5 @@
 import { GetObjectCommand, NoSuchKey, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { ObjectStorage, StorageError, safeObjectKey } from "@scratchwork/server-core/storage";
+import { ObjectStorage, StorageConflict, StorageError, requireSafeObjectKey, type ObjectStorageShape } from "@scratchwork/server-core/storage";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -10,6 +10,7 @@ interface AwsStorageConfig {
   readonly forcePathStyle: boolean;
 }
 
+/** Adapts S3 to the server object storage contract. */
 export function AwsObjectStorageLive(
   env: Readonly<Record<string, string | undefined>>,
 ): Layer.Layer<ObjectStorage, StorageError> {
@@ -23,55 +24,75 @@ export function AwsObjectStorageLive(
         forcePathStyle: config.forcePathStyle,
       });
 
-      return ObjectStorage.of({
-        getText: (key) =>
-          validateKey(key).pipe(
-            Effect.flatMap(() =>
-              Effect.tryPromise({
-                try: async () => {
-                  const response = await client.send(
-                    new GetObjectCommand({
-                      Bucket: config.bucket,
-                      Key: key,
-                    }),
-                  );
-                  return response.Body == null ? null : await response.Body.transformToString("utf-8");
-                },
-                catch: (cause) =>
-                  isS3NotFound(cause)
-                    ? new StorageError({ message: "not found", cause })
-                    : new StorageError({ message: `Could not read object: ${key}`, cause }),
-              }),
-            ),
-            Effect.catchAll((error) =>
-              error.message === "not found" ? Effect.succeed(null) : Effect.fail(error),
-            ),
+      const getObject: ObjectStorageShape["getObject"] = (key) =>
+        requireSafeObjectKey(key).pipe(
+          Effect.zipRight(
+            Effect.tryPromise({
+              try: async () => {
+                try {
+                const response = await client.send(
+                  new GetObjectCommand({
+                    Bucket: config.bucket,
+                    Key: key,
+                  }),
+                );
+                return response.Body == null
+                  ? null
+                  : {
+                      key,
+                      body: await response.Body.transformToByteArray(),
+                      contentType: response.ContentType,
+                      etag: response.ETag,
+                    };
+                } catch (cause) {
+                  if (isS3NotFound(cause)) return null;
+                  throw cause;
+                }
+              },
+              catch: (cause) =>
+                new StorageError({ message: `Could not read object: ${key}`, cause }),
+            }),
           ),
+        );
 
-        putText: (key, value) =>
-          validateKey(key).pipe(
-            Effect.zipRight(
-              Effect.tryPromise({
-                try: async () => {
-                  await client.send(
-                    new PutObjectCommand({
-                      Bucket: config.bucket,
-                      Key: key,
-                      Body: value,
-                      ContentType: "application/json; charset=utf-8",
-                    }),
-                  );
-                },
-                catch: (cause) =>
-                  new StorageError({ message: `Could not write object: ${key}`, cause }),
-              }),
-            ),
+      const putObject: ObjectStorageShape["putObject"] = (key, value, options) =>
+        requireSafeObjectKey(key).pipe(
+          Effect.zipRight(
+            Effect.tryPromise({
+              try: async () => {
+                const response = await client.send(
+                  new PutObjectCommand({
+                    Bucket: config.bucket,
+                    Key: key,
+                    Body: value,
+                    CacheControl: options?.cacheControl,
+                    ContentType: options?.contentType,
+                    IfMatch: options?.ifMatch,
+                    IfNoneMatch: options?.ifNoneMatch,
+                  }),
+                );
+                return { etag: response.ETag };
+              },
+              catch: (cause) =>
+                isS3Conflict(cause)
+                  ? new StorageConflict({ key, message: `Object write precondition failed: ${key}` })
+                  : new StorageError({ message: `Could not write object: ${key}`, cause }),
+            }),
           ),
+        );
+
+      return ObjectStorage.of({
+        getObject,
+        putObject,
+        getText: (key) =>
+          getObject(key).pipe(Effect.map((object) => object == null ? null : new TextDecoder().decode(object.body))),
+        putText: (key, value, options) => putObject(key, new TextEncoder().encode(value), options),
       });
     }),
   );
 }
 
+/** Reads S3 bucket and client settings from deployment environment values. */
 function readAwsStorageConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): Effect.Effect<AwsStorageConfig, StorageError> {
@@ -91,12 +112,7 @@ function readAwsStorageConfig(
   });
 }
 
-function validateKey(key: string): Effect.Effect<void, StorageError> {
-  return safeObjectKey(key)
-    ? Effect.void
-    : Effect.fail(new StorageError({ message: `Invalid object key: ${key}` }));
-}
-
+/** Parses common env-style boolean strings. */
 function parseBoolean(value: string | undefined): boolean | null {
   if (value == null || value === "") return null;
   if (["1", "true", "yes", "on"].includes(value.toLowerCase())) return true;
@@ -104,6 +120,7 @@ function parseBoolean(value: string | undefined): boolean | null {
   return null;
 }
 
+/** Detects S3 not-found errors across SDK exception shapes. */
 function isS3NotFound(cause: unknown): boolean {
   if (cause instanceof NoSuchKey) return true;
   const candidate = cause as {
@@ -111,4 +128,13 @@ function isS3NotFound(cause: unknown): boolean {
     readonly $metadata?: { readonly httpStatusCode?: number };
   };
   return candidate.name === "NoSuchKey" || candidate.$metadata?.httpStatusCode === 404;
+}
+
+/** Detects S3 conditional write failures. */
+function isS3Conflict(cause: unknown): boolean {
+  const candidate = cause as {
+    readonly name?: string;
+    readonly $metadata?: { readonly httpStatusCode?: number };
+  };
+  return candidate.name === "PreconditionFailed" || candidate.$metadata?.httpStatusCode === 409 || candidate.$metadata?.httpStatusCode === 412;
 }

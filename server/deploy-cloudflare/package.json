@@ -5,7 +5,7 @@
   "private": true,
   "description": "Cloudflare Worker + R2 deployment package for the Scratchwork server.",
   "scripts": {
-    "check": "bun run typecheck",
+    "check": "bun run typecheck && bun test",
     "deploy": "bun scripts/deploy.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

@@ -6,7 +6,7 @@
   "description": "AWS Lambda + S3 deployment package for the Scratchwork server.",
   "scripts": {
     "build": "bun build src/handler.ts --target=node --format=esm --outfile=dist/handler.mjs",
-    "check": "bun run typecheck",
+    "check": "bun run typecheck && bun test",
     "deploy": "bun scripts/deploy.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

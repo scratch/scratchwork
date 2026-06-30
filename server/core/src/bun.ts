@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import { app } from "./app";
 import { AuthLive } from "./auth";
 import { ServerConfig, ServerConfigLive } from "./config";
+import { SiteStoreLive } from "./site-store";
 import { LocalObjectStorageLive } from "./storage";
 
 const storageDirectory = process.env.SCRATCHWORK_STORAGE_DIR ?? ".scratchwork-data";
@@ -20,9 +21,14 @@ const BaseLayer = Layer.mergeAll(
   ServerConfigLive,
 );
 
-const MainLayer = Layer.provideMerge(
-  Layer.mergeAll(LocalObjectStorageLive(storageDirectory), AuthLive),
+const StorageLayer = Layer.provideMerge(
+  LocalObjectStorageLive(storageDirectory),
   BaseLayer,
+);
+
+const MainLayer = Layer.provideMerge(
+  Layer.mergeAll(AuthLive, SiteStoreLive),
+  StorageLayer,
 );
 
 const program = Effect.scoped(

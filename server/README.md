@@ -24,7 +24,13 @@ Auth is disabled by default for local development. Enable the publish and viewin
 SCRATCHWORK_AUTH=google
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
-SCRATCHWORK_SESSION_SECRET=use-a-long-random-string
+SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
+```
+
+Cloud deploys require Google auth unless you explicitly opt into a public unauthenticated server:
+
+```sh
+SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1
 ```
 
 Deploy scripts load environment values from files and the shell. Precedence is:
@@ -104,7 +110,9 @@ SCRATCHWORK_PUBLIC_URL=https://your-host.example
 SCRATCHWORK_AUTH=google
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
-SCRATCHWORK_SESSION_SECRET=use-a-long-random-string
+SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
+# Or, for an intentionally public server:
+# SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1
 ```
 
 ## Cloudflare
@@ -127,7 +135,9 @@ SCRATCHWORK_CLOUDFLARE_SKIP_BUCKET_CREATE=1
 SCRATCHWORK_AUTH=google
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
-SCRATCHWORK_SESSION_SECRET=use-a-long-random-string
+SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
+# Or, for an intentionally public server:
+# SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1
 ```
 
 Cloudflare deploy writes non-secret auth values into the generated Wrangler config and uploads `SCRATCHWORK_GOOGLE_CLIENT_SECRET` plus `SCRATCHWORK_SESSION_SECRET` with `wrangler secret put`. AWS deploy sends `SCRATCHWORK_*` values to Lambda environment variables.

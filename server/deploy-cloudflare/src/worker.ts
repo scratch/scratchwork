@@ -1,20 +1,10 @@
 import * as HttpApp from "@effect/platform/HttpApp";
-import { AuthLive, app, makeServerConfigLayer, type EnvVars } from "@scratchwork/server-core";
+import { AuthLive, app, makeServerConfigLayer, SiteStoreLive, type EnvVars } from "@scratchwork/server-core";
 import * as Layer from "effect/Layer";
 import { R2ObjectStorageLive, type R2BucketBinding } from "./r2-storage";
 
-interface CloudflareEnv {
+interface CloudflareEnv extends Record<string, R2BucketBinding | string | undefined> {
   readonly SCRATCHWORK_R2: R2BucketBinding;
-  readonly PORT?: string;
-  readonly SCRATCHWORK_PORT?: string;
-  readonly SCRATCHWORK_PUBLIC_URL?: string;
-  readonly SCRATCHWORK_AUTH?: string;
-  readonly SCRATCHWORK_GOOGLE_CLIENT_ID?: string;
-  readonly SCRATCHWORK_GOOGLE_CLIENT_SECRET?: string;
-  readonly SCRATCHWORK_SESSION_SECRET?: string;
-  readonly SCRATCHWORK_AUTH_ALLOWED_EMAILS?: string;
-  readonly SCRATCHWORK_AUTH_ALLOWED_DOMAINS?: string;
-  readonly SCRATCHWORK_AUTH_SESSION_SECONDS?: string;
 }
 
 interface ExecutionContextBinding {
@@ -30,27 +20,29 @@ export default {
   },
 };
 
+/** Builds and caches one Effect web handler per Cloudflare environment binding set. */
 function handlerFor(env: CloudflareEnv): (request: Request) => Promise<Response> {
   const cached = handlers.get(env);
   if (cached != null) return cached;
 
-  const serverEnv: EnvVars = {
-    PORT: env.PORT,
-    SCRATCHWORK_PORT: env.SCRATCHWORK_PORT,
-    SCRATCHWORK_PUBLIC_URL: env.SCRATCHWORK_PUBLIC_URL,
-    SCRATCHWORK_AUTH: env.SCRATCHWORK_AUTH,
-    SCRATCHWORK_GOOGLE_CLIENT_ID: env.SCRATCHWORK_GOOGLE_CLIENT_ID,
-    SCRATCHWORK_GOOGLE_CLIENT_SECRET: env.SCRATCHWORK_GOOGLE_CLIENT_SECRET,
-    SCRATCHWORK_SESSION_SECRET: env.SCRATCHWORK_SESSION_SECRET,
-    SCRATCHWORK_AUTH_ALLOWED_EMAILS: env.SCRATCHWORK_AUTH_ALLOWED_EMAILS,
-    SCRATCHWORK_AUTH_ALLOWED_DOMAINS: env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS,
-    SCRATCHWORK_AUTH_SESSION_SECONDS: env.SCRATCHWORK_AUTH_SESSION_SECONDS,
-  };
+  const serverEnv = envVarsFromCloudflare(env);
   const layer = Layer.provideMerge(
-    Layer.mergeAll(R2ObjectStorageLive(env.SCRATCHWORK_R2), AuthLive),
-    makeServerConfigLayer(serverEnv),
+    Layer.mergeAll(AuthLive, SiteStoreLive),
+    Layer.mergeAll(R2ObjectStorageLive(env.SCRATCHWORK_R2), makeServerConfigLayer(serverEnv)),
   );
   const web = HttpApp.toWebHandlerLayer(app, layer);
   handlers.set(env, web.handler);
   return web.handler;
+}
+
+/** Copies string Cloudflare bindings that should be visible to server config. */
+export function envVarsFromCloudflare(env: CloudflareEnv): EnvVars {
+  const vars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string") continue;
+    if (key === "PORT" || key.startsWith("SCRATCHWORK_") || key.startsWith("GOOGLE_")) {
+      vars[key] = value;
+    }
+  }
+  return vars;
 }

@@ -1,5 +1,5 @@
 import * as HttpApp from "@effect/platform/HttpApp";
-import { AuthLive, app, makeServerConfigLayer, type EnvVars } from "@scratchwork/server-core";
+import { AuthLive, app, makeServerConfigLayer, SiteStoreLive, type EnvVars } from "@scratchwork/server-core";
 import * as Layer from "effect/Layer";
 import type {
   APIGatewayProxyEventV2,
@@ -10,11 +10,13 @@ import { AwsObjectStorageLive } from "./storage";
 
 const env = process.env as EnvVars;
 const MainLayer = Layer.provideMerge(
-  Layer.mergeAll(AwsObjectStorageLive(env), AuthLive),
-  makeServerConfigLayer(env),
+  Layer.mergeAll(AuthLive, SiteStoreLive),
+  Layer.mergeAll(AwsObjectStorageLive(env), makeServerConfigLayer(env)),
 );
+
 const web = HttpApp.toWebHandlerLayer(app, MainLayer);
 
+/** Handles one API Gateway v2 event with the shared server app. */
 export async function handler(
   event: APIGatewayProxyEventV2,
   _context: LambdaContext,
@@ -24,14 +26,24 @@ export async function handler(
   return responseToResult(response);
 }
 
-function eventToRequest(event: APIGatewayProxyEventV2): Request {
+/** Creates a testable Lambda handler from a Web Fetch handler. */
+export function makeAwsHandler(
+  webHandler: (request: Request) => Promise<Response>,
+): (event: APIGatewayProxyEventV2, context: LambdaContext) => Promise<APIGatewayProxyStructuredResultV2> {
+  return async (event) => responseToResult(await webHandler(eventToRequest(event)));
+}
+
+/** Converts an API Gateway v2 event into a standard Web Request. */
+export function eventToRequest(event: APIGatewayProxyEventV2): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(event.headers ?? {})) {
     if (value != null) headers.set(key, value);
   }
+  const cookies = cookieHeaderFromEvent(event);
+  if (cookies != null) headers.set("cookie", cookies);
 
   const proto = firstHeader(event.headers, "x-forwarded-proto") ?? "https";
-  const host = firstHeader(event.headers, "x-forwarded-host") ?? firstHeader(event.headers, "host") ?? event.requestContext.domainName;
+  const host = firstHeader(event.headers, "host") ?? event.requestContext.domainName;
   const path = event.rawPath || event.requestContext.http.path || "/";
   const query = event.rawQueryString ? `?${event.rawQueryString}` : "";
   const method = event.requestContext.http.method;
@@ -45,7 +57,8 @@ function eventToRequest(event: APIGatewayProxyEventV2): Request {
   return new Request(url, { body, headers, method });
 }
 
-async function responseToResult(response: Response): Promise<APIGatewayProxyStructuredResultV2> {
+/** Converts a standard Web Response into API Gateway's structured result. */
+export async function responseToResult(response: Response): Promise<APIGatewayProxyStructuredResultV2> {
   const headers: Record<string, string> = {};
   for (const [key, value] of response.headers.entries()) {
     if (key.toLowerCase() !== "set-cookie") headers[key] = value;
@@ -65,6 +78,15 @@ async function responseToResult(response: Response): Promise<APIGatewayProxyStru
   };
 }
 
+/** Merges API Gateway's cookie array with any existing Cookie header. */
+function cookieHeaderFromEvent(event: APIGatewayProxyEventV2): string | undefined {
+  const eventCookies = event.cookies?.filter((cookie) => cookie !== "") ?? [];
+  const headerCookie = firstHeader(event.headers, "cookie");
+  if (headerCookie == null || headerCookie === "") return eventCookies.length === 0 ? undefined : eventCookies.join("; ");
+  return eventCookies.length === 0 ? headerCookie : `${headerCookie}; ${eventCookies.join("; ")}`;
+}
+
+/** Finds a header value case-insensitively in API Gateway's header object. */
 function firstHeader(headers: APIGatewayProxyEventV2["headers"], name: string): string | undefined {
   const lowerName = name.toLowerCase();
   for (const [key, value] of Object.entries(headers ?? {})) {
@@ -73,6 +95,7 @@ function firstHeader(headers: APIGatewayProxyEventV2["headers"], name: string): 
   return undefined;
 }
 
+/** Reads all Set-Cookie headers across runtimes with and without getSetCookie. */
 function getSetCookie(headers: Headers): ReadonlyArray<string> {
   const withCookies = headers as Headers & { readonly getSetCookie?: () => ReadonlyArray<string> };
   const cookies = withCookies.getSetCookie?.();
@@ -81,6 +104,7 @@ function getSetCookie(headers: Headers): ReadonlyArray<string> {
   return cookie == null ? [] : [cookie];
 }
 
+/** Decides whether Lambda can return a response body as UTF-8 text. */
 function isTextResponse(contentType: string): boolean {
   return (
     contentType.startsWith("text/") ||

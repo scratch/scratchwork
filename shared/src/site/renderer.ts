@@ -40,12 +40,3 @@ export function resolveMarkdownRenderer<E, R>(
     return html == null ? null : { _tag: "Fallback", html };
   });
 }
-
-export function nearestMarkdownRenderer<E, R>(
-  startDir: SitePath,
-  fallback: Effect.Effect<string | null, E, R>,
-): Effect.Effect<string | null, E | SiteFileError, SiteFiles | R> {
-  return resolveMarkdownRenderer(startDir, fallback).pipe(
-    Effect.map((renderer) => renderer?.html ?? null),
-  );
-}
