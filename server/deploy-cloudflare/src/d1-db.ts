@@ -8,6 +8,7 @@ import {
   requireSafeDbKey,
   requireSafeDbKeyPrefix,
   requireSafeDbNamespace,
+  validateDeleteOptions,
   validatePutOptions,
   type JsonValue,
   type DeletePrimitiveDbRecordOptions,
@@ -118,6 +119,7 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
     Effect.gen(function* () {
       yield* requireSafeDbNamespace(namespace);
       yield* requireSafeDbKey(key);
+      yield* validateDeleteOptions(options);
       const result = yield* d1Run(
         database,
         options?.ifMatch == null
@@ -140,8 +142,8 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
         database,
         prefix === ""
           ? `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE namespace = ? ORDER BY key LIMIT ?`
-          : `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE namespace = ? AND key LIKE ? ESCAPE '\\' ORDER BY key LIMIT ?`,
-        prefix === "" ? [namespace, limit] : [namespace, `${escapeLike(prefix)}%`, limit],
+          : `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE namespace = ? AND substr(key, 1, length(?)) = ? ORDER BY key LIMIT ?`,
+        prefix === "" ? [namespace, limit] : [namespace, prefix, prefix, limit],
       );
       return { records: yield* Effect.all(rows.map((row) => rowToRecord<A>(row))) };
     });
@@ -219,8 +221,4 @@ function sqlIdentifierEffect(name: string): Effect.Effect<string, PrimitiveDbErr
 
 function isConstraintError(cause: unknown): boolean {
   return String((cause as { readonly message?: unknown }).message ?? cause).toLowerCase().includes("constraint");
-}
-
-function escapeLike(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 }

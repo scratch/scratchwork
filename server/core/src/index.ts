@@ -25,6 +25,7 @@ export {
   safeDbKey,
   safeDbKeyPrefix,
   safeDbNamespace,
+  validateDeleteOptions,
   validatePutOptions,
   type DeletePrimitiveDbRecordOptions,
   type JsonPrimitive,
