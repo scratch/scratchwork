@@ -18,6 +18,7 @@ import {
   requireSafeDbKey,
   requireSafeDbKeyPrefix,
   requireSafeDbNamespace,
+  validateDeleteOptions,
   validatePutOptions,
   type JsonValue,
   type DeletePrimitiveDbRecordOptions,
@@ -147,6 +148,7 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
     Effect.gen(function* () {
       yield* requireSafeDbNamespace(namespace);
       yield* requireSafeDbKey(key);
+      yield* validateDeleteOptions(options);
       yield* Effect.tryPromise({
         try: () => client.send(new DeleteItemCommand({
           TableName: tableName,

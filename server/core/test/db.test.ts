@@ -39,9 +39,20 @@ describe("PrimitiveDb", () => {
     expect(listed.records.map((record) => record.key)).toEqual(["alice/a", "alice/b"]);
   });
 
+  test("lists records in backend byte order", async () => {
+    const db = makeMemoryPrimitiveDb();
+    for (const key of ["alice/_", "alice/-", "alice/0", "alice/a", "alice/Z"]) {
+      await Effect.runPromise(db.put("projects", key, { key }));
+    }
+
+    const listed = await Effect.runPromise(db.list("projects", { prefix: "alice/" }));
+    expect(listed.records.map((record) => record.key)).toEqual(["alice/-", "alice/0", "alice/Z", "alice/_", "alice/a"]);
+  });
+
   test("delete can be version-checked", async () => {
     const db = makeMemoryPrimitiveDb();
     const created = await Effect.runPromise(db.put("projects", "alice/docs", { ok: true }));
+    await expect(Effect.runPromise(db.delete("projects", "alice/docs", { ifMatch: 0 }))).rejects.toThrow("ifMatch must be a positive integer version");
     await expect(Effect.runPromise(db.delete("projects", "alice/docs", { ifMatch: created.version + 1 }))).rejects.toThrow("Record version mismatch");
     await Effect.runPromise(db.delete("projects", "alice/docs", { ifMatch: created.version }));
     expect(await Effect.runPromise(db.get("projects", "alice/docs"))).toBeNull();

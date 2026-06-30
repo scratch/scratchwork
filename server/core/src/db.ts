@@ -123,6 +123,7 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
       yield* requireSafeDbKey(key);
       const mapKey = memoryKey(namespace, key);
       const existing = records.get(mapKey);
+      yield* validateDeleteOptions(options);
       if (options?.ifMatch != null && existing?.version !== options.ifMatch) {
         return yield* Effect.fail(new PrimitiveDbConflict({ namespace, key, message: `Record version mismatch: ${namespace}/${key}` }));
       }
@@ -140,7 +141,7 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
         .filter(([key]) => key.startsWith(namespacePrefix))
         .map(([key, record]) => [key.slice(namespacePrefix.length), record] as const)
         .filter(([key]) => key.startsWith(prefix))
-        .sort(([a], [b]) => a.localeCompare(b))
+        .sort(([a], [b]) => compareUtf8Bytes(a, b))
         .slice(0, limit);
       return { records: yield* Effect.all(matches.map(([key, record]) => materializeRecord<A>(namespace, key, record))) };
     });
@@ -223,10 +224,12 @@ export function validatePutOptions(options: PutPrimitiveDbRecordOptions | undefi
   if (options?.ifNoneMatch === "*" && options.ifMatch != null) {
     return Effect.fail(new PrimitiveDbError({ message: "Use only one database write precondition" }));
   }
-  if (options?.ifMatch != null && (!Number.isInteger(options.ifMatch) || options.ifMatch < 1)) {
-    return Effect.fail(new PrimitiveDbError({ message: "ifMatch must be a positive integer version" }));
-  }
-  return Effect.void;
+  return validateVersionPrecondition(options?.ifMatch);
+}
+
+/** Validates provider-independent delete preconditions. */
+export function validateDeleteOptions(options: DeletePrimitiveDbRecordOptions | undefined): Effect.Effect<void, PrimitiveDbError> {
+  return validateVersionPrecondition(options?.ifMatch);
 }
 
 /** Normalizes and caps list limits for provider implementations. */
@@ -258,4 +261,24 @@ function materializeRecord<A extends JsonValue>(
 
 function memoryKey(namespace: string, key: string): string {
   return `${namespace}\0${key}`;
+}
+
+const utf8Encoder = new TextEncoder();
+
+function compareUtf8Bytes(a: string, b: string): number {
+  const left = utf8Encoder.encode(a);
+  const right = utf8Encoder.encode(b);
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = left[index] - right[index];
+    if (delta !== 0) return delta;
+  }
+  return left.length - right.length;
+}
+
+function validateVersionPrecondition(version: number | undefined): Effect.Effect<void, PrimitiveDbError> {
+  if (version != null && (!Number.isInteger(version) || version < 1)) {
+    return Effect.fail(new PrimitiveDbError({ message: "ifMatch must be a positive integer version" }));
+  }
+  return Effect.void;
 }
