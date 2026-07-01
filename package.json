@@ -9,7 +9,8 @@
     "renderer",
     "server/core",
     "server/deploy-aws",
-    "server/deploy-cloudflare"
+    "server/deploy-cloudflare",
+    "deploy/*"
   ],
   "scripts": {
     "build": "cd renderer && bun install && cd ../cli && bun run build",
@@ -17,6 +18,7 @@
     "check": "cd cli && bun run check && cd ../server && bun run check",
     "deploy:aws": "cd server && bun run deploy:aws",
     "deploy:cloudflare": "cd server && bun run deploy:cloudflare",
+    "deploy:sndbx.sh": "cd deploy/sndbx.sh && bun run deploy",
     "dev:server": "cd server && bun run dev",
     "dev:renderer": "cd renderer && bun run dev",
     "lint": "cd cli && bun run lint",

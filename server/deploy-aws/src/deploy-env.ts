@@ -61,12 +61,6 @@ export async function loadDeployEnv(options: LoadDeployEnvOptions): Promise<Load
   };
 }
 
-/** Copies one defined environment value into a concrete string map. */
-export function copyEnv(target: Record<string, string>, env: DeployEnv, key: string): void {
-  const value = env[key];
-  if (value != null && value !== "") target[key] = value;
-}
-
 /** Drops undefined values so the result can be passed to spawned commands. */
 export function definedEnv(env: DeployEnv): Record<string, string> {
   const result: Record<string, string> = {};

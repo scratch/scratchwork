@@ -41,87 +41,110 @@ A project config looks like this:
 
 ## Server Config
 
-Server deploys are TypeScript projects that depend on one Scratchwork deploy package. The deploy package exports a `deployServer` function and a config type for its target platform.
+Server deploys are TypeScript projects that depend on one Scratchwork deploy package. The deploy package exports a `deployServer` function, a platform-neutral `ScratchworkServerConfig` type, and a provider-specific deploy config type.
 
-For Cloudflare Workers + D1 + R2:
+`ScratchworkServerConfig` describes settings consumed by the running Scratchwork server, such as its public app/content hostnames and auth policy. The provider deploy config describes infrastructure used to run that server, such as the Cloudflare Worker/R2 resources or AWS Lambda/S3 resources.
+
+Server hostnames and provider routing are separate. The server config hostnames are canonical public names used in generated URLs, OAuth redirects, cookies, and origin checks. They do not create DNS records or attach provider infrastructure to those names. The provider deploy config controls that binding.
+
+Define server settings once, in a shared module, then pair them with whichever provider deploy config this target uses:
+
+```ts
+// server-config.ts
+import type { ScratchworkServerConfig } from "@scratchwork/server-deploy-cloudflare";
+// In an AWS-only deploy project, import this type from "@scratchwork/server-deploy-aws".
+
+export const server = {
+  // Canonical public hostnames for the dashboard/API and published content.
+  // These do not assign provider infrastructure to the hostnames.
+  appDomain: "app.example.com",
+  contentDomain: "pages.example.com",
+
+  // Authentication method (only "google" is supported, for now)
+  auth: "google",
+
+  // Optional auth restrictions. authAllowedDomains defaults to allowing only the admin to
+  // authenticate. It can be set to a single domain or a list of domains and accepts wildcards,
+  // e.g. *.example.com.
+  authAllowedDomains: "example.com",
+  authSessionSeconds: 2_592_000,
+
+  // If shareAllowedDomains is set, users can only share published content with users on these
+  // domains. If it is not set, there are no restrictions on who users can share with.
+  shareAllowedDomains: None,
+
+  usersCanCreateWorkspaces: false,
+  defaultWorkspace:
+} satisfies ScratchworkServerConfig;
+```
+
+For Cloudflare Workers + R2:
 
 ```ts
 // deploy.ts
 import {
   deployServer,
-  type CloudflareServerConfig,
+  type CloudflareDeployConfig,
+  type CloudflareDeployServerConfig,
 } from "@scratchwork/server-deploy-cloudflare";
+import { server } from "./server-config";
 
-const config = {
-  appDomain: "app.example.com",
-  contentDomain: "pages.example.com",
-
-  // Who can publish content to this server.
-  allowedUsers: "@example.com",
-
-  // Most-permissive visibility any project on this server may use.
-  maxContentVisibility: "@example.com",
-
-  // "built-in" uses Scratchwork OAuth. "cloudflare-access" trusts Cloudflare Access.
-  authMode: "built-in",
-
-  // Maximum zipped project size, in megabytes.
-  maxProjectSizeMB: 25,
-
+const deploy = {
   workerName: "scratchwork-server",
 
-  // D1 stores users, projects, permissions, deploy metadata, and live pointers.
-  d1Database: {
-    name: "scratchwork-records",
-    binding: "SCRATCHWORK_DB",
-    tableName: "scratchwork_records",
-  },
+  // These Wrangler routes assign the Worker to the Cloudflare hostnames.
+  // DNS for the hostnames must exist in the Cloudflare zone.
+  routes: [
+    { pattern: "app.example.com/*", zoneName: "example.com" },
+    { pattern: "pages.example.com/*", zoneName: "example.com" },
+  ],
 
   // R2 stores immutable project bundles and rendered assets.
   r2Bucket: {
     name: "scratchwork-sites",
     binding: "SCRATCHWORK_R2",
   },
-} satisfies CloudflareServerConfig;
+} satisfies CloudflareDeployConfig;
 
-await deployServer(config, { envFile: ".env" });
+await deployServer({ server, deploy } satisfies CloudflareDeployServerConfig, {
+  envFile: ".env",
+});
 ```
 
-For AWS Lambda + DynamoDB + S3:
+Cloudflare host assignment is part of `CloudflareDeployConfig`. Use `route` for one route pattern, `routes` for multiple hostnames/patterns, or `customDomain` for a Wrangler custom-domain binding.
+
+For AWS Lambda + S3:
 
 ```ts
 // deploy.ts
 import {
   deployServer,
-  type AwsServerConfig,
+  type AwsDeployConfig,
+  type AwsDeployServerConfig,
 } from "@scratchwork/server-deploy-aws";
+import { server } from "./server-config";
 
-const config = {
-  appDomain: "app.example.com",
-  contentDomain: "pages.example.com",
-  allowedUsers: "@example.com",
-  maxVisibility: "@example.com",
-  authMode: "built-in",
-  maxProjectSizeMB: 25,
-
+const deploy = {
   region: "us-east-1",
   functionName: "scratchwork-server",
 
-  // DynamoDB stores users, projects, permissions, deploy metadata, and live pointers.
-  dynamoDbTable: {
-    name: "scratchwork-records",
-    partitionKey: "namespace",
-    sortKey: "key",
-  },
+  // AWS deploys create or reuse a public Lambda Function URL. They do not
+  // create DNS records or custom-domain bindings for appDomain/contentDomain.
+  // Put CloudFront, API Gateway, or another proxy in front separately if these
+  // hostnames should point at the Lambda.
 
   // S3 stores immutable project bundles and rendered assets.
   s3Bucket: "scratchwork-sites",
-} satisfies AwsServerConfig;
+} satisfies AwsDeployConfig;
 
-await deployServer(config, { envFile: ".env" });
+await deployServer({ server, deploy } satisfies AwsDeployServerConfig, {
+  envFile: ".env",
+});
 ```
 
-`deployServer` loads secrets from `process.env` and, optionally, a local env file passed as a deploy option. Environment variables override `.env` values. It fails before deploying if required secrets are missing, or if the config does not match the exported config type's runtime schema. Secrets should not be committed in `deploy.ts`.
+AWS host assignment is external to `AwsDeployConfig`. The deploy creates or reuses a public Lambda Function URL and returns it; custom domains for `appDomain` and `contentDomain` must be configured separately through CloudFront, API Gateway, DNS/proxying, or equivalent infrastructure.
+
+`deployServer` loads secrets from `process.env` and, optionally, a local env file passed as a deploy option. Environment variables override `.env` values. It fails before deploying if required secrets or deploy settings are missing. Secrets should not be committed in `deploy.ts`.
 
 Example `.env` for built-in OAuth:
 
@@ -176,19 +199,44 @@ scratchwork me
 # if path points to a directory, the name of the project defaults to the name of the directory
 # if the path points to a file and the project name isn't found in .scratchwork.json,
 # the name of the project must be specified
+# if the server is specified (either in the args or project config) and the cli is not logged
+# in to that server, scratchwork login <server> is automatically run first
+# if the server is not specified, this command should error out
 scratchwork publish [--server text] [--workspace text] [--project text] [--visibility <group>] [<path>]
 
+# The following commands reference a project on the server. The project may be identified in one
+# of three ways:
+#   1. specifying the server, workspace, and project name via flags
+#   2. specifying the path (default `.`) on disk to the project directory where
+#      the server, workspace, and project name are specified in the project config file
+#   3. a url, e.g. example.com/myworkspace/myproject/
+
+# Unpublish a given project (make it visible to only the owner)
+scratchwork unpublish [--server text] [--workspace text] [--project text] [<path-or-url>]
+
+# Delete a given project
+scratchwork delete [--server text] [--workspace text] [--project text] [<path-or-url>]
+
 # clone this project in path/project
-scratchwork clone <server.com/path/to/project> [<path>]
+scratchwork clone [<path-or-url>]
 
 # stream edits to the server
 # project must be previously published
 scratchwork stream [<path>]
+
+# List my projects
+scratchwork projects
+
+# Info on a project
+scratchwork info [--server text] [--workspace text] [--project text] [<path-or-url>]
+
 ```
 
-## Default workspace
+## Default pub
 
 A server can be configured to route a project to a default workspace:
+
+random
 
 ## Security
 
