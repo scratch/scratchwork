@@ -83,10 +83,14 @@ export function resolveProjectRef(input: {
   return Effect.gen(function* () {
     const urlRef = parseProjectUrl(input.pathOrUrl);
     if (urlRef != null) {
+      const server = yield* Effect.try({
+        try: () => normalizeServerUrl(nonEmpty(input.server) ?? urlRef.server),
+        catch: () => new CliError({ code: 1, message: `scratchwork ${input.command}: invalid server` }),
+      });
       return {
-        server: normalizeServerUrl(input.server ?? urlRef.server),
-        workspace: input.workspace ?? urlRef.workspace,
-        project: input.project ?? urlRef.project,
+        server,
+        workspace: nonEmpty(input.workspace) ?? urlRef.workspace,
+        project: nonEmpty(input.project) ?? urlRef.project,
       };
     }
 

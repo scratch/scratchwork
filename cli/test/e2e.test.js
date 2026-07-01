@@ -767,6 +767,9 @@ describe("scratchwork project commands", () => {
       expect((await runCli(["info", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain('"routePath": "founder/site"');
       expect((await runCli(["unpublish", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain('"visibility": "private"');
       expect((await runCli(["delete", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain("Deleted founder/site");
+      expect((await runCli(["info", `${serverUrl}/founder/site/`], dir)).stdout).toContain('"routePath": "founder/site"');
+      expect((await runCli(["unpublish", `${serverUrl}/founder/site/`], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["delete", `${serverUrl}/founder/site/`], dir)).stdout).toContain("Deleted founder/site");
       expect((await runCli(["clone", `${serverUrl}/founder/site/`], dir)).stdout).toContain("Cloned founder/site");
       expect(readFileSync(join(dir, "site", "index.html"), "utf8")).toBe("<h1>cloned</h1>");
       expect(seen).toContain("GET /api/projects");
