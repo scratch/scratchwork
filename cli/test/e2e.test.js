@@ -778,6 +778,42 @@ describe("scratchwork project commands", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("clone rejects bundles with path-traversal file paths without writing anything", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-clone-traversal-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname === "/api/projects/founder/site/bundle") {
+          return Response.json({
+            bundle: {
+              version: 1,
+              files: [
+                { path: "index.html", contentBase64: btoa("<h1>ok</h1>") },
+                { path: "../escape.html", contentBase64: btoa("<h1>escaped</h1>") },
+              ],
+            },
+          });
+        }
+        return Response.json({ error: "not found" }, { status: 404 });
+      },
+    });
+
+    try {
+      const { code, stderr } = await runCli(["clone", `${serverUrl}/founder/site/`], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("invalid server response");
+      expect(existsSync(join(dir, "escape.html"))).toBe(false);
+      expect(existsSync(join(dir, "site", "index.html"))).toBe(false);
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("scratchwork stream", () => {

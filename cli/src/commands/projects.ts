@@ -5,6 +5,7 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import { watch } from "node:fs";
 import { base64ToBytes } from "../../../shared/src/encoding/base64";
+import { isSafeSitePath } from "../../../shared/src/site/paths";
 import { PROJECT_CONFIG_FILE, authHeaders, authTokenForServer, projectApiUrl, readProjectConfig, resolveProjectRef, resolveServer } from "../project-config";
 import { CliError, errorMessage } from "../errors";
 import type { CloneConfig, ProjectRefConfig, ServerConfig } from "../types";
@@ -193,6 +194,7 @@ function decodeBundleResponse(value: unknown): BundleResponse | null {
   if (!isRecord(value) || !isRecord(value.bundle) || !Array.isArray(value.bundle.files)) return null;
   for (const file of value.bundle.files) {
     if (!isRecord(file) || typeof file.path !== "string" || typeof file.contentBase64 !== "string") return null;
+    if (!isSafeSitePath(file.path)) return null;
   }
   return value as unknown as BundleResponse;
 }
