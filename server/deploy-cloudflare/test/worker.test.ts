@@ -5,6 +5,16 @@ describe("envVarsFromCloudflare", () => {
   test("copies string server env vars and excludes bindings", () => {
     const vars = envVarsFromCloudflare({
       SCRATCHWORK_R2: { get: async () => null, put: async () => null },
+      SCRATCHWORK_D1: {
+        prepare: () => ({
+          bind: function () {
+            return this;
+          },
+          first: async () => null,
+          all: async () => ({ results: [] }),
+          run: async () => ({}),
+        }),
+      },
       SCRATCHWORK_AUTH: "google",
       SCRATCHWORK_PUBLIC_URL: "https://scratch.test",
       GOOGLE_CLIENT_ID: "client-id",

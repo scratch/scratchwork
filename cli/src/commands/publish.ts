@@ -5,63 +5,79 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import { bytesToBase64, PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
-import { normalizeServerUrl, readAuthToken } from "../auth";
+import { readAuthRecord } from "../auth";
 import { openBrowser } from "../browser";
 import { resolveDevTarget } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
+import {
+  PROJECT_CONFIG_FILE,
+  personalWorkspaceForEmail,
+  readProjectConfig,
+  resolveServer,
+  safeIdentifier,
+  slugifyIdentifier,
+  writeProjectConfig,
+  type ProjectConfigFile,
+} from "../project-config";
 import type { PublishConfig } from "../types";
+import { runLogin } from "./login";
 
-const DEFAULT_SERVER = "http://localhost:3001";
-const METADATA_FILE = ".scratchwork.json";
 const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", ".scratchwork-data"]);
 
-interface PublishMetadata {
-  readonly server: string;
-  readonly slug: string;
-  readonly token: string;
+interface PublishResponse {
+  readonly workspace: string;
+  readonly project: string;
+  readonly routePath: string;
+  readonly visibility: string;
+  readonly openPath: string;
   readonly url: string;
-  readonly updatedAt: string;
 }
 
-interface PublishResponse {
-  readonly slug: string;
-  readonly token: string;
-  readonly url: string;
-}
+class PublishAuthRequired extends CliError {}
 
 export function runPublish(
   config: PublishConfig,
 ): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const target = yield* resolveDevTarget(config.path ?? ".", "publish");
-    const metadata = yield* readMetadata(target.root);
-    const server = normalizeServerUrl(
-      nonEmpty(config.server) ??
-        nonEmpty(process.env.SCRATCHWORK_SERVER_URL) ??
-        metadata?.server ??
-        DEFAULT_SERVER,
-    );
-    const reusableMetadata = metadata?.server === server ? metadata : null;
-    const slug = nonEmpty(config.slug) ?? reusableMetadata?.slug;
-    const token = nonEmpty(config.token) ?? reusableMetadata?.token;
-
-    if ((slug == null) !== (token == null)) {
-      return yield* Effect.fail(
-        new CliError({
-          code: 1,
-          message: "scratchwork publish: --slug and --token must be provided together",
-        }),
-      );
-    }
+    const projectConfig = yield* readProjectConfig(target.root);
+    const server = yield* resolveServer(config.server, projectConfig, "publish");
+    const authRecord = yield* readAuthRecord(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    const project = yield* resolveProjectName(config, projectConfig);
+    const workspace = nonEmpty(config.workspace)
+      ?? nonEmpty(projectConfig?.workspace)
+      ?? personalWorkspaceForEmail(authRecord?.email)
+      ?? "default";
+    const visibility = nonEmpty(config.visibility) ?? nonEmpty(projectConfig?.visibility) ?? "private";
 
     const bundle = yield* createBundle(target.root);
-    const authToken = yield* readAuthToken(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    let authToken = authRecord?.token;
     const response = yield* postPublish(server, {
       bundle,
       openPath: target.openPath,
-      slug,
-      token,
-    }, authToken);
+      workspace,
+      project,
+      visibility,
+    }, authToken).pipe(
+      Effect.catchIf((error) => error instanceof PublishAuthRequired, () =>
+        Effect.gen(function* () {
+          yield* runLogin({ server });
+          const record = yield* readAuthRecord(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+          authToken = record?.token;
+          const retryWorkspace = nonEmpty(config.workspace)
+            ?? nonEmpty(projectConfig?.workspace)
+            ?? personalWorkspaceForEmail(record?.email)
+            ?? workspace;
+          return yield* postPublish(server, {
+            bundle,
+            openPath: target.openPath,
+            workspace: retryWorkspace,
+            project,
+            visibility,
+          }, authToken);
+        }),
+      ),
+    );
 
     yield* writeMetadata(target.root, server, response).pipe(Effect.catchAll(() => Effect.void));
     yield* printResult(response, bundle);
@@ -121,7 +137,7 @@ function collectFiles(
             : yield* collectFiles(root, relativePath);
         }
         if (info.type !== "File") return [] as ReadonlyArray<SitePath>;
-        if (relativePath === METADATA_FILE) return [] as ReadonlyArray<SitePath>;
+        if (relativePath === PROJECT_CONFIG_FILE) return [] as ReadonlyArray<SitePath>;
         if (!isSafeSitePath(relativePath)) {
           return yield* Effect.fail(
             new CliError({
@@ -143,8 +159,9 @@ function postPublish(
   body: {
     readonly bundle: PublishBundle;
     readonly openPath: string;
-    readonly slug?: string;
-    readonly token?: string;
+    readonly workspace: string;
+    readonly project: string;
+    readonly visibility: string;
   },
   authToken: string | undefined,
 ): Effect.Effect<PublishResponse, CliError> {
@@ -161,12 +178,15 @@ function postPublish(
       const json = parseJson(text);
       if (!response.ok) {
         const message = isRecord(json) && typeof json.error === "string" ? json.error : text;
-        throw new CliError({
-          code: 1,
-          message: response.status === 401
-            ? `scratchwork publish: authentication required. Run \`scratchwork login --server ${server}\`.`
-            : `scratchwork publish: ${message || `server returned ${response.status}`}`,
-        });
+        throw response.status === 401
+          ? new PublishAuthRequired({
+            code: 1,
+            message: `scratchwork publish: authentication required. Run \`scratchwork login ${server}\`.`,
+          })
+          : new CliError({
+            code: 1,
+            message: `scratchwork publish: ${message || `server returned ${response.status}`}`,
+          });
       }
 
       const parsed = decodePublishResponse(json);
@@ -188,37 +208,21 @@ function postPublish(
   });
 }
 
-function readMetadata(
-  root: string,
-): Effect.Effect<PublishMetadata | null, never, FileSystem.FileSystem | Path.Path> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const paths = yield* Path.Path;
-    const path = paths.join(root, METADATA_FILE);
-    if (!(yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false))))) return null;
-
-    const text = yield* fs.readFileString(path).pipe(Effect.catchAll(() => Effect.succeed("")));
-    const metadata = decodeMetadata(parseJson(text));
-    return metadata;
-  }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-}
-
 function writeMetadata(
   root: string,
   server: string,
   response: PublishResponse,
 ): Effect.Effect<void, PlatformError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const paths = yield* Path.Path;
-    const metadata: PublishMetadata = {
+    yield* writeProjectConfig(root, {
       server,
-      slug: response.slug,
-      token: response.token,
+      workspace: response.workspace,
+      project: response.project,
+      visibility: response.visibility,
+      routePath: response.routePath,
       url: response.url,
       updatedAt: new Date().toISOString(),
-    };
-    yield* fs.writeFileString(paths.join(root, METADATA_FILE), `${JSON.stringify(metadata, null, 2)}\n`);
+    });
   });
 }
 
@@ -231,10 +235,10 @@ function printResult(
     [
       "\n  scratchwork publish",
       `  url     ${response.url}`,
-      `  slug    ${response.slug}`,
-      `  token   ${response.token}`,
+      `  project ${response.workspace}/${response.project}`,
+      `  access  ${response.visibility}`,
       `  files   ${bundle.files.length} (${formatBytes(bytes)})`,
-      `  saved   ${METADATA_FILE}\n`,
+      `  saved   ${PROJECT_CONFIG_FILE}\n`,
     ].join("\n"),
   );
 }
@@ -249,31 +253,23 @@ function publishEndpoint(server: string): string {
 
 function decodePublishResponse(value: unknown): PublishResponse | null {
   if (!isRecord(value)) return null;
-  if (typeof value.slug !== "string" || typeof value.token !== "string" || typeof value.url !== "string") {
-    return null;
-  }
-  return { slug: value.slug, token: value.token, url: value.url };
-}
-
-function decodeMetadata(value: unknown): PublishMetadata | null {
-  if (!isRecord(value)) return null;
   if (
-    typeof value.server !== "string" ||
-    typeof value.slug !== "string" ||
-    typeof value.token !== "string" ||
-    typeof value.url !== "string" ||
-    typeof value.updatedAt !== "string"
+    typeof value.workspace !== "string" ||
+    typeof value.project !== "string" ||
+    typeof value.routePath !== "string" ||
+    typeof value.visibility !== "string" ||
+    typeof value.openPath !== "string" ||
+    typeof value.url !== "string"
   ) {
     return null;
   }
-  const server = tryNormalizeServerUrl(value.server);
-  if (server == null) return null;
   return {
-    server,
-    slug: value.slug,
-    token: value.token,
+    workspace: value.workspace,
+    project: value.project,
+    routePath: value.routePath,
+    visibility: value.visibility,
+    openPath: value.openPath,
     url: value.url,
-    updatedAt: value.updatedAt,
   };
 }
 
@@ -289,14 +285,6 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value == null || value === "" ? undefined : value;
 }
 
-function tryNormalizeServerUrl(value: string): string | null {
-  try {
-    return normalizeServerUrl(value);
-  } catch {
-    return null;
-  }
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -305,4 +293,29 @@ function formatBytes(bytes: number): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function resolveProjectName(
+  config: PublishConfig,
+  projectConfig: ProjectConfigFile | null,
+): Effect.Effect<string, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    const explicit = nonEmpty(config.project) ?? nonEmpty(projectConfig?.project);
+    if (explicit != null) {
+      if (!safeIdentifier(explicit)) {
+        return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork publish: invalid project ${explicit}` }));
+      }
+      return explicit;
+    }
+
+    const fs = yield* FileSystem.FileSystem;
+    const paths = yield* Path.Path;
+    const target = paths.resolve(process.cwd(), config.path ?? ".");
+    const info = yield* fs.stat(target);
+    if (info.type === "Directory") return slugifyIdentifier(paths.basename(target), "project");
+    return yield* Effect.fail(new CliError({
+      code: 1,
+      message: "scratchwork publish: --project is required when publishing a file",
+    }));
+  });
 }

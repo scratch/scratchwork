@@ -17,6 +17,7 @@ import { runExample } from "./commands/example";
 import { runLogin } from "./commands/login";
 import { DEFAULT_PORT, runDev } from "./commands/dev";
 import { runPublish } from "./commands/publish";
+import { runClone, runDelete, runInfo, runMe, runProjects, runStream, runUnpublish } from "./commands/projects";
 import { runTemplate } from "./commands/template";
 import { CliError } from "./errors";
 
@@ -66,28 +67,93 @@ const publishCommand = Command.make(
       Options.withDefault(""),
       Options.withDescription("Scratchwork server URL"),
     ),
-    slug: Options.text("slug").pipe(
+    workspace: Options.text("workspace").pipe(
       Options.withDefault(""),
-      Options.withDescription("Existing slug to republish"),
+      Options.withDescription("Workspace name"),
     ),
-    token: Options.text("token").pipe(
+    project: Options.text("project").pipe(
       Options.withDefault(""),
-      Options.withDescription("Publish token for an existing slug"),
+      Options.withDescription("Project name"),
+    ),
+    visibility: Options.text("visibility").pipe(
+      Options.withDefault(""),
+      Options.withDescription("Project visibility group"),
     ),
   },
   runPublish,
 ).pipe(Command.withDescription("Publish a static site to a Scratchwork server"));
 
+const projectRefOptions = {
+  server: Options.text("server").pipe(
+    Options.withDefault(""),
+    Options.withDescription("Scratchwork server URL"),
+  ),
+  workspace: Options.text("workspace").pipe(
+    Options.withDefault(""),
+    Options.withDescription("Workspace name"),
+  ),
+  project: Options.text("project").pipe(
+    Options.withDefault(""),
+    Options.withDescription("Project name"),
+  ),
+  pathOrUrl: pathArg("path-or-url"),
+};
+
 const loginCommand = Command.make(
   "login",
   {
+    serverArg: Args.text({ name: "server" }).pipe(Args.withDefault("")),
     server: Options.text("server").pipe(
       Options.withDefault(""),
       Options.withDescription("Scratchwork server URL"),
     ),
   },
-  runLogin,
+  ({ serverArg, server }) => runLogin({ server: serverArg || server }),
 ).pipe(Command.withDescription("Authenticate with a Scratchwork server"));
+
+const meCommand = Command.make(
+  "me",
+  {
+    server: Options.text("server").pipe(Options.withDefault("")),
+  },
+  runMe,
+).pipe(Command.withDescription("Print the current authenticated user"));
+
+const projectsCommand = Command.make(
+  "projects",
+  {
+    server: Options.text("server").pipe(Options.withDefault("")),
+  },
+  runProjects,
+).pipe(Command.withDescription("List my projects"));
+
+const infoCommand = Command.make("info", projectRefOptions, runInfo).pipe(
+  Command.withDescription("Show project info"),
+);
+
+const unpublishCommand = Command.make("unpublish", projectRefOptions, runUnpublish).pipe(
+  Command.withDescription("Make a project private"),
+);
+
+const deleteCommand = Command.make("delete", projectRefOptions, runDelete).pipe(
+  Command.withDescription("Delete a project"),
+);
+
+const cloneCommand = Command.make(
+  "clone",
+  {
+    pathOrUrl: pathArg("path-or-url"),
+  },
+  runClone,
+).pipe(Command.withDescription("Clone a project"));
+
+const streamCommand = Command.make(
+  "stream",
+  {
+    path: pathArg("path"),
+  },
+  runStream,
+).pipe(Command.withDescription("Stream edits to an existing project"));
 
 const versionCommand = Command.make("version", {}, () =>
   Console.log(pkg.version),
@@ -96,11 +162,18 @@ const versionCommand = Command.make("version", {}, () =>
 const scratchworkCommand = Command.make("scratchwork").pipe(
   Command.withDescription("CLI for Scratchwork projects"),
   Command.withSubcommands([
+    cloneCommand,
+    deleteCommand,
     devCommand,
     exampleCommand,
+    infoCommand,
     loginCommand,
+    meCommand,
+    projectsCommand,
     publishCommand,
+    streamCommand,
     templateCommand,
+    unpublishCommand,
     versionCommand,
   ]),
 );

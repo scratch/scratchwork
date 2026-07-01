@@ -6,12 +6,13 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context as LambdaContext,
 } from "aws-lambda";
+import { AwsPrimitiveDbLive } from "./dynamodb-db";
 import { AwsObjectStorageLive } from "./storage";
 
 const env = process.env as EnvVars;
 const MainLayer = Layer.provideMerge(
   Layer.mergeAll(AuthLive, SiteStoreLive),
-  Layer.mergeAll(AwsObjectStorageLive(env), makeServerConfigLayer(env)),
+  Layer.mergeAll(AwsObjectStorageLive(env), AwsPrimitiveDbLive(env), makeServerConfigLayer(env)),
 );
 
 const web = HttpApp.toWebHandlerLayer(app, MainLayer);

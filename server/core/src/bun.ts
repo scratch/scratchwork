@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import { app } from "./app";
 import { AuthLive } from "./auth";
 import { ServerConfig, ServerConfigLive } from "./config";
+import { MemoryPrimitiveDbLive } from "./db";
 import { SiteStoreLive } from "./site-store";
 import { LocalObjectStorageLive } from "./storage";
 
@@ -28,7 +29,7 @@ const StorageLayer = Layer.provideMerge(
 
 const MainLayer = Layer.provideMerge(
   Layer.mergeAll(AuthLive, SiteStoreLive),
-  StorageLayer,
+  Layer.mergeAll(StorageLayer, MemoryPrimitiveDbLive()),
 );
 
 const program = Effect.scoped(

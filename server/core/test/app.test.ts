@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import * as Effect from "effect/Effect";
+import { createSessionToken } from "../src/auth";
 import { appHandler, bundle, json, testAuth, type MemoryStoredObject } from "./helpers";
 
 const user = { id: "user-1", email: "founder@example.com" };
@@ -6,7 +8,7 @@ const user = { id: "user-1", email: "founder@example.com" };
 describe("server app", () => {
   test("publishes files into per-file storage and serves the site", async () => {
     const storage = new Map<string, MemoryStoredObject>();
-    const handler = await appHandler({ storage });
+    const handler = await appHandler({ storage, config: { projectPath: "workspace/project" } });
 
     const publish = await handler(post("/api/publish", {
       bundle: bundle({
@@ -14,82 +16,90 @@ describe("server app", () => {
         "style.css": "body { color: red; }",
       }),
       openPath: "/",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
     }));
 
     expect(publish.status).toBe(200);
-    const body = await json(publish) as { slug: string; token: string; url: string };
-    expect(body.slug).toMatch(/^[a-z0-9][a-z0-9-]{2,63}$/);
-    expect(body.token).toMatch(/^[A-Za-z0-9_-]{16,256}$/);
-    expect(body.url).toBe(`https://scratch.test/${body.slug}/`);
+    const body = await json(publish) as { workspace: string; project: string; routePath: string; url: string };
+    expect(body.workspace).toBe("demo");
+    expect(body.project).toBe("site");
+    expect(body.routePath).toBe("demo/site");
+    expect(body.url).toBe("https://scratch.test/demo/site/");
     expect([...storage.keys()].some((key) => key.startsWith("blobs/sha256/"))).toBe(true);
-    expect([...storage.keys()].some((key) => key === `sites/${body.slug}/site.v2.json`)).toBe(true);
-    expect(new TextDecoder().decode(storage.get(`sites/${body.slug}/site.v2.json`)?.body)).not.toContain("contentBase64");
+    const revisionKey = [...storage.keys()].find((key) => key.startsWith("projects/demo/site/revisions/"));
+    expect(typeof revisionKey).toBe("string");
+    expect(new TextDecoder().decode(storage.get(revisionKey ?? "")?.body)).not.toContain("contentBase64");
 
-    const html = await handler(new Request(`https://scratch.test/${body.slug}/`));
+    const html = await handler(new Request("https://scratch.test/demo/site/"));
     expect(html.status).toBe(200);
     expect(html.headers.get("content-security-policy")).toContain("sandbox");
     expect(await html.text()).toContain("Hello");
 
-    const css = await handler(new Request(`https://scratch.test/${body.slug}/style.css`));
+    const css = await handler(new Request("https://scratch.test/demo/site/style.css"));
     expect(css.status).toBe(200);
     expect(css.headers.get("content-type")).toContain("text/css");
     expect(await css.text()).toBe("body { color: red; }");
   });
 
   test("republishes by flipping the current revision", async () => {
-    const handler = await appHandler();
-    const first = await json(await handler(post("/api/publish", {
+    const handler = await appHandler({ config: { projectPath: "workspace/project" } });
+    const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "old", "old.css": "old" }),
       openPath: "/",
-    }))) as { slug: string; token: string };
-
-    const wrong = await handler(post("/api/publish", {
-      bundle: bundle({ "index.html": "bad" }),
-      openPath: "/",
-      slug: first.slug,
-      token: "wrong-token-wrong-token",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
     }));
-    expect(wrong.status).toBe(403);
+    expect(first.status).toBe(200);
 
     const second = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "new" }),
       openPath: "/",
-      slug: first.slug,
-      token: first.token,
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
     }));
     expect(second.status).toBe(200);
 
-    const html = await handler(new Request(`https://scratch.test/${first.slug}/`));
+    const html = await handler(new Request("https://scratch.test/demo/site/"));
     expect(await html.text()).toContain("new");
-    const removed = await handler(new Request(`https://scratch.test/${first.slug}/old.css`));
+    const removed = await handler(new Request("https://scratch.test/demo/site/old.css"));
     expect(removed.status).toBe(404);
   });
 
   test("serves rendered markdown with sandbox and public asset CORS", async () => {
-    const handler = await appHandler();
+    const handler = await appHandler({ config: { projectPath: "workspace/project" } });
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.md": "# Hello" }),
       openPath: "/",
-    }))) as { slug: string };
+      workspace: "demo",
+      project: "docs",
+      visibility: "public",
+    }))) as { routePath: string };
 
-    const html = await handler(new Request(`https://scratch.test/${published.slug}/`));
+    const html = await handler(new Request(`https://scratch.test/${published.routePath}/`));
     expect(html.status).toBe(200);
     expect(html.headers.get("content-security-policy")).toContain("sandbox");
     expect(html.headers.get("access-control-allow-origin")).toBe("*");
 
-    const markdown = await handler(new Request(`https://scratch.test/${published.slug}/index.md`));
+    const markdown = await handler(new Request(`https://scratch.test/${published.routePath}/index.md`));
     expect(markdown.status).toBe(200);
     expect(markdown.headers.get("access-control-allow-origin")).toBe("*");
   });
 
   test("sandboxes published SVG assets", async () => {
-    const handler = await appHandler();
+    const handler = await appHandler({ config: { projectPath: "workspace/project" } });
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "evil.svg": "<svg><script>alert(1)</script></svg>" }),
       openPath: "/evil.svg",
-    }))) as { slug: string };
+      workspace: "demo",
+      project: "svg",
+      visibility: "public",
+    }))) as { routePath: string };
 
-    const svg = await handler(new Request(`https://scratch.test/${published.slug}/evil.svg`));
+    const svg = await handler(new Request(`https://scratch.test/${published.routePath}/evil.svg`));
     expect(svg.status).toBe(200);
     expect(svg.headers.get("content-security-policy")).toContain("sandbox");
   });
@@ -99,21 +109,184 @@ describe("server app", () => {
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
+      workspace: "demo",
+      project: "site",
     }));
 
     expect(response.status).toBe(401);
   });
 
-  test("rejects reserved slugs", async () => {
-    const handler = await appHandler();
+  test("rejects visibility above the server ceiling", async () => {
+    const handler = await appHandler({ config: { maxVisibility: "@example.com" } });
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      slug: "api",
-      token: "valid-token-valid-token",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
     }));
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
+  });
+
+  test("rejects public visibility when shareAllowedDomains is set", async () => {
+    const handler = await appHandler({ config: { shareAllowedDomains: new Set(["example.com"]) } });
+    const response = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
+    }));
+
+    expect(response.status).toBe(403);
+  });
+
+  test("redirects private content readers through app-domain project auth", async () => {
+    const handler = await appHandler({
+      auth: testAuth(null, user),
+      config: {
+        appUrl: "https://app.scratch.test",
+        contentUrl: "https://pages.scratch.test",
+        projectPath: "workspace/project",
+      },
+    });
+
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "private" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "secret",
+      visibility: "private",
+    }));
+    expect(publish.status).toBe(200);
+
+    const response = await handler(new Request("https://pages.scratch.test/demo/secret/", { redirect: "manual" }));
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "https://invalid");
+    expect(location.origin).toBe("https://app.scratch.test");
+    expect(location.pathname).toBe("/auth/project");
+    expect(location.searchParams.get("route")).toBe("demo/secret");
+  });
+
+  test("redirects auth routes to the configured app origin before setting cookies", async () => {
+    const handler = await appHandler({
+      config: {
+        appUrl: "https://app.scratch.test",
+        auth: {
+          _tag: "Google",
+          clientId: "client-id",
+          clientSecret: "client-secret",
+          sessionSecret: "session-secret-session-secret-32-bytes",
+          allowedUsers: "public",
+          sessionTtlSeconds: 60,
+        },
+      },
+    });
+
+    const response = await handler(new Request(
+      "http://scratchwork.local/auth/login?cli_redirect=http%3A%2F%2F127.0.0.1%3A7777%2Fcallback",
+      {
+        headers: {
+          host: "www.scratch.test",
+          "x-forwarded-host": "www.scratch.test",
+          "x-forwarded-proto": "https",
+        },
+        redirect: "manual",
+      },
+    ));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const location = new URL(response.headers.get("location") ?? "https://invalid");
+    expect(location.origin).toBe("https://app.scratch.test");
+    expect(location.pathname).toBe("/auth/login");
+    expect(location.searchParams.get("cli_redirect")).toBe("http://127.0.0.1:7777/callback");
+  });
+
+  test("uses configured content origin in private asset auth redirects", async () => {
+    const handler = await appHandler({
+      auth: testAuth(null, user),
+      config: {
+        appUrl: "https://app.scratch.test",
+        contentUrl: "https://pages.scratch.test",
+        projectPath: "workspace/project",
+      },
+    });
+
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({
+        "index.html": "private",
+        "hello-world.svg": "<svg></svg>",
+      }),
+      openPath: "/",
+      workspace: "demo",
+      project: "secret",
+      visibility: "private",
+    }));
+    expect(publish.status).toBe(200);
+
+    const response = await handler(new Request("http://scratchwork.local/demo/secret/hello-world.svg", {
+      headers: {
+        host: "pages.scratch.test",
+        "x-forwarded-host": "pages.scratch.test",
+        "x-forwarded-proto": "https",
+      },
+      redirect: "manual",
+    }));
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "https://invalid");
+    expect(location.origin).toBe("https://app.scratch.test");
+    expect(location.searchParams.get("route")).toBe("demo/secret");
+    expect(location.searchParams.get("returnTo")).toBe("https://pages.scratch.test/demo/secret/hello-world.svg");
+  });
+
+  test("issues a content cookie through the private project access handoff", async () => {
+    const authConfig = {
+      _tag: "Google",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      sessionSecret: "session-secret-session-secret-32-bytes",
+      allowedUsers: "public",
+      sessionTtlSeconds: 60,
+    } as const;
+    const token = await Effect.runPromise(createSessionToken(user, authConfig));
+    const handler = await appHandler({
+      config: {
+        appUrl: "https://app.scratch.test",
+        contentUrl: "https://pages.scratch.test",
+        projectPath: "workspace/project",
+        auth: authConfig,
+      },
+    });
+
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "private" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "secret",
+      visibility: "private",
+    }, token));
+    expect(publish.status).toBe(200);
+
+    const appRedirect = await handler(new Request(
+      "https://app.scratch.test/auth/project?route=demo/secret&returnTo=https%3A%2F%2Fpages.scratch.test%2Fdemo%2Fsecret%2F",
+      { headers: { authorization: `Bearer ${token}` }, redirect: "manual" },
+    ));
+    expect(appRedirect.status).toBe(302);
+    const contentWithToken = appRedirect.headers.get("location") ?? "";
+    expect(contentWithToken).toContain("scratchwork_access=");
+
+    const setCookie = await handler(new Request(contentWithToken, { redirect: "manual" }));
+    expect(setCookie.status).toBe(302);
+    const cookie = setCookie.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("scratchwork_project_access=");
+    expect(cookie).toContain("Path=/demo/secret");
+
+    const content = await handler(new Request("https://pages.scratch.test/demo/secret/", { headers: { cookie } }));
+    expect(content.status).toBe(200);
+    expect(await content.text()).toContain("private");
   });
 
   test("binds OAuth callback state to a browser cookie", async () => {
@@ -124,8 +297,7 @@ describe("server app", () => {
           clientId: "client-id",
           clientSecret: "client-secret",
           sessionSecret: "session-secret-session-secret-32-bytes",
-          allowedEmails: new Set(),
-          allowedDomains: new Set(),
+          allowedUsers: "public",
           sessionTtlSeconds: 60,
         },
       },
@@ -144,10 +316,12 @@ describe("server app", () => {
 });
 
 /** Builds a JSON POST request for app endpoint tests. */
-function post(path: string, body: unknown): Request {
+function post(path: string, body: unknown, bearer?: string): Request {
   return new Request(`https://scratch.test${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: bearer == null
+      ? { "content-type": "application/json" }
+      : { "authorization": `Bearer ${bearer}`, "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 }

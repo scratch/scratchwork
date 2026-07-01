@@ -24,8 +24,8 @@ scratchwork dev [path]
 To publish to a running Scratchwork server:
 
 ```sh
-scratchwork login --server https://your-scratchwork-server.example
-scratchwork publish [path]
+scratchwork login https://your-scratchwork-server.example
+scratchwork publish --workspace myspace --project myproject [path]
 ```
 
 ## Local development
@@ -82,7 +82,7 @@ scratchwork login --server http://localhost:3001
 scratchwork publish index.html
 ```
 
-The server stores the bundle in local object storage by default, returns a random slug URL such as `/abc123defg/`, and returns a token. The CLI saves the slug and token in `.scratchwork.json` so the next `scratchwork publish` republishes the same URL.
+The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `workspace`, `project`, `visibility`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
 
 Deploy the server with one command:
 

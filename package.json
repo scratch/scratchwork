@@ -18,13 +18,14 @@
     "check": "cd cli && bun run check && cd ../server && bun run check",
     "deploy:aws": "cd server && bun run deploy:aws",
     "deploy:cloudflare": "cd server && bun run deploy:cloudflare",
+    "deploy:local": "cd deploy/local && bun run deploy",
     "deploy:sndbx.sh": "cd deploy/sndbx.sh && bun run deploy",
     "dev:server": "cd server && bun run dev",
     "dev:renderer": "cd renderer && bun run dev",
     "lint": "cd cli && bun run lint",
     "server": "cd server && bun run start",
     "test": "cd cli && bun run test",
-    "typecheck": "cd cli && bun run typecheck && cd ../server && bun run typecheck"
+    "typecheck": "cd cli && bun run typecheck && cd ../server && bun run typecheck && cd ../deploy/local && bun run typecheck && cd ../sndbx.sh && bun run typecheck"
   },
   "dependencies": {
     "@effect/platform": "0.96.2",

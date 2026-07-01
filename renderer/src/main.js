@@ -89,7 +89,7 @@ async function renderPage() {
   for (const cand of mdCandidates(location.pathname)) {
     const url = new URL(cand, location.origin).href;
     try {
-      const r = await fetch(url);
+      const r = await fetch(url, { credentials: "include" });
       if (r.ok) { res = r; mdUrl = url; break; }
     } catch (err) {
       /* try the next candidate */

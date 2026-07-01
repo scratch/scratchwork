@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { base64UrlToBytes, bytesToBase64Url } from "../../../shared/src/encoding/base64";
 import { errorMessage, isRecord, parseJson } from "../../../shared/src/util/json";
+import { accessGroupMatches } from "./access";
 import { ServerConfig, type AuthConfig } from "./config";
 import { verifyGoogleIdToken, type GoogleIdTokenClaims } from "./google-jwt";
 import { timingSafeEqual } from "./tokens";
@@ -18,6 +19,7 @@ const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SESSION_VERSION = 1;
 const STATE_TTL_SECONDS = 10 * 60;
+const PROJECT_ACCESS_TTL_SECONDS = 10 * 60;
 const REDIRECT_MAX_LENGTH = 2048;
 
 export interface AuthUser {
@@ -40,6 +42,15 @@ interface OAuthState {
   readonly returnTo: string;
   readonly cliRedirect?: string;
   readonly nonce: string;
+  readonly expiresAt: number;
+}
+
+interface ProjectAccessPayload {
+  readonly version: typeof SESSION_VERSION;
+  readonly kind: "project-access";
+  readonly projectKey: string;
+  readonly routePath: string;
+  readonly email: string;
   readonly expiresAt: number;
 }
 
@@ -78,6 +89,16 @@ export interface AuthShape {
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError>;
   readonly logout: (baseUrl: string) => HttpServerResponse.HttpServerResponse;
   readonly loginRedirect: (url: URL, baseUrl: string) => HttpServerResponse.HttpServerResponse;
+  readonly issueProjectAccessToken: (
+    projectKey: string,
+    routePath: string,
+    user: AuthUser,
+  ) => Effect.Effect<string, AuthError>;
+  readonly verifyProjectAccessToken: (
+    token: string,
+    projectKey: string,
+    routePath: string,
+  ) => Effect.Effect<AuthUser | null, AuthError>;
 }
 
 export class Auth extends Context.Tag("@scratchwork/server/Auth")<Auth, AuthShape>() {}
@@ -99,6 +120,8 @@ export function makeAuth(config: AuthConfig): AuthShape {
       callback: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
       logout: () => HttpServerResponse.redirect("/", { status: 302 }),
       loginRedirect: () => HttpServerResponse.redirect("/", { status: 302 }),
+      issueProjectAccessToken: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
+      verifyProjectAccessToken: () => Effect.succeed(null),
     });
   }
 
@@ -218,6 +241,34 @@ export function makeAuth(config: AuthConfig): AuthShape {
       loginUrl.searchParams.set("returnTo", `${url.pathname}${url.search}`);
       return HttpServerResponse.redirect(loginUrl, { status: 302 });
     },
+
+    issueProjectAccessToken: (projectKey, routePath, user) =>
+      signValue(
+        {
+          version: SESSION_VERSION,
+          kind: "project-access",
+          projectKey,
+          routePath,
+          email: user.email,
+          expiresAt: epochSeconds() + PROJECT_ACCESS_TTL_SECONDS,
+        } satisfies ProjectAccessPayload,
+        config.sessionSecret,
+      ),
+
+    verifyProjectAccessToken: (token, projectKey, routePath) =>
+      Effect.gen(function* () {
+        const payload = yield* verifySignedValue<ProjectAccessPayload>(token, config.sessionSecret);
+        if (
+          !isProjectAccessPayload(payload) ||
+          payload.expiresAt < epochSeconds() ||
+          payload.projectKey !== projectKey ||
+          payload.routePath !== routePath
+        ) {
+          return null;
+        }
+        const user = { id: payload.email, email: payload.email };
+        return allowedUser(user, config) ? user : null;
+      }),
   });
 }
 
@@ -328,10 +379,7 @@ function userFromClaims(
 
 /** Checks whether a verified Google user passes email/domain allow lists. */
 function allowedUser(user: AuthUser, config: Extract<AuthConfig, { readonly _tag: "Google" }>): boolean {
-  if (config.allowedEmails.size === 0 && config.allowedDomains.size === 0) return true;
-  if (config.allowedEmails.has(user.email.toLowerCase())) return true;
-  const domain = user.email.split("@")[1]?.toLowerCase();
-  return domain != null && config.allowedDomains.has(domain);
+  return accessGroupMatches(config.allowedUsers, user);
 }
 
 /** Signs arbitrary JSON as a compact HMAC token. */
@@ -519,6 +567,19 @@ function isSessionPayload(value: unknown): value is SessionPayload {
     isRecord(value.user) &&
     typeof value.user.id === "string" &&
     typeof value.user.email === "string"
+  );
+}
+
+/** Checks the decoded content-access token shape. */
+function isProjectAccessPayload(value: unknown): value is ProjectAccessPayload {
+  return (
+    isRecord(value) &&
+    value.version === SESSION_VERSION &&
+    value.kind === "project-access" &&
+    typeof value.projectKey === "string" &&
+    typeof value.routePath === "string" &&
+    typeof value.email === "string" &&
+    typeof value.expiresAt === "number"
   );
 }
 

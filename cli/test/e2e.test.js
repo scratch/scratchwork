@@ -622,9 +622,14 @@ describe("scratchwork --help", () => {
       expect(code).toBe(0);
       expect(stdout).toContain("dev");
       expect(stdout).toContain("example");
+      expect(stdout).toContain("info");
       expect(stdout).toContain("login");
+      expect(stdout).toContain("me");
+      expect(stdout).toContain("projects");
       expect(stdout).toContain("publish");
+      expect(stdout).toContain("stream");
       expect(stdout).toContain("template");
+      expect(stdout).toContain("unpublish");
       expect(stdout).toContain("version");
       expect(stdout).not.toContain("logout");
       expect(stdout).not.toContain("whoami");
@@ -642,7 +647,6 @@ describe("scratchwork publish", () => {
     const configDir = mkdtempSync(join(tmpdir(), "scratchwork-config-"));
     const port = nextPort++;
     const serverUrl = `http://localhost:${port}`;
-    const token = "tokentokentoken1";
     const authToken = "signed-auth-token";
     let publishBody;
     let authorization;
@@ -654,17 +658,20 @@ describe("scratchwork publish", () => {
         authorization = request.headers.get("authorization");
         publishBody = await request.json();
         return Response.json({
-          slug: "savedslug",
-          token,
-          url: `${serverUrl}/savedslug/`,
+          workspace: publishBody.workspace,
+          project: publishBody.project,
+          routePath: `${publishBody.workspace}/${publishBody.project}`,
+          visibility: publishBody.visibility,
+          openPath: publishBody.openPath,
+          url: `${serverUrl}/${publishBody.workspace}/${publishBody.project}/`,
         });
       },
     });
 
     try {
-      mkdirSync(join(configDir, "scratchwork"), { recursive: true });
+      mkdirSync(configDir, { recursive: true });
       writeFileSync(
-        join(configDir, "scratchwork", "auth.json"),
+        join(configDir, "auth.json"),
         `${JSON.stringify(
           {
             version: 1,
@@ -686,9 +693,10 @@ describe("scratchwork publish", () => {
         `${JSON.stringify(
           {
             server: serverUrl,
-            slug: "savedslug",
-            token,
-            url: `${serverUrl}/savedslug/`,
+            workspace: "founder",
+            project: "site",
+            visibility: "public",
+            url: `${serverUrl}/founder/site/`,
             updatedAt: "2026-06-29T00:00:00.000Z",
           },
           null,
@@ -697,15 +705,16 @@ describe("scratchwork publish", () => {
       );
 
       const { code, stdout, stderr } = await runCli(["publish", "index.html"], dir, {
-        env: { SCRATCHWORK_SERVER_URL: "", XDG_CONFIG_HOME: configDir },
+        env: { SCRATCHWORK_SERVER_URL: "", SCRATCHWORK_HOME: configDir },
       });
 
       expect(code).toBe(0);
       expect(stderr).toBe("");
-      expect(stdout).toContain(`${serverUrl}/savedslug/`);
+      expect(stdout).toContain(`${serverUrl}/founder/site/`);
       expect(authorization).toBe(`Bearer ${authToken}`);
-      expect(publishBody.slug).toBe("savedslug");
-      expect(publishBody.token).toBe(token);
+      expect(publishBody.workspace).toBe("founder");
+      expect(publishBody.project).toBe("site");
+      expect(publishBody.visibility).toBe("public");
       expect(publishBody.bundle.files.map((file) => file.path)).toEqual(["index.html"]);
     } finally {
       server.stop(true);
@@ -715,14 +724,95 @@ describe("scratchwork publish", () => {
   });
 });
 
+describe("scratchwork project commands", () => {
+  test("lists, inspects, unpublishes, deletes, and clones projects", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-project-cmds-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const seen = [];
+    const project = {
+      workspace: "founder",
+      project: "site",
+      routePath: "founder/site",
+      visibility: "public",
+      url: `${serverUrl}/founder/site/`,
+      updatedAt: "2026-06-29T00:00:00.000Z",
+    };
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        const url = new URL(request.url);
+        seen.push(`${request.method} ${url.pathname}`);
+        if (url.pathname === "/api/projects") return Response.json({ projects: [project] });
+        if (url.pathname === "/api/projects/founder/site" && request.method === "GET") return Response.json({ project });
+        if (url.pathname === "/api/projects/founder/site/unpublish" && request.method === "POST") {
+          return Response.json({ project: { ...project, visibility: "private" } });
+        }
+        if (url.pathname === "/api/projects/founder/site" && request.method === "DELETE") return Response.json({ ok: true });
+        if (url.pathname === "/api/projects/founder/site/bundle") {
+          return Response.json({
+            bundle: {
+              version: 1,
+              files: [{ path: "index.html", contentBase64: btoa("<h1>cloned</h1>") }],
+            },
+          });
+        }
+        return Response.json({ error: "not found" }, { status: 404 });
+      },
+    });
+
+    try {
+      expect((await runCli(["projects", "--server", serverUrl], dir)).stdout).toContain("founder/site");
+      expect((await runCli(["info", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain('"routePath": "founder/site"');
+      expect((await runCli(["unpublish", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["delete", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain("Deleted founder/site");
+      expect((await runCli(["clone", `${serverUrl}/founder/site/`], dir)).stdout).toContain("Cloned founder/site");
+      expect(readFileSync(join(dir, "site", "index.html"), "utf8")).toBe("<h1>cloned</h1>");
+      expect(seen).toContain("GET /api/projects");
+      expect(seen).toContain("POST /api/projects/founder/site/unpublish");
+      expect(seen).toContain("DELETE /api/projects/founder/site");
+      expect(seen).toContain("GET /api/projects/founder/site/bundle");
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("scratchwork stream", () => {
+  test("requires a previously published project config", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-stream-unpublished-"));
+    try {
+      writeFileSync(join(dir, "index.html"), staticPage("stream"));
+      const { code, stderr } = await runCli(["stream", "."], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("scratchwork stream: server is required");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("scratchwork login", () => {
+  test("requires a server when no project config provides one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-login-missing-server-"));
+    try {
+      const { code, stderr } = await runCli(["login"], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("scratchwork login: server is required");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("accepts the local callback and stores the returned token", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-login-"));
     const configDir = mkdtempSync(join(tmpdir(), "scratchwork-login-config-"));
     const serverUrl = "http://localhost:3999";
-    const proc = Bun.spawn(["bun", SCRATCHWORK, "login", "--server", serverUrl], {
+    const proc = Bun.spawn(["bun", SCRATCHWORK, "login", serverUrl], {
       cwd: dir,
-      env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", XDG_CONFIG_HOME: configDir },
+      env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", SCRATCHWORK_HOME: configDir },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -748,7 +838,7 @@ describe("scratchwork login", () => {
       expect(code).toBe(0);
       expect(stderr).toBe("");
 
-      const auth = JSON.parse(readFileSync(join(configDir, "scratchwork", "auth.json"), "utf8"));
+      const auth = JSON.parse(readFileSync(join(configDir, "auth.json"), "utf8"));
       expect(auth.servers[serverUrl].token).toBe("login-token");
     } finally {
       proc.kill();
