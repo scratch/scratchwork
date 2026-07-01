@@ -20,6 +20,7 @@ import { runPublish } from "./commands/publish";
 import { runClone, runDelete, runInfo, runMe, runProjects, runStream, runUnpublish } from "./commands/projects";
 import { runTemplate } from "./commands/template";
 import { CliError } from "./errors";
+import { printHelpIfRequested } from "./help";
 
 const pathArg = (name = "path", fallback = ".") =>
   Args.text({ name }).pipe(Args.withDefault(fallback));
@@ -181,7 +182,6 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
 function normalizeArgv(argv: ReadonlyArray<string>): ReadonlyArray<string> {
   if (argv.length < 3) return argv;
   const normalized = [...argv];
-  if (normalized[2] === "help") normalized[2] = "--help";
   if (normalized[2] === "-v") normalized[2] = "--version";
   return normalized;
 }
@@ -197,6 +197,12 @@ const MainLayer = Layer.mergeAll(
 );
 
 function runScratchworkCli(argv: ReadonlyArray<string> = process.argv): void {
+  const help = printHelpIfRequested(argv, pkg.version);
+  if (help.handled) {
+    process.exitCode = help.exitCode;
+    return;
+  }
+
   const normalizedArgv = normalizeArgv(argv);
   const noCommand = normalizedArgv.length < 3;
 
