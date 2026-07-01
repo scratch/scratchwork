@@ -8,7 +8,7 @@ const user = { id: "user-1", email: "founder@example.com" };
 describe("server app", () => {
   test("publishes files into per-file storage and serves the site", async () => {
     const storage = new Map<string, MemoryStoredObject>();
-    const handler = await appHandler({ storage, config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ storage, auth: testAuth(user), config: { projectPath: "workspace/project" } });
 
     const publish = await handler(post("/api/publish", {
       bundle: bundle({
@@ -44,7 +44,7 @@ describe("server app", () => {
   });
 
   test("republishes by flipping the current revision", async () => {
-    const handler = await appHandler({ config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
     const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "old", "old.css": "old" }),
       openPath: "/",
@@ -70,7 +70,7 @@ describe("server app", () => {
   });
 
   test("serves rendered markdown with sandbox and public asset CORS", async () => {
-    const handler = await appHandler({ config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.md": "# Hello" }),
       openPath: "/",
@@ -90,7 +90,7 @@ describe("server app", () => {
   });
 
   test("sandboxes published SVG assets", async () => {
-    const handler = await appHandler({ config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "evil.svg": "<svg><script>alert(1)</script></svg>" }),
       openPath: "/evil.svg",
@@ -117,7 +117,7 @@ describe("server app", () => {
   });
 
   test("rejects visibility above the server ceiling", async () => {
-    const handler = await appHandler({ config: { maxVisibility: "@example.com" } });
+    const handler = await appHandler({ auth: testAuth(user), config: { maxVisibility: "@example.com" } });
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
@@ -130,7 +130,7 @@ describe("server app", () => {
   });
 
   test("rejects public visibility when shareAllowedDomains is set", async () => {
-    const handler = await appHandler({ config: { shareAllowedDomains: new Set(["example.com"]) } });
+    const handler = await appHandler({ auth: testAuth(user), config: { shareAllowedDomains: new Set(["example.com"]) } });
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
@@ -174,7 +174,6 @@ describe("server app", () => {
       config: {
         appUrl: "https://app.scratch.test",
         auth: {
-          _tag: "Google",
           clientId: "client-id",
           clientSecret: "client-secret",
           sessionSecret: "session-secret-session-secret-32-bytes",
@@ -244,7 +243,6 @@ describe("server app", () => {
 
   test("issues a content cookie through the private project access handoff", async () => {
     const authConfig = {
-      _tag: "Google",
       clientId: "client-id",
       clientSecret: "client-secret",
       sessionSecret: "session-secret-session-secret-32-bytes",
@@ -293,7 +291,6 @@ describe("server app", () => {
     const handler = await appHandler({
       config: {
         auth: {
-          _tag: "Google",
           clientId: "client-id",
           clientSecret: "client-secret",
           sessionSecret: "session-secret-session-secret-32-bytes",

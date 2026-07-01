@@ -18,19 +18,13 @@ By default the server listens on `3001` and stores published bundles under `.scr
 
 ## Google OAuth
 
-Auth is disabled by default for local development. Enable the publish and viewing wall with Google OAuth:
+Every server requires OAuth — auth cannot be disabled. Configure Google OAuth credentials (including for local development):
 
 ```sh
-SCRATCHWORK_AUTH=google
+SCRATCHWORK_AUTH=oauth  # optional; "oauth" is the only supported mode
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
-```
-
-Cloud deploys require Google auth unless you explicitly opt into a public unauthenticated server:
-
-```sh
-SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1
 ```
 
 Deploy scripts load environment values from files and the shell. Precedence is:
@@ -107,12 +101,9 @@ SCRATCHWORK_AWS_FUNCTION_NAME=scratchwork-server
 SCRATCHWORK_AWS_ROLE_NAME=scratchwork-server-lambda-role
 SCRATCHWORK_S3_BUCKET=my-existing-bucket
 SCRATCHWORK_PUBLIC_URL=https://your-host.example
-SCRATCHWORK_AUTH=google
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
-# Or, for an intentionally public server:
-# SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1
 ```
 
 ## Cloudflare
@@ -132,12 +123,9 @@ SCRATCHWORK_CLOUDFLARE_WORKER_NAME=scratchwork-server
 SCRATCHWORK_R2_BUCKET=scratchwork-sites
 SCRATCHWORK_PUBLIC_URL=https://your-worker.example
 SCRATCHWORK_CLOUDFLARE_SKIP_BUCKET_CREATE=1
-SCRATCHWORK_AUTH=google
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
-# Or, for an intentionally public server:
-# SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1
 ```
 
 Cloudflare deploy writes non-secret auth values into the generated Wrangler config and uploads `SCRATCHWORK_GOOGLE_CLIENT_SECRET` plus `SCRATCHWORK_SESSION_SECRET` with `wrangler secret put`. AWS deploy sends `SCRATCHWORK_*` values to Lambda environment variables.

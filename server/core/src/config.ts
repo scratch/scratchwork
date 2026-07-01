@@ -28,18 +28,13 @@ export type ProjectPathStrategy =
 
 export type DefaultWorkspaceStrategy = "personal" | "random" | "required";
 
-export type AuthConfig =
-  | {
-      readonly _tag: "Disabled";
-    }
-  | {
-      readonly _tag: "Google";
-      readonly clientId: string;
-      readonly clientSecret: string;
-      readonly sessionSecret: string;
-      readonly allowedUsers: AccessGroup;
-      readonly sessionTtlSeconds: number;
-    };
+export interface AuthConfig {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly sessionSecret: string;
+  readonly allowedUsers: AccessGroup;
+  readonly sessionTtlSeconds: number;
+}
 
 export class ServerConfig extends Context.Tag("@scratchwork/server/Config")<
   ServerConfig,
@@ -107,23 +102,21 @@ function readPublicUrl(value: string | undefined): Effect.Effect<string | undefi
   }
 }
 
-/** Parses disabled or Google auth settings from environment variables. */
+/** Parses required OAuth settings from environment variables. Auth cannot be disabled. */
 function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigError> {
   return Effect.gen(function* () {
     const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
     const clientId = env.SCRATCHWORK_GOOGLE_CLIENT_ID ?? env.GOOGLE_CLIENT_ID;
     const clientSecret = env.SCRATCHWORK_GOOGLE_CLIENT_SECRET ?? env.GOOGLE_CLIENT_SECRET;
     const sessionSecret = env.SCRATCHWORK_SESSION_SECRET;
-    const wantsGoogle = authMode === "google" || clientId != null || clientSecret != null || sessionSecret != null;
 
-    if (!wantsGoogle) return { _tag: "Disabled" } as const;
-    if (authMode !== "" && authMode !== "google") {
-      return yield* Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_AUTH must be \"google\" when set" }));
+    if (authMode !== "" && authMode !== "oauth") {
+      return yield* Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_AUTH must be \"oauth\" when set" }));
     }
     if (!clientId || !clientSecret || !sessionSecret) {
       return yield* Effect.fail(
         new ServerConfigError({
-          message: "Google auth requires SCRATCHWORK_GOOGLE_CLIENT_ID, SCRATCHWORK_GOOGLE_CLIENT_SECRET, and SCRATCHWORK_SESSION_SECRET",
+          message: "OAuth is required: set SCRATCHWORK_GOOGLE_CLIENT_ID, SCRATCHWORK_GOOGLE_CLIENT_SECRET, and SCRATCHWORK_SESSION_SECRET",
         }),
       );
     }
@@ -136,7 +129,6 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
     }
 
     return {
-      _tag: "Google",
       clientId,
       clientSecret,
       sessionSecret,

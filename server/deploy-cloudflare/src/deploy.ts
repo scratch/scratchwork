@@ -23,12 +23,11 @@ export interface CloudflareRouteConfig {
 
 export interface ScratchworkServerConfig {
   readonly publicUrl?: string;
-  readonly auth?: "google";
+  readonly auth?: "oauth";
   readonly googleClientId?: string;
   readonly authAllowedEmails?: string;
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
-  readonly allowPublicPublish?: boolean;
   readonly allowedUsers?: string;
   readonly maxVisibility?: string;
   readonly shareAllowedDomains?: string;
@@ -222,7 +221,6 @@ function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScra
   if (config.projectPath != null) env.SCRATCHWORK_PROJECT_PATH = config.projectPath;
   if (config.defaultWorkspace != null) env.SCRATCHWORK_DEFAULT_WORKSPACE = config.defaultWorkspace === "required" ? "" : config.defaultWorkspace;
   if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
-  if (config.allowPublicPublish != null) env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH = config.allowPublicPublish ? "1" : "";
   if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
   if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;
   return env;
@@ -321,14 +319,14 @@ function zoneFor(pattern: string, configured: string | undefined): Record<string
   return labels.length >= 2 ? { zone_name: labels.slice(-2).join(".") } : {};
 }
 
-/** Refuses accidental public deploys and validates required Google auth secrets. */
+/** Validates required OAuth secrets. Auth cannot be disabled. */
 function validateDeploymentAuth(env: DeployEnv): void {
-  if ((env.SCRATCHWORK_AUTH ?? "").toLowerCase() !== "google") {
-    if (env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH === "1") return;
-    throw new Error("Cloudflare deploys require SCRATCHWORK_AUTH=google or explicit SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1");
+  const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
+  if (authMode !== "" && authMode !== "oauth") {
+    throw new Error('SCRATCHWORK_AUTH must be "oauth" when set');
   }
   for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
-    if (!env[key]) throw new Error(`${key} is required when SCRATCHWORK_AUTH=google`);
+    if (!env[key]) throw new Error(`${key} is required: Cloudflare deploys always use OAuth`);
   }
 }
 

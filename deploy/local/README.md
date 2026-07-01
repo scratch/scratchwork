@@ -10,6 +10,14 @@ Run from the repo root:
 bun run deploy:local
 ```
 
+OAuth credentials are required (auth cannot be disabled):
+
+```sh
+SCRATCHWORK_GOOGLE_CLIENT_ID=...
+SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
+SCRATCHWORK_SESSION_SECRET=...  # at least 32 bytes
+```
+
 Useful environment variables:
 
 ```sh

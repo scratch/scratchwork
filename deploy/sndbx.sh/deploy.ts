@@ -7,7 +7,7 @@ const config = {
   server: {
     appDomain: "app.sndbx.sh",
     contentDomain: "pages.sndbx.sh",
-    auth: "google",
+    auth: "oauth",
     authSessionSeconds: 2_592_000,
     allowedUsers: "public",
     maxVisibility: "public",

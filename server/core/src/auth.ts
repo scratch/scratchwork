@@ -67,16 +67,15 @@ export class AuthError extends Data.TaggedError("AuthError")<{
 }> {}
 
 export interface AuthShape {
-  readonly enabled: boolean;
   readonly currentUser: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<AuthUser | null, AuthError>;
   readonly requireUser: (
     request: HttpServerRequest.HttpServerRequest,
-  ) => Effect.Effect<AuthUser | null, AuthError>;
+  ) => Effect.Effect<AuthUser, AuthError>;
   readonly requireApiUser: (
     request: HttpServerRequest.HttpServerRequest,
-  ) => Effect.Effect<AuthUser | null, AuthError>;
+  ) => Effect.Effect<AuthUser, AuthError>;
   readonly login: (
     request: HttpServerRequest.HttpServerRequest,
     url: URL,
@@ -108,26 +107,9 @@ export const AuthLive: Layer.Layer<Auth, never, ServerConfig> = Layer.effect(
   Effect.map(ServerConfig, (config) => makeAuth(config.auth)),
 );
 
-/** Creates the auth service implementation for disabled or Google auth modes. */
+/** Creates the auth service implementation over Google OAuth. */
 export function makeAuth(config: AuthConfig): AuthShape {
-  if (config._tag === "Disabled") {
-    return Auth.of({
-      enabled: false,
-      currentUser: () => Effect.succeed(null),
-      requireUser: () => Effect.succeed(null),
-      requireApiUser: () => Effect.succeed(null),
-      login: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
-      callback: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
-      logout: () => HttpServerResponse.redirect("/", { status: 302 }),
-      loginRedirect: () => HttpServerResponse.redirect("/", { status: 302 }),
-      issueProjectAccessToken: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
-      verifyProjectAccessToken: () => Effect.succeed(null),
-    });
-  }
-
   return Auth.of({
-    enabled: true,
-
     currentUser: (request) =>
       Effect.gen(function* () {
         const token = bearerToken(request) ?? cookieToken(request);
@@ -275,7 +257,7 @@ export function makeAuth(config: AuthConfig): AuthShape {
 /** Signs a portable session token for browser cookies and CLI bearer auth. */
 export function createSessionToken(
   user: AuthUser,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<string, AuthError> {
   const issuedAt = epochSeconds();
   return signValue(
@@ -293,7 +275,7 @@ export function createSessionToken(
 /** Reads bearer or cookie credentials and verifies the contained session token. */
 function verifySessionTokenFromRequest(
   request: HttpServerRequest.HttpServerRequest,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<AuthUser | null, AuthError> {
   const token = bearerToken(request) ?? cookieToken(request);
   return token == null ? Effect.succeed(null) : verifySessionToken(token, config);
@@ -302,7 +284,7 @@ function verifySessionTokenFromRequest(
 /** Verifies one signed session token and applies current allow-list rules. */
 function verifySessionToken(
   token: string,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<AuthUser | null, AuthError> {
   return Effect.gen(function* () {
     const payload = yield* verifySignedValue<SessionPayload>(token, config.sessionSecret);
@@ -317,7 +299,7 @@ function exchangeGoogleCode(
   code: string,
   redirectUri: string,
   nonce: string,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<AuthUser, AuthError> {
   return Effect.gen(function* () {
     const idToken = yield* Effect.tryPromise({
@@ -366,7 +348,7 @@ function exchangeGoogleCode(
 /** Converts verified Google claims into the auth user shape. */
 function userFromClaims(
   claims: GoogleIdTokenClaims,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): AuthUser | null {
   const user: AuthUser = {
     id: claims.sub,
@@ -378,7 +360,7 @@ function userFromClaims(
 }
 
 /** Checks whether a verified Google user passes email/domain allow lists. */
-function allowedUser(user: AuthUser, config: Extract<AuthConfig, { readonly _tag: "Google" }>): boolean {
+function allowedUser(user: AuthUser, config: AuthConfig): boolean {
   return accessGroupMatches(config.allowedUsers, user);
 }
 

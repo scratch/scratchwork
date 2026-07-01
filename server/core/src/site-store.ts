@@ -56,7 +56,7 @@ export interface SiteRecord {
   readonly project: string;
   readonly routePath: string;
   readonly visibility: AccessGroup;
-  readonly owner?: SiteOwner;
+  readonly owner: SiteOwner;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly currentRevisionId: string;
@@ -111,21 +111,21 @@ export class SiteStoreError extends Data.TaggedError("SiteStoreError")<{
 export interface SiteStoreShape {
   readonly publish: (
     request: PublishRequest,
-    user: AuthUser | null,
+    user: AuthUser,
     config: ServerConfigShape,
   ) => Effect.Effect<PublishResult, SiteStoreError | StorageError>;
   readonly loadByRoute: (routePath: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
   readonly loadProject: (workspace: string, project: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
-  readonly listProjects: (user: AuthUser | null) => Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError | StorageError>;
+  readonly listProjects: (user: AuthUser) => Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError | StorageError>;
   readonly unpublish: (
     workspace: string,
     project: string,
-    user: AuthUser | null,
+    user: AuthUser,
   ) => Effect.Effect<SiteRecord, SiteStoreError | StorageError>;
   readonly deleteProject: (
     workspace: string,
     project: string,
-    user: AuthUser | null,
+    user: AuthUser,
   ) => Effect.Effect<void, SiteStoreError | StorageError>;
   readonly bundle: (
     workspace: string,
@@ -163,7 +163,7 @@ const SiteRecordSchema = Schema.Struct({
   project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
   routePath: Schema.String.pipe(Schema.filter((value) => safeRoutePath(value) || "Invalid route path")),
   visibility: Schema.String,
-  owner: Schema.optional(SiteOwnerSchema),
+  owner: SiteOwnerSchema,
   createdAt: Schema.String,
   updatedAt: Schema.String,
   currentRevisionId: Schema.String,
@@ -221,7 +221,7 @@ function publishProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
-  user: AuthUser | null,
+  user: AuthUser,
   config: ServerConfigShape,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
@@ -252,7 +252,7 @@ function createProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
-  user: AuthUser | null,
+  user: AuthUser,
   config: ServerConfigShape,
   workspace: string,
   project: string,
@@ -279,7 +279,7 @@ function writeNewProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
-  user: AuthUser | null,
+  user: AuthUser,
   workspace: string,
   project: string,
   routePath: string,
@@ -316,7 +316,7 @@ function updateProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
-  user: AuthUser | null,
+  user: AuthUser,
   loaded: LoadedDbRecord<SiteRecord>,
   visibility: AccessGroup,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
@@ -332,7 +332,7 @@ function updateProject(
       project: loaded.value.project,
       routePath: loaded.value.routePath,
       visibility,
-      user: loaded.value.owner ?? user,
+      user: loaded.value.owner,
       createdAt: loaded.value.createdAt,
       updatedAt: now,
       revision,
@@ -387,19 +387,13 @@ function loadPublishedSiteByRoute(
   });
 }
 
-/** Lists projects owned by the given user, or every project when auth is disabled. */
+/** Lists projects owned by the given user. */
 function listProjects(
   _storage: ObjectStorageShape,
   db: PrimitiveDbShape,
-  user: AuthUser | null,
+  user: AuthUser,
 ): Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError> {
   return Effect.gen(function* () {
-    if (user == null) {
-      const records = yield* db.list<JsonValue>(PROJECTS_NAMESPACE).pipe(Effect.mapError(dbError));
-      const decoded = yield* Effect.forEach(records.records, (record) => decodeDbRecord(record, SiteRecordSchema));
-      return decoded.map((record) => record.value);
-    }
-
     const index = yield* db.list<JsonValue>(OWNER_INDEX_NAMESPACE, { prefix: `${encodeKeySegment(user.id)}/` }).pipe(Effect.mapError(dbError));
     const loaded = yield* Effect.forEach(index.records, (record) =>
       decodeDbRecord(record, OwnerProjectRecordSchema).pipe(
@@ -415,7 +409,7 @@ function unpublishProject(
   db: PrimitiveDbShape,
   workspace: string,
   project: string,
-  user: AuthUser | null,
+  user: AuthUser,
 ): Effect.Effect<SiteRecord, SiteStoreError> {
   return Effect.gen(function* () {
     const loaded = yield* loadSiteRecord(db, workspace, project);
@@ -433,7 +427,7 @@ function deleteProject(
   db: PrimitiveDbShape,
   workspace: string,
   project: string,
-  user: AuthUser | null,
+  user: AuthUser,
 ): Effect.Effect<void, SiteStoreError> {
   return Effect.gen(function* () {
     const loaded = yield* loadSiteRecord(db, workspace, project);
@@ -443,9 +437,7 @@ function deleteProject(
     }
     yield* db.delete(PROJECTS_NAMESPACE, projectKey(workspace, project), { ifMatch: loaded.version }).pipe(Effect.mapError(dbError));
     yield* db.delete(ROUTES_NAMESPACE, loaded.value.routePath).pipe(Effect.catchAll(() => Effect.void));
-    if (loaded.value.owner != null) {
-      yield* db.delete(OWNER_INDEX_NAMESPACE, ownerIndexKey(loaded.value.owner, workspace, project)).pipe(Effect.catchAll(() => Effect.void));
-    }
+    yield* db.delete(OWNER_INDEX_NAMESPACE, ownerIndexKey(loaded.value.owner, workspace, project)).pipe(Effect.catchAll(() => Effect.void));
   });
 }
 
@@ -530,14 +522,13 @@ function buildRevision(
 /** Returns true when the user may read a project under server policy. */
 export function canReadProject(record: SiteRecord, user: AuthUser | null, config: ServerConfigShape): boolean {
   if (!accessGroupIsSubset(record.visibility, config.maxVisibility)) return false;
-  if (canWriteProject(record, user)) return true;
+  if (user != null && canWriteProject(record, user)) return true;
   return accessGroupMatches(record.visibility, user);
 }
 
-/** Returns true when the user owns the project. Unowned projects are writable only without auth. */
-export function canWriteProject(record: SiteRecord, user: AuthUser | null): boolean {
-  if (record.owner == null) return user == null;
-  return user != null && (record.owner.id === user.id || record.owner.email.toLowerCase() === user.email.toLowerCase());
+/** Returns true when the user owns the project. */
+export function canWriteProject(record: SiteRecord, user: AuthUser): boolean {
+  return record.owner.id === user.id || record.owner.email.toLowerCase() === user.email.toLowerCase();
 }
 
 /** Splits a content path into the longest route prefix and remaining site path. */
@@ -572,7 +563,7 @@ function siteRecord(input: {
   readonly project: string;
   readonly routePath: string;
   readonly visibility: AccessGroup;
-  readonly user: AuthUser | SiteOwner | null | undefined;
+  readonly user: AuthUser | SiteOwner;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly revision: SiteRevisionRecord;
@@ -603,25 +594,24 @@ function validateVisibility(visibility: AccessGroup, config: ServerConfigShape):
   return Effect.void;
 }
 
-function defaultWorkspace(config: ServerConfigShape, user: AuthUser | null): string | null {
+function defaultWorkspace(config: ServerConfigShape, user: AuthUser): string | null {
   if (config.defaultWorkspace === "required") return null;
   if (config.defaultWorkspace === "random") return randomSlug();
-  if (user != null) return workspaceFromEmail(user.email);
-  return "default";
+  return workspaceFromEmail(user.email);
 }
 
 function routePathForProject(
   config: ServerConfigShape,
-  user: AuthUser | null,
+  user: AuthUser,
   workspace: string,
   project: string,
 ): string {
   if (config.projectPath === "random") return randomSlug();
   if (config.projectPath === "workspace/project") return `${workspace}/${project}`;
-  const email = user?.email.toLowerCase();
-  const username = email == null ? workspace : workspaceFromEmail(email);
+  const email = user.email.toLowerCase();
+  const username = workspaceFromEmail(email);
   if (config.projectPath === "username/project") return `${username}/${project}`;
-  const domain = email?.split("@")[1];
+  const domain = email.split("@")[1];
   return domain == null ? `${workspace}/${project}` : `${domain}/${username}/${project}`;
 }
 
@@ -672,7 +662,6 @@ function putRouteRecord(
 }
 
 function putOwnerIndex(db: PrimitiveDbShape, record: SiteRecord): Effect.Effect<void, SiteStoreError> {
-  if (record.owner == null) return Effect.void;
   const value: OwnerProjectRecord = { version: 1, workspace: record.workspace, project: record.project };
   return db.put(OWNER_INDEX_NAMESPACE, ownerIndexKey(record.owner, record.workspace, record.project), value as unknown as JsonValue).pipe(
     Effect.asVoid,
@@ -765,8 +754,7 @@ function serialize(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
-function ownerFromUser(user: AuthUser | SiteOwner | null | undefined): SiteOwner | undefined {
-  if (user == null) return undefined;
+function ownerFromUser(user: AuthUser | SiteOwner): SiteOwner {
   return { id: user.id, email: user.email.toLowerCase() };
 }
 

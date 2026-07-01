@@ -281,9 +281,6 @@ function servePublishedSite(
 
     const user = tokenUser ?? (yield* auth.currentUser(request));
     if (!canReadProject(site.record, user, config)) {
-      if (!auth.enabled) {
-        return yield* Effect.fail(new HttpError({ status: 403, message: "Project not found" }));
-      }
       return projectAccessRedirect(request, url, site, config);
     }
 

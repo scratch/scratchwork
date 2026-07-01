@@ -44,7 +44,13 @@ export async function appHandler(options: {
     projectPath: "random",
     defaultWorkspace: "personal",
     defaultVisibility: "public",
-    auth: { _tag: "Disabled" },
+    auth: {
+      clientId: "test-client-id",
+      clientSecret: "test-client-secret",
+      sessionSecret: "test-session-secret-test-session-secret",
+      allowedUsers: "public",
+      sessionTtlSeconds: 60,
+    },
     ...options.config,
   };
   const base = Layer.mergeAll(
@@ -69,7 +75,6 @@ export function memoryStorageLayer(
 /** Provides deterministic auth behavior for app tests. */
 export function testAuth(user: AuthUser | null, apiUser = user): Layer.Layer<Auth> {
   const shape: AuthShape = {
-    enabled: true,
     currentUser: () => Effect.succeed(user),
     requireUser: () => user == null
       ? Effect.fail(new AuthError({ status: 401, message: "Authentication required" }))

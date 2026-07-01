@@ -65,8 +65,9 @@ export const server = {
   appDomain: "app.example.com",
   contentDomain: "pages.example.com",
 
-  // Authentication method (only "google" is supported, for now)
-  auth: "google",
+  // Authentication method. "oauth" is the only supported option; auth cannot be disabled.
+  // Every server requires OAuth credentials, and every project has an owner.
+  auth: "oauth",
 
   // Optional login/API restrictions. Uses the same group syntax as project visibility.
   // Defaults to "public" unless a deploy target sets a tighter value.
@@ -89,7 +90,7 @@ export const server = {
   projectPath: "random",
 
   // Must be one of:
-  //   "personal" - derive from the user's email username, or "default" when auth is disabled
+  //   "personal" - derive from the user's email username
   //   "random" - generate a workspace when the CLI does not send one
   //   "required" - reject publishes that omit workspace
   defaultWorkspace: "personal",
