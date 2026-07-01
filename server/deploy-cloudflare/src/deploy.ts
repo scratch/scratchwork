@@ -15,7 +15,7 @@ export interface CloudflareRouteConfig {
   readonly customDomain?: boolean;
 }
 
-export interface CloudflareServerConfig {
+export interface ScratchworkServerConfig {
   readonly publicUrl?: string;
   readonly auth?: "google";
   readonly googleClientId?: string;
@@ -23,6 +23,9 @@ export interface CloudflareServerConfig {
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
   readonly allowPublicPublish?: boolean;
+}
+
+export interface CloudflareDeployConfig {
   readonly workerName?: string;
   readonly compatibilityDate?: string;
   readonly r2Bucket?: string | CloudflareR2BucketConfig;
@@ -32,6 +35,14 @@ export interface CloudflareServerConfig {
   readonly routes?: ReadonlyArray<CloudflareRouteConfig>;
   readonly skipBucketCreate?: boolean;
 }
+
+export interface CloudflareDeployServerConfig {
+  readonly server?: ScratchworkServerConfig;
+  readonly deploy?: CloudflareDeployConfig;
+}
+
+/** @deprecated Use CloudflareDeployServerConfig. */
+export type CloudflareServerConfig = CloudflareDeployServerConfig;
 
 export interface CloudflareDeployOptions {
   readonly envFile?: string;
@@ -49,8 +60,11 @@ export interface CloudflareDeployResult {
   readonly workerPath: string;
 }
 
-interface ResolvedCloudflareServerConfig {
+interface ResolvedScratchworkServerConfig {
   readonly publicUrl?: string;
+}
+
+interface ResolvedCloudflareDeployConfig {
   readonly workerName: string;
   readonly compatibilityDate: string;
   readonly bucketName: string;
@@ -69,7 +83,7 @@ const configPath = join(dist, "wrangler.jsonc");
 
 /** Deploys the Scratchwork server as a Cloudflare Worker. */
 export async function deployServer(
-  config: CloudflareServerConfig = {},
+  config: CloudflareDeployServerConfig = {},
   options: CloudflareDeployOptions = {},
 ): Promise<CloudflareDeployResult> {
   const loadedEnv = await loadDeployEnv({
@@ -79,25 +93,32 @@ export async function deployServer(
     loadDefaultEnvFiles: options.loadPackageEnvFiles === true,
     explicitEnvRoots: options.loadPackageEnvFiles === true ? undefined : [process.cwd()],
   });
-  const resolved = resolveConfig(config, loadedEnv.env);
-  const env = { ...loadedEnv.env, ...configEnv(config, resolved) };
+  const serverConfig = config.server ?? {};
+  const deployConfig = config.deploy ?? {};
+  const resolvedDeploy = resolveDeployConfig(deployConfig, loadedEnv.env);
+  const resolvedServer = resolveServerConfig(serverConfig, loadedEnv.env, resolvedDeploy);
+  const env = {
+    ...loadedEnv.env,
+    ...serverConfigEnv(serverConfig, resolvedServer),
+    ...deployConfigEnv(resolvedDeploy),
+  };
   const commandEnv = definedEnv(env);
   const { run } = createRunner(commandEnv);
 
   await mkdir(dist, { recursive: true });
   validateDeploymentAuth(env);
   await run("bun", ["build", "src/worker.ts", "--target=browser", "--format=esm", `--outfile=${workerPath}`], { cwd: root });
-  const routes = cloudflareRoutes(resolved);
-  await writeConfig(resolved, env, routes);
-  await ensureBucket(resolved, run);
+  const routes = cloudflareRoutes(resolvedDeploy);
+  await writeConfig(resolvedDeploy, resolvedServer, env, routes);
+  await ensureBucket(resolvedDeploy, run);
   await run("wrangler", ["deploy", "--config", configPath, "--no-bundle"], { cwd: root });
   await putSecret(commandEnv, env, "SCRATCHWORK_GOOGLE_CLIENT_SECRET");
   await putSecret(commandEnv, env, "SCRATCHWORK_SESSION_SECRET");
 
   return {
-    workerName: resolved.workerName,
-    bucketName: resolved.bucketName,
-    publicUrl: resolved.publicUrl,
+    workerName: resolvedDeploy.workerName,
+    bucketName: resolvedDeploy.bucketName,
+    publicUrl: resolvedServer.publicUrl,
     routes,
     configPath,
     workerPath,
@@ -108,19 +129,32 @@ function deployArgv(options: CloudflareDeployOptions): ReadonlyArray<string> {
   return options.envFile == null ? options.argv ?? [] : ["--env", options.envFile, ...(options.argv ?? [])];
 }
 
-function resolveConfig(config: CloudflareServerConfig, env: DeployEnv): ResolvedCloudflareServerConfig {
+function resolveServerConfig(
+  config: ScratchworkServerConfig,
+  env: DeployEnv,
+  deploy: ResolvedCloudflareDeployConfig,
+): ResolvedScratchworkServerConfig {
+  return {
+    publicUrl: optional(config.publicUrl)
+      ?? optional(env.SCRATCHWORK_PUBLIC_URL)
+      ?? (deploy.customDomain == null ? undefined : `https://${deploy.customDomain}`),
+  };
+}
+
+function resolveDeployConfig(config: CloudflareDeployConfig, env: DeployEnv): ResolvedCloudflareDeployConfig {
   const customDomain = optional(config.customDomain) ?? optional(env.SCRATCHWORK_CLOUDFLARE_CUSTOM_DOMAIN);
   const bucket = config.r2Bucket;
   const bucketName = typeof bucket === "string"
     ? bucket
     : bucket?.name ?? optional(env.SCRATCHWORK_R2_BUCKET) ?? "scratchwork-sites";
-  const bucketBinding = typeof bucket === "string" || bucket == null ? "SCRATCHWORK_R2" : bucket.binding ?? "SCRATCHWORK_R2";
+  const bucketBinding = typeof bucket === "string" || bucket == null
+    ? "SCRATCHWORK_R2"
+    : bucket.binding ?? "SCRATCHWORK_R2";
   if (bucketBinding !== "SCRATCHWORK_R2") {
     throw new Error("Cloudflare r2Bucket.binding must be SCRATCHWORK_R2");
   }
 
   return {
-    publicUrl: optional(config.publicUrl) ?? optional(env.SCRATCHWORK_PUBLIC_URL) ?? (customDomain == null ? undefined : `https://${customDomain}`),
     workerName: optional(config.workerName) ?? optional(env.SCRATCHWORK_CLOUDFLARE_WORKER_NAME) ?? "scratchwork-server",
     compatibilityDate: optional(config.compatibilityDate) ?? optional(env.SCRATCHWORK_CLOUDFLARE_COMPATIBILITY_DATE) ?? "2026-06-01",
     bucketName,
@@ -133,7 +167,7 @@ function resolveConfig(config: CloudflareServerConfig, env: DeployEnv): Resolved
   };
 }
 
-function configEnv(config: CloudflareServerConfig, resolved: ResolvedCloudflareServerConfig): DeployEnv {
+function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScratchworkServerConfig): DeployEnv {
   const env: DeployEnv = {};
   if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
   if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
@@ -142,6 +176,11 @@ function configEnv(config: CloudflareServerConfig, resolved: ResolvedCloudflareS
   if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
   if (config.allowPublicPublish != null) env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH = config.allowPublicPublish ? "1" : "";
   if (resolved.publicUrl != null) env.SCRATCHWORK_PUBLIC_URL = resolved.publicUrl;
+  return env;
+}
+
+function deployConfigEnv(resolved: ResolvedCloudflareDeployConfig): DeployEnv {
+  const env: DeployEnv = {};
   env.SCRATCHWORK_CLOUDFLARE_WORKER_NAME = resolved.workerName;
   env.SCRATCHWORK_R2_BUCKET = resolved.bucketName;
   if (resolved.customDomain != null) env.SCRATCHWORK_CLOUDFLARE_CUSTOM_DOMAIN = resolved.customDomain;
@@ -154,7 +193,8 @@ function configEnv(config: CloudflareServerConfig, resolved: ResolvedCloudflareS
 
 /** Writes the generated Wrangler config consumed by the deploy command. */
 async function writeConfig(
-  config: ResolvedCloudflareServerConfig,
+  config: ResolvedCloudflareDeployConfig,
+  server: ResolvedScratchworkServerConfig,
   env: DeployEnv,
   routes: ReadonlyArray<Record<string, string | boolean>>,
 ): Promise<void> {
@@ -164,7 +204,7 @@ async function writeConfig(
   copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_EMAILS");
   copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_AUTH_SESSION_SECONDS");
-  if (config.publicUrl != null && config.publicUrl !== "") vars.SCRATCHWORK_PUBLIC_URL = config.publicUrl;
+  if (server.publicUrl != null && server.publicUrl !== "") vars.SCRATCHWORK_PUBLIC_URL = server.publicUrl;
   await writeFile(
     configPath,
     JSON.stringify(
@@ -188,7 +228,7 @@ async function writeConfig(
 }
 
 /** Builds optional custom-domain and route entries for Wrangler. */
-function cloudflareRoutes(config: ResolvedCloudflareServerConfig): ReadonlyArray<Record<string, string | boolean>> {
+function cloudflareRoutes(config: ResolvedCloudflareDeployConfig): ReadonlyArray<Record<string, string | boolean>> {
   if (config.routes != null) {
     return config.routes.map((route) => ({
       pattern: route.pattern,
@@ -245,7 +285,7 @@ async function putSecret(commandEnv: Record<string, string>, env: DeployEnv, key
 
 /** Creates the configured R2 bucket unless bucket creation is explicitly skipped. */
 async function ensureBucket(
-  config: ResolvedCloudflareServerConfig,
+  config: ResolvedCloudflareDeployConfig,
   run: ReturnType<typeof createRunner>["run"],
 ): Promise<void> {
   if (config.skipBucketCreate) return;

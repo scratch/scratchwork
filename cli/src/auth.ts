@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import { CliError } from "./errors";
 
 const AUTH_FILE = "auth.json";
+const DEFAULT_APP_SUBDOMAIN = "www";
 
 interface AuthRecord {
   readonly token: string;
@@ -55,6 +56,7 @@ export function writeAuthToken(
 export function normalizeServerUrl(value: string): string {
   const input = value.trim();
   const url = new URL(hasScheme(input) ? input : `${defaultScheme(input)}://${input}`);
+  if (isNakedPublicHost(url.hostname)) url.hostname = `${DEFAULT_APP_SUBDOMAIN}.${url.hostname}`;
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/+$/, "");
@@ -134,6 +136,10 @@ function hasScheme(value: string): boolean {
 function defaultScheme(value: string): "http" | "https" {
   const host = hostFromServer(value).toLowerCase();
   return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" ? "http" : "https";
+}
+
+function isNakedPublicHost(host: string): boolean {
+  return /^[A-Za-z0-9-]+\.[A-Za-z0-9-]+$/.test(host);
 }
 
 function hostFromServer(value: string): string {

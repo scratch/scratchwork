@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { definedEnv, loadDeployEnv, type DeployEnv } from "./deploy-env";
 import { createRunner, type RunOptions, type RunResult } from "./deploy-proc";
 
-export interface AwsServerConfig {
+export interface ScratchworkServerConfig {
   readonly publicUrl?: string;
   readonly auth?: "google";
   readonly googleClientId?: string;
@@ -12,12 +12,23 @@ export interface AwsServerConfig {
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
   readonly allowPublicPublish?: boolean;
+}
+
+export interface AwsDeployConfig {
   readonly region?: string;
   readonly storageRegion?: string;
   readonly functionName?: string;
   readonly roleName?: string;
   readonly s3Bucket?: string;
 }
+
+export interface AwsDeployServerConfig {
+  readonly server?: ScratchworkServerConfig;
+  readonly deploy?: AwsDeployConfig;
+}
+
+/** @deprecated Use AwsDeployServerConfig. */
+export type AwsServerConfig = AwsDeployServerConfig;
 
 export interface AwsDeployOptions {
   readonly envFile?: string;
@@ -36,8 +47,11 @@ export interface AwsDeployResult {
   readonly storageRegion: string;
 }
 
-interface ResolvedAwsServerConfig {
+interface ResolvedScratchworkServerConfig {
   readonly publicUrl?: string;
+}
+
+interface ResolvedAwsDeployConfig {
   readonly region: string;
   readonly storageRegion: string;
   readonly functionName: string;
@@ -55,7 +69,7 @@ const environmentPath = join(dist, "environment.json");
 
 /** Deploys the Scratchwork server as an AWS Lambda Function URL. */
 export async function deployServer(
-  config: AwsServerConfig = {},
+  config: AwsDeployServerConfig = {},
   options: AwsDeployOptions = {},
 ): Promise<AwsDeployResult> {
   const loadedEnv = await loadDeployEnv({
@@ -65,12 +79,19 @@ export async function deployServer(
     loadDefaultEnvFiles: options.loadPackageEnvFiles === true,
     explicitEnvRoots: options.loadPackageEnvFiles === true ? undefined : [process.cwd()],
   });
-  const resolved = resolveConfig(config, loadedEnv.env);
-  const env = { ...loadedEnv.env, ...configEnv(config, resolved) };
+  const serverConfig = config.server ?? {};
+  const deployConfig = config.deploy ?? {};
+  const resolvedServer = resolveServerConfig(serverConfig, loadedEnv.env);
+  const resolvedDeploy = resolveDeployConfig(deployConfig, loadedEnv.env);
+  const env = {
+    ...loadedEnv.env,
+    ...serverConfigEnv(serverConfig, resolvedServer),
+    ...deployConfigEnv(resolvedDeploy),
+  };
   const commandEnv = definedEnv(env);
   const { run } = createRunner(commandEnv);
   const aws = (args: ReadonlyArray<string>, runOptions: RunOptions = {}) =>
-    run("aws", ["--region", resolved.region, ...args], runOptions);
+    run("aws", ["--region", resolvedDeploy.region, ...args], runOptions);
   const awsText = async (args: ReadonlyArray<string>, runOptions: RunOptions = {}) => {
     const result = await aws(args, { ...runOptions, capture: true });
     return result.ok ? result.stdout.trim() : "";
@@ -83,22 +104,22 @@ export async function deployServer(
   await run("zip", ["-j", zipPath, handlerPath], { cwd: root });
 
   const accountId = await awsText(["sts", "get-caller-identity", "--query", "Account", "--output", "text"]);
-  const bucketName = resolved.s3Bucket ?? `scratchwork-server-${accountId}-${resolved.storageRegion}`;
+  const bucketName = resolvedDeploy.s3Bucket ?? `scratchwork-server-${accountId}-${resolvedDeploy.storageRegion}`;
 
-  await ensureBucket(aws, bucketName, resolved.storageRegion);
-  const roleArn = await ensureRole(aws, awsText, resolved.roleName, resolved.functionName, bucketName);
-  await writeEnvironment(env, bucketName, resolved.storageRegion);
-  await upsertFunction(aws, resolved.functionName, roleArn);
-  const url = await ensureFunctionUrl(aws, awsText, resolved.functionName);
+  await ensureBucket(aws, bucketName, resolvedDeploy.storageRegion);
+  const roleArn = await ensureRole(aws, awsText, resolvedDeploy.roleName, resolvedDeploy.functionName, bucketName);
+  await writeEnvironment(env, bucketName, resolvedDeploy.storageRegion);
+  await upsertFunction(aws, resolvedDeploy.functionName, roleArn);
+  const url = await ensureFunctionUrl(aws, awsText, resolvedDeploy.functionName);
 
   return {
     url,
-    functionName: resolved.functionName,
-    roleName: resolved.roleName,
+    functionName: resolvedDeploy.functionName,
+    roleName: resolvedDeploy.roleName,
     roleArn,
     bucketName,
-    region: resolved.region,
-    storageRegion: resolved.storageRegion,
+    region: resolvedDeploy.region,
+    storageRegion: resolvedDeploy.storageRegion,
   };
 }
 
@@ -106,12 +127,21 @@ function deployArgv(options: AwsDeployOptions): ReadonlyArray<string> {
   return options.envFile == null ? options.argv ?? [] : ["--env", options.envFile, ...(options.argv ?? [])];
 }
 
-function resolveConfig(config: AwsServerConfig, env: DeployEnv): ResolvedAwsServerConfig {
-  const region = optional(config.region) ?? optional(env.AWS_REGION) ?? optional(env.AWS_DEFAULT_REGION) ?? optional(env.SCRATCHWORK_S3_REGION) ?? "us-east-1";
+function resolveServerConfig(config: ScratchworkServerConfig, env: DeployEnv): ResolvedScratchworkServerConfig {
+  return {
+    publicUrl: optional(config.publicUrl) ?? optional(env.SCRATCHWORK_PUBLIC_URL),
+  };
+}
+
+function resolveDeployConfig(config: AwsDeployConfig, env: DeployEnv): ResolvedAwsDeployConfig {
+  const region = optional(config.region)
+    ?? optional(env.AWS_REGION)
+    ?? optional(env.AWS_DEFAULT_REGION)
+    ?? optional(env.SCRATCHWORK_S3_REGION)
+    ?? "us-east-1";
   const storageRegion = optional(config.storageRegion) ?? optional(env.SCRATCHWORK_S3_REGION) ?? region;
   const functionName = optional(config.functionName) ?? optional(env.SCRATCHWORK_AWS_FUNCTION_NAME) ?? "scratchwork-server";
   return {
-    publicUrl: optional(config.publicUrl) ?? optional(env.SCRATCHWORK_PUBLIC_URL),
     region,
     storageRegion,
     functionName,
@@ -120,7 +150,7 @@ function resolveConfig(config: AwsServerConfig, env: DeployEnv): ResolvedAwsServ
   };
 }
 
-function configEnv(config: AwsServerConfig, resolved: ResolvedAwsServerConfig): DeployEnv {
+function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScratchworkServerConfig): DeployEnv {
   const env: DeployEnv = {};
   if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
   if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
@@ -129,6 +159,11 @@ function configEnv(config: AwsServerConfig, resolved: ResolvedAwsServerConfig): 
   if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
   if (config.allowPublicPublish != null) env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH = config.allowPublicPublish ? "1" : "";
   if (resolved.publicUrl != null) env.SCRATCHWORK_PUBLIC_URL = resolved.publicUrl;
+  return env;
+}
+
+function deployConfigEnv(resolved: ResolvedAwsDeployConfig): DeployEnv {
+  const env: DeployEnv = {};
   env.AWS_REGION = resolved.region;
   env.SCRATCHWORK_S3_REGION = resolved.storageRegion;
   env.SCRATCHWORK_AWS_FUNCTION_NAME = resolved.functionName;

@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import { bytesToBase64, PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
 import { normalizeServerUrl, readAuthToken } from "../auth";
+import { openBrowser } from "../browser";
 import { resolveDevTarget } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
 import type { PublishConfig } from "../types";
@@ -64,6 +65,7 @@ export function runPublish(
 
     yield* writeMetadata(target.root, server, response).pipe(Effect.catchAll(() => Effect.void));
     yield* printResult(response, bundle);
+    yield* openBrowser(response.url);
   });
 }
 
