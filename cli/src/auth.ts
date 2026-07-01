@@ -53,7 +53,11 @@ export function writeAuthToken(
 }
 
 export function normalizeServerUrl(value: string): string {
-  return new URL(value).toString().replace(/\/+$/, "");
+  const input = value.trim();
+  const url = new URL(hasScheme(input) ? input : `${defaultScheme(input)}://${input}`);
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/+$/, "");
 }
 
 export function defaultServerUrl(value: string | undefined): string {
@@ -121,4 +125,22 @@ function parseJson(text: string): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function hasScheme(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value);
+}
+
+function defaultScheme(value: string): "http" | "https" {
+  const host = hostFromServer(value).toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" ? "http" : "https";
+}
+
+function hostFromServer(value: string): string {
+  const authority = value.split(/[/?#]/, 1)[0] ?? "";
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    return end === -1 ? authority : authority.slice(1, end);
+  }
+  return authority.split(":", 1)[0] ?? "";
 }

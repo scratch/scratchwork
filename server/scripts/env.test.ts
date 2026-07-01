@@ -29,4 +29,53 @@ describe("loadDeployEnv", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("can isolate explicit env loading to caller roots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scratchwork-env-"));
+    const packageRoot = join(root, "server", "deploy-cloudflare");
+    const deployRoot = join(root, "deploy", "sndbx.sh");
+    try {
+      await mkdir(packageRoot, { recursive: true });
+      await mkdir(deployRoot, { recursive: true });
+      await writeFile(join(root, "server", ".env"), "VALUE=server\nSERVER_ONLY=1\n");
+      await writeFile(join(packageRoot, ".env"), "VALUE=package\nPACKAGE_ONLY=1\n");
+      await writeFile(join(deployRoot, ".env"), "VALUE=deploy\nDEPLOY_ONLY=1\n");
+
+      const loaded = await loadDeployEnv({
+        packageRoot,
+        argv: ["--env", ".env"],
+        processEnv: {},
+        loadDefaultEnvFiles: false,
+        explicitEnvRoots: [deployRoot],
+      });
+
+      expect(loaded.env.VALUE).toBe("deploy");
+      expect(loaded.env.DEPLOY_ONLY).toBe("1");
+      expect(loaded.env.SERVER_ONLY).toBeUndefined();
+      expect(loaded.env.PACKAGE_ONLY).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not fall back to server env when caller env is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scratchwork-env-"));
+    const packageRoot = join(root, "server", "deploy-cloudflare");
+    const deployRoot = join(root, "deploy", "sndbx.sh");
+    try {
+      await mkdir(packageRoot, { recursive: true });
+      await mkdir(deployRoot, { recursive: true });
+      await writeFile(join(root, "server", ".env"), "VALUE=server\n");
+
+      await expect(loadDeployEnv({
+        packageRoot,
+        argv: ["--env", ".env"],
+        processEnv: {},
+        loadDefaultEnvFiles: false,
+        explicitEnvRoots: [deployRoot],
+      })).rejects.toThrow("Env file not found: .env");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

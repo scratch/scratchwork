@@ -5,7 +5,7 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import { bytesToBase64, PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
-import { readAuthToken } from "../auth";
+import { normalizeServerUrl, readAuthToken } from "../auth";
 import { resolveDevTarget } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
 import type { PublishConfig } from "../types";
@@ -243,10 +243,6 @@ function publishEndpoint(server: string): string {
   url.search = "";
   url.hash = "";
   return url.toString();
-}
-
-function normalizeServerUrl(value: string): string {
-  return new URL(value).toString().replace(/\/+$/, "");
 }
 
 function decodePublishResponse(value: unknown): PublishResponse | null {

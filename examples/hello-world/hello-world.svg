@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title description" preserveAspectRatio="xMidYMid slice">
+  <title id="title">Hello, world!</title>
+  <desc id="description">A static pastoral scene with a blue sky, sun, clouds, rolling hills, wildflowers, and the words Hello, world.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#6bb7ed" />
+      <stop offset="62%" stop-color="#c7eaff" />
+      <stop offset="100%" stop-color="#eaf7ff" />
+    </linearGradient>
+    <linearGradient id="hillBack" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#91d083" />
+      <stop offset="100%" stop-color="#57ad63" />
+    </linearGradient>
+    <linearGradient id="hillFront" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#7fc963" />
+      <stop offset="100%" stop-color="#3f9850" />
+    </linearGradient>
+    <linearGradient id="meadow" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#8bd26c" />
+      <stop offset="100%" stop-color="#4fae4d" />
+    </linearGradient>
+    <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff7a6" stop-opacity="0.95" />
+      <stop offset="62%" stop-color="#ffe36b" stop-opacity="0.34" />
+      <stop offset="100%" stop-color="#ffe36b" stop-opacity="0" />
+    </radialGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#275331" flood-opacity="0.18" />
+    </filter>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#sky)" />
+
+  <circle cx="1290" cy="150" r="132" fill="url(#sunGlow)" />
+  <circle cx="1290" cy="150" r="70" fill="#ffd94d" />
+  <g stroke="#ffd94d" stroke-linecap="round" stroke-width="10" opacity="0.85">
+    <line x1="1290" y1="42" x2="1290" y2="0" />
+    <line x1="1290" y1="300" x2="1290" y2="258" />
+    <line x1="1182" y1="150" x2="1140" y2="150" />
+    <line x1="1440" y1="150" x2="1398" y2="150" />
+    <line x1="1214" y1="74" x2="1184" y2="44" />
+    <line x1="1366" y1="226" x2="1396" y2="256" />
+    <line x1="1366" y1="74" x2="1396" y2="44" />
+    <line x1="1214" y1="226" x2="1184" y2="256" />
+  </g>
+
+  <g fill="#ffffff" opacity="0.94">
+    <path d="M158 188c28-46 91-52 126-14 19-37 75-47 108-17 17-12 41-18 65-12 39 10 63 45 58 83H120c-6-17 8-33 38-40z" />
+    <path d="M780 135c31-45 99-48 134-8 22-37 80-42 112-9 16-9 38-12 59-5 35 13 54 47 45 82H742c-4-25 11-49 38-60z" opacity="0.9" />
+    <path d="M1110 306c22-30 67-34 94-8 15-28 58-33 84-11 13-8 32-10 49-4 27 10 42 36 35 63h-290c-4-18 7-34 28-40z" opacity="0.86" />
+  </g>
+
+  <path d="M0 548c140-88 273-121 398-99 120 21 195 97 311 103 139 7 224-88 360-100 170-15 330 88 531 2v446H0z" fill="url(#hillBack)" />
+  <path d="M0 635c178-91 341-111 489-60 112 39 219 37 332-7 178-69 342-52 779 73v259H0z" fill="url(#hillFront)" />
+  <path d="M0 719c176-49 348-52 516-10 167 42 305 47 458 9 200-49 396-36 626 39v143H0z" fill="url(#meadow)" />
+
+  <g opacity="0.22" stroke="#2f7f42" stroke-linecap="round" stroke-width="5">
+    <path d="M94 770c46-42 98-58 156-48" />
+    <path d="M548 755c72-48 150-57 235-28" />
+    <path d="M1070 775c88-48 184-55 290-20" />
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="181" y="607" width="130" height="86" fill="#c96c47" />
+    <path d="M164 609l82-69 82 69z" fill="#9d3f34" />
+    <rect x="226" y="642" width="41" height="51" fill="#693329" />
+    <rect x="278" y="630" width="23" height="22" fill="#f8d789" />
+    <rect x="193" y="630" width="23" height="22" fill="#f8d789" />
+  </g>
+
+  <g stroke="#2f7f42" stroke-linecap="round" stroke-width="4">
+    <path d="M415 826c-6-31 0-56 19-75" />
+    <path d="M458 833c-10-38-4-70 18-96" />
+    <path d="M513 829c-7-31 0-57 20-78" />
+    <path d="M1135 831c-7-34 0-62 22-84" />
+    <path d="M1183 836c-10-37-1-69 25-94" />
+    <path d="M1235 829c-5-29 4-54 27-75" />
+  </g>
+  <g>
+    <circle cx="434" cy="748" r="13" fill="#f9f06f" />
+    <circle cx="476" cy="735" r="13" fill="#ffffff" />
+    <circle cx="533" cy="750" r="13" fill="#f37aa1" />
+    <circle cx="1157" cy="747" r="13" fill="#ffffff" />
+    <circle cx="1208" cy="742" r="13" fill="#f9f06f" />
+    <circle cx="1262" cy="754" r="13" fill="#f37aa1" />
+  </g>
+
+  <g fill="#f8fbff" stroke="#224a67" stroke-opacity="0.18" stroke-width="3">
+    <path d="M524 311c71-47 151-45 224 5 57-32 125-28 174 11 43 35 64 83 61 144H425c-9-72 25-130 99-160z" opacity="0.16" />
+  </g>
+
+  <text
+    x="800"
+    y="395"
+    text-anchor="middle"
+    font-family="Georgia, 'Times New Roman', serif"
+    font-size="116"
+    font-weight="700"
+    fill="#1f4f2e"
+    stroke="#f9fff2"
+    stroke-width="8"
+    paint-order="stroke fill"
+  >Hello, world!</text>
+</svg>
