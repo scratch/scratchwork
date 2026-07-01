@@ -204,7 +204,12 @@ scratchwork me
 # if the server is not specified, this command should error out
 scratchwork publish [--server text] [--workspace text] [--project text] [--visibility <group>] [<path>]
 
-
+# The following commands reference a project on the server. The project may be identified in one
+# of three ways:
+#   1. specifying the server, workspace, and project name via flags
+#   2. specifying the path (default `.`) on disk to the project directory where
+#      the server, workspace, and project name are specified in the project config file
+#   3. a url, e.g. example.com/myworkspace/myproject/
 
 # Unpublish a given project (make it visible to only the owner)
 scratchwork unpublish [--server text] [--workspace text] [--project text] [<path-or-url>]
