@@ -64,8 +64,7 @@ export const server = {
   auth: "google",
 
   // Optional auth restrictions. authAllowedDomains defaults to allowing only the admin to
-  // authenticate. It can be set to a single domain or a list of domains and accepts wildcards,
-  // e.g. *.example.com.
+  // authenticate. It can be set to a single domain, a list of domains, or "*".
   authAllowedDomains: "example.com",
   authSessionSeconds: 2_592_000,
 
@@ -73,7 +72,17 @@ export const server = {
   // domains. If it is not set, there are no restrictions on who users can share with.
   shareAllowedDomains: None,
 
+  // Must be one of the following:
+  //   1. "workspace/project" - users can create workspaces
+  //   2. "example.com/username/project" - path is determined by the owner's email address
+  //   3. "username/project" - identical to (2), but without the domain. This can only be used when
+  //      authAllowedDomains is set to a single domain.
+  //   4. "random" - projects are assigned a random slug when published
+  projectPath: "random",
+
   usersCanCreateWorkspaces: false,
+
+  // can either be None, "random", ""
   defaultWorkspace:
 } satisfies ScratchworkServerConfig;
 ```
@@ -231,12 +240,6 @@ scratchwork projects
 scratchwork info [--server text] [--workspace text] [--project text] [<path-or-url>]
 
 ```
-
-## Default pub
-
-A server can be configured to route a project to a default workspace:
-
-random
 
 ## Security
 
