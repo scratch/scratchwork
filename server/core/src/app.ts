@@ -6,7 +6,7 @@ import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
 import { servePath } from "../../../shared/src/site/serve";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
-import { Auth, AuthError, cookieValue, type AuthUser } from "./auth";
+import { Auth, AuthError } from "./auth";
 import { ServerConfig } from "./config";
 import { errorJson, HttpError, jsonResponse, securityHeaders } from "./http-error";
 import { readPublishRequest } from "./publish-request";
@@ -22,7 +22,15 @@ import {
 import { StorageError } from "./storage";
 
 const NO_STORE = "no-store, must-revalidate";
-const CONTENT_ACCESS_COOKIE = "scratchwork_project_access";
+/**
+ * Reserved first path segment carrying a signed project-access token for private content,
+ * e.g. `/_a/<token>/<routePath>/...`. The token lives in the path (not a cookie) so that
+ * relative subresource fetches from the sandboxed, opaque-origin content page inherit it —
+ * a `SameSite` cookie is never attached to those cross-site subresource requests. `_a` starts
+ * with an underscore, so it can never collide with a route path (identifiers must start
+ * alphanumeric).
+ */
+const CONTENT_ACCESS_PREFIX = "_a";
 
 export const app: HttpApp.Default<never, ServerConfig | SiteStore | Auth> =
   Effect.gen(function* () {
@@ -273,14 +281,57 @@ function issueProjectAccess(
     }
 
     const token = yield* auth.issueProjectAccessToken(projectKey(site.record.workspace, site.record.project), site.record.routePath, user);
-    const redirectUrl = new URL(returnTo);
-    redirectUrl.searchParams.set("scratchwork_access", token);
-    return HttpServerResponse.redirect(redirectUrl, { status: 302 });
+    return HttpServerResponse.redirect(tokenizedContentUrl(returnTo, token), { status: 302 });
   });
 }
 
-/** Loads and serves one published site route by route path. */
+/** Routes a published-content request to tokenized (private) or clean (public) serving. */
 function servePublishedSite(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
+  return Effect.gen(function* () {
+    const access = parseAccessPrefix(url.pathname);
+    if (access != null) {
+      return yield* serveTokenizedContent(request, url, access);
+    }
+    return yield* serveCleanContent(request, url);
+  });
+}
+
+/** Serves private content addressed as `/_a/<token>/<routePath>/...` after verifying the token. */
+function serveTokenizedContent(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+  access: { readonly token: string; readonly innerPath: string },
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
+  return Effect.gen(function* () {
+    const site = yield* loadSiteForPath(access.innerPath);
+    if (site == null) {
+      return yield* Effect.fail(new HttpError({ status: 404, message: "Not found" }));
+    }
+    const auth = yield* Auth;
+    const config = yield* ServerConfig;
+    const tokenUser = yield* auth
+      .verifyProjectAccessToken(access.token, projectKey(site.record.workspace, site.record.project), site.record.routePath)
+      .pipe(Effect.catchAll(() => Effect.succeed(null)));
+    if (tokenUser == null || !canReadProject(site.record, tokenUser, config)) {
+      // Missing/expired/mismatched token, or access revoked since issuance: bounce to the
+      // clean URL, which re-runs the app-host authentication handoff and mints a fresh token.
+      return HttpServerResponse.redirect(`${access.innerPath}${url.search}`, { status: 302 });
+    }
+
+    const prefix = `/${CONTENT_ACCESS_PREFIX}/${access.token}/${site.record.routePath}`;
+    const rest = routeRest(access.innerPath, site.record.routePath);
+    if (rest == null) {
+      return HttpServerResponse.redirect(`${prefix}/`, { status: 308 });
+    }
+    return yield* serveSiteFiles(site, rest, url.search, prefix);
+  });
+}
+
+/** Serves public content at its clean URL, or sends private content through the auth handoff. */
+function serveCleanContent(
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
@@ -295,18 +346,11 @@ function servePublishedSite(
         headers: securityHeaders(),
       });
     }
-    const auth = yield* Auth;
     const config = yield* ServerConfig;
-    const tokenUser = yield* contentAccessUser(request, url, site);
-    if (url.searchParams.has("scratchwork_access") && tokenUser != null) {
-      return HttpServerResponse.redirect(cleanContentUrl(url), {
-        status: 302,
-        headers: { "set-cookie": contentAccessCookie(url, site.record.routePath) },
-      });
-    }
-
-    const user = tokenUser ?? (yield* auth.currentUser(request));
-    if (!canReadProject(site.record, user, config)) {
+    // Only anonymously-readable (public) projects serve at their clean URL. Anything gated
+    // is redirected to the app host, which authenticates the viewer and returns a token-prefixed
+    // URL so sandboxed subresource fetches (which carry no cookies) stay authenticated.
+    if (!canReadProject(site.record, null, config)) {
       return projectAccessRedirect(request, url, site, config);
     }
 
@@ -314,22 +358,31 @@ function servePublishedSite(
     if (rest == null) {
       return HttpServerResponse.redirect(`/${site.record.routePath}/`, { status: 308 });
     }
-
-    return yield* servePath(rest, url.search, {
-      cacheControl: () => NO_STORE,
-      defaultFaviconSvg: FIGURE_SVG,
-      headers: publishedSiteHeaders,
-      pathPrefix: `/${site.record.routePath}`,
-      rendererFallback: Effect.succeed(defaultRendererHtml),
-    }).pipe(
-      Effect.mapError((error) =>
-        error instanceof SiteFileError
-          ? new HttpError({ status: 500, message: error.message })
-          : error,
-      ),
-      Effect.provideService(SiteFiles, site.siteFiles),
-    );
+    return yield* serveSiteFiles(site, rest, url.search, `/${site.record.routePath}`);
   });
+}
+
+/** Serves one file from a loaded site under the given canonical path prefix. */
+function serveSiteFiles(
+  site: LoadedSite,
+  rest: string,
+  search: string,
+  pathPrefix: string,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError, ServerConfig> {
+  return servePath(rest, search, {
+    cacheControl: () => NO_STORE,
+    defaultFaviconSvg: FIGURE_SVG,
+    headers: publishedSiteHeaders,
+    pathPrefix,
+    rendererFallback: Effect.succeed(defaultRendererHtml),
+  }).pipe(
+    Effect.mapError((error) =>
+      error instanceof SiteFileError
+        ? new HttpError({ status: 500, message: error.message })
+        : error,
+    ),
+    Effect.provideService(SiteFiles, site.siteFiles),
+  );
 }
 
 function loadSiteForPath(
@@ -480,19 +533,27 @@ function projectApiPath(pathname: string): { readonly workspace: string; readonl
   }
 }
 
-function contentAccessUser(
-  request: HttpServerRequest.HttpServerRequest,
-  url: URL,
-  site: LoadedSite,
-): Effect.Effect<AuthUser | null, AuthError, Auth> {
-  return Effect.gen(function* () {
-    const auth = yield* Auth;
-    const token = url.searchParams.get("scratchwork_access") ?? cookieValue(request, [CONTENT_ACCESS_COOKIE]);
-    if (token == null) return null;
-    return yield* auth.verifyProjectAccessToken(token, projectKey(site.record.workspace, site.record.project), site.record.routePath).pipe(
-      Effect.catchAll(() => Effect.succeed(null)),
-    );
-  });
+/** Splits `/_a/<token>/<rest...>` into the token and the remaining content path, or null. */
+function parseAccessPrefix(pathname: string): { readonly token: string; readonly innerPath: string } | null {
+  const segments = pathname.split("/").filter((segment) => segment !== "");
+  if (segments.length < 2 || segments[0] !== CONTENT_ACCESS_PREFIX) return null;
+  let token: string;
+  try {
+    token = decodeURIComponent(segments[1]);
+  } catch {
+    return null;
+  }
+  const innerSegments = segments.slice(2);
+  const trailingSlash = innerSegments.length > 0 && pathname.endsWith("/");
+  const innerPath = `/${innerSegments.join("/")}${trailingSlash ? "/" : ""}`;
+  return { token, innerPath };
+}
+
+/** Rewrites a validated content return URL into its token-prefixed form `/_a/<token>/...`. */
+function tokenizedContentUrl(returnTo: string, token: string): string {
+  const target = new URL(returnTo);
+  target.pathname = `/${CONTENT_ACCESS_PREFIX}/${token}${target.pathname}`;
+  return target.toString();
 }
 
 function projectAccessRedirect(
@@ -509,23 +570,6 @@ function projectAccessRedirect(
 
 function contentRequestUrl(url: URL, contentBase: string): string {
   return new URL(`${url.pathname}${url.search}`, contentBase).toString();
-}
-
-function cleanContentUrl(url: URL): string {
-  const clean = new URL(url);
-  clean.searchParams.delete("scratchwork_access");
-  return clean.toString();
-}
-
-function contentAccessCookie(url: URL, routePath: string): string {
-  return [
-    `${CONTENT_ACCESS_COOKIE}=${encodeURIComponent(url.searchParams.get("scratchwork_access") ?? "")}`,
-    `Path=/${routePath}`,
-    "HttpOnly",
-    "SameSite=Lax",
-    url.protocol === "https:" ? "Secure" : "",
-    "Max-Age=600",
-  ].filter(Boolean).join("; ");
 }
 
 function safeContentReturnTo(value: string | null, contentBase: string, routePath: string): string | null {

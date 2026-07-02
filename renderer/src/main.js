@@ -89,7 +89,13 @@ async function renderPage() {
   for (const cand of mdCandidates(location.pathname)) {
     const url = new URL(cand, location.origin).href;
     try {
-      const r = await fetch(url, { credentials: "include" });
+      // No credentials: the content page runs in a CSP sandbox (opaque origin), so its
+      // fetches are cross-origin and a credentialed request would be blocked by CORS against
+      // the `Access-Control-Allow-Origin: *` on content responses. Private access is carried
+      // by the `/_a/<token>/` path prefix already present in `location.pathname`, so every
+      // candidate URL derived from it (and every component import resolved against the
+      // markdown's directory) inherits the token without needing cookies.
+      const r = await fetch(url, { credentials: "omit" });
       if (r.ok) { res = r; mdUrl = url; break; }
     } catch (err) {
       /* try the next candidate */
