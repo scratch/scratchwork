@@ -6,7 +6,7 @@ import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
 import { servePath } from "../../../shared/src/site/serve";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
-import { Auth, AuthError, type AuthUser } from "./auth";
+import { Auth, AuthError, cookieValue, type AuthUser } from "./auth";
 import { ServerConfig } from "./config";
 import { errorJson, HttpError, jsonResponse, securityHeaders } from "./http-error";
 import { readPublishRequest } from "./publish-request";
@@ -487,7 +487,7 @@ function contentAccessUser(
 ): Effect.Effect<AuthUser | null, AuthError, Auth> {
   return Effect.gen(function* () {
     const auth = yield* Auth;
-    const token = url.searchParams.get("scratchwork_access") ?? cookieValue(request, CONTENT_ACCESS_COOKIE);
+    const token = url.searchParams.get("scratchwork_access") ?? cookieValue(request, [CONTENT_ACCESS_COOKIE]);
     if (token == null) return null;
     return yield* auth.verifyProjectAccessToken(token, projectKey(site.record.workspace, site.record.project), site.record.routePath).pipe(
       Effect.catchAll(() => Effect.succeed(null)),
@@ -540,19 +540,4 @@ function safeContentReturnTo(value: string | null, contentBase: string, routePat
   } catch {
     return null;
   }
-}
-
-function cookieValue(request: HttpServerRequest.HttpServerRequest, name: string): string | undefined {
-  const header = request.headers.cookie;
-  if (header == null) return undefined;
-  for (const part of header.split(";")) {
-    const [cookieName, ...valueParts] = part.trim().split("=");
-    if (cookieName !== name) continue;
-    try {
-      return decodeURIComponent(valueParts.join("="));
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
 }

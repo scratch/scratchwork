@@ -2,6 +2,7 @@ import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
+import { isRecord, parseJson } from "../../shared/src/util/json";
 import { CliError } from "./errors";
 
 const AUTH_FILE = "auth.json";
@@ -119,18 +120,6 @@ function isAuthFile(value: unknown): value is AuthFile {
     if (record.email != null && typeof record.email !== "string") return false;
   }
   return true;
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function hasScheme(value: string): boolean {

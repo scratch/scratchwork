@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import { watch } from "node:fs";
 import { base64ToBytes } from "../../../shared/src/encoding/base64";
 import { isSafeSitePath } from "../../../shared/src/site/paths";
+import { isRecord, parseJson } from "../../../shared/src/util/json";
 import { PROJECT_CONFIG_FILE, authHeaders, authTokenForServer, projectApiUrl, readProjectConfig, resolveProjectRef, resolveServer } from "../project-config";
 import { CliError, errorMessage } from "../errors";
 import type { CloneConfig, ProjectRefConfig, ServerConfig } from "../types";
@@ -199,14 +200,3 @@ function decodeBundleResponse(value: unknown): BundleResponse | null {
   return value as unknown as BundleResponse;
 }
 
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}

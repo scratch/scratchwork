@@ -4,7 +4,9 @@ import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import { bytesToBase64, PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
+import { safeProjectIdentifier, slugifyIdentifier } from "../../../shared/src/site/identifiers";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
+import { isRecord, parseJson } from "../../../shared/src/util/json";
 import { readAuthRecord } from "../auth";
 import { openBrowser } from "../browser";
 import { resolveDevTarget } from "../dev/target";
@@ -13,8 +15,6 @@ import {
   PROJECT_CONFIG_FILE,
   readProjectConfig,
   resolveServer,
-  safeIdentifier,
-  slugifyIdentifier,
   writeProjectConfig,
   type ProjectConfigFile,
 } from "../project-config";
@@ -262,14 +262,6 @@ function decodePublishResponse(value: unknown): PublishResponse | null {
   };
 }
 
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 function nonEmpty(value: string | undefined): string | undefined {
   return value == null || value === "" ? undefined : value;
 }
@@ -280,10 +272,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function resolveProjectName(
   config: PublishConfig,
   projectConfig: ProjectConfigFile | null,
@@ -291,7 +279,7 @@ function resolveProjectName(
   return Effect.gen(function* () {
     const explicit = nonEmpty(config.project) ?? nonEmpty(projectConfig?.project);
     if (explicit != null) {
-      if (!safeIdentifier(explicit)) {
+      if (!safeProjectIdentifier(explicit)) {
         return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork publish: invalid project ${explicit}` }));
       }
       return explicit;

@@ -424,7 +424,7 @@ function oauthStateToken(request: HttpServerRequest.HttpServerRequest, baseUrl: 
 }
 
 /** Finds and decodes the first matching cookie value from the request. */
-function cookieValue(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): string | undefined {
+export function cookieValue(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): string | undefined {
   const header = request.headers.cookie;
   if (header == null) return undefined;
   for (const part of header.split(";")) {

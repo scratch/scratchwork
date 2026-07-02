@@ -37,35 +37,13 @@ export function accessGroupIsSubset(candidate: AccessGroup, ceiling: AccessGroup
   return candidateTerms.every((term) => termIsSubset(term, ceilingTerms));
 }
 
-/** Validates workspace/project ids used in URLs and DB keys. */
-export function safeProjectIdentifier(value: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
-}
+export { safeProjectIdentifier, slugifyIdentifier, workspaceFromEmail } from "../../../shared/src/site/identifiers";
 
 const RESERVED_ROUTE_SLUGS: ReadonlySet<string> = new Set(["api", "auth", "health", "favicon.ico", "favicon.svg"]);
 
 /** Returns true when a slug would shadow a server-reserved route prefix (/api, /auth, ...). */
 export function isReservedSlug(value: string): boolean {
   return RESERVED_ROUTE_SLUGS.has(value.toLowerCase());
-}
-
-/** Converts an email into the default personal workspace name. */
-export function workspaceFromEmail(email: string): string {
-  const username = email.split("@", 1)[0]?.toLowerCase() ?? "user";
-  return safeProjectIdentifier(username) ? username : slugifyIdentifier(username, "user");
-}
-
-/** Converts arbitrary local directory/file names into safe project identifiers. */
-export function slugifyIdentifier(value: string, fallback: string): string {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^[._-]+|[._-]+$/g, "")
-    .replace(/[-_.]{2,}/g, "-")
-    .slice(0, 128);
-  if (safeProjectIdentifier(normalized)) return normalized;
-  return fallback;
 }
 
 /** Checks that every explicit email/domain share target sits within an allowed domain list. */

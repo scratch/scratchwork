@@ -22,8 +22,15 @@ import { runTemplate } from "./commands/template";
 import { CliError } from "./errors";
 import { printHelpIfRequested } from "./help";
 
-const pathArg = (name = "path", fallback = ".") =>
-  Args.text({ name }).pipe(Args.withDefault(fallback));
+const pathArg = (name: string, fallback: string, description: string) =>
+  Args.text({ name }).pipe(Args.withDefault(fallback), Args.withDescription(description));
+
+const textOption = (name: string, pseudoName: string, description: string) =>
+  Options.text(name).pipe(
+    Options.withDefault(""),
+    Options.withPseudoName(pseudoName),
+    Options.withDescription(description),
+  );
 
 // ---------------------------------------------------------------------------
 // Top-level project commands
@@ -31,134 +38,116 @@ const pathArg = (name = "path", fallback = ".") =>
 const devCommand = Command.make(
   "dev",
   {
-    path: pathArg("path"),
+    path: pathArg("path", ".", "File or directory to serve. Default: current directory; passing a file opens that file's route."),
     port: Options.integer("port").pipe(
       Options.withAlias("p"),
       Options.withDefault(DEFAULT_PORT),
-      Options.withDescription("Starting port to probe upward from"),
+      Options.withPseudoName("port"),
+      Options.withDescription("Starting port for the local server. Default: 3000; if the port is busy, Scratchwork probes upward."),
     ),
     verbose: Options.boolean("verbose").pipe(
-      Options.withDescription("Show Effect debug logs for the dev server"),
+      Options.withDescription("Print Effect debug logs for server startup and routing decisions."),
     ),
   },
   runDev,
-).pipe(Command.withDescription("Serve a project with hot reload"));
+).pipe(Command.withDescription("Serve a Scratchwork project locally with hot reload"));
 
 const exampleCommand = Command.make(
   "example",
   {
-    path: pathArg("path"),
+    path: pathArg("path", ".", "Destination directory for the example project. Default: current directory."),
   },
   runExample,
-).pipe(Command.withDescription("Write example Markdown and React files"));
+).pipe(Command.withDescription("Write a small Markdown project with sample components"));
 
 const templateCommand = Command.make(
   "template",
   {
-    file: pathArg("file", "index.html"),
+    file: pathArg("file", "index.html", "Output HTML file. Default: index.html."),
   },
   runTemplate,
-).pipe(Command.withDescription("Write the default Markdown HTML template"));
+).pipe(Command.withDescription("Write the default Scratchwork Markdown renderer HTML"));
 
 const publishCommand = Command.make(
   "publish",
   {
-    path: pathArg("path"),
-    server: Options.text("server").pipe(
-      Options.withDefault(""),
-      Options.withDescription("Scratchwork server URL"),
-    ),
-    workspace: Options.text("workspace").pipe(
-      Options.withDefault(""),
-      Options.withDescription("Workspace name"),
-    ),
-    project: Options.text("project").pipe(
-      Options.withDefault(""),
-      Options.withDescription("Project name"),
-    ),
-    visibility: Options.text("visibility").pipe(
-      Options.withDefault(""),
-      Options.withDescription("Project visibility group"),
-    ),
+    path: pathArg("path", ".", "File or directory to publish. Default: current directory. Directories are uploaded recursively, excluding .git, node_modules, and .scratchwork-data."),
+    server: textOption("server", "url", "Scratchwork app server, such as sndbx.sh or https://app.sndbx.sh. Required on first publish; later publishes read it from .scratchwork.json."),
+    workspace: textOption("workspace", "name", "Workspace/owner segment for the published URL. Default: saved config, or the server's default workspace policy."),
+    project: textOption("project", "name", "Project name segment for the published URL. Default: saved config or the published directory name."),
+    visibility: textOption("visibility", "scope", "Access level: private, public, an email address, or a domain group like @example.com. Default: saved config, the project's current visibility, or the server default."),
   },
   runPublish,
-).pipe(Command.withDescription("Publish a static site to a Scratchwork server"));
+).pipe(Command.withDescription("Publish a static Scratchwork project to a server"));
 
 const projectRefOptions = {
-  server: Options.text("server").pipe(
-    Options.withDefault(""),
-    Options.withDescription("Scratchwork server URL"),
-  ),
-  workspace: Options.text("workspace").pipe(
-    Options.withDefault(""),
-    Options.withDescription("Workspace name"),
-  ),
-  project: Options.text("project").pipe(
-    Options.withDefault(""),
-    Options.withDescription("Project name"),
-  ),
-  pathOrUrl: pathArg("path-or-url"),
+  server: textOption("server", "url", "Scratchwork app server. May be omitted when the project reference or .scratchwork.json provides it."),
+  workspace: textOption("workspace", "name", "Workspace/owner name. Overrides values from .scratchwork.json or a URL."),
+  project: textOption("project", "name", "Project name. Overrides values from .scratchwork.json or a URL."),
+  pathOrUrl: pathArg("path-or-url", ".", "Published project URL or a local path containing .scratchwork.json. Default: current directory."),
 };
 
 const loginCommand = Command.make(
   "login",
   {
-    serverArg: Args.text({ name: "server" }).pipe(Args.withDefault("")),
-    server: Options.text("server").pipe(
-      Options.withDefault(""),
-      Options.withDescription("Scratchwork server URL"),
+    serverArg: Args.text({ name: "server" }).pipe(
+      Args.withDefault(""),
+      Args.withDescription("Scratchwork app server to authenticate with. Naked public domains normalize to their app subdomain, for example sndbx.sh -> https://app.sndbx.sh."),
     ),
+    server: textOption("server", "url", "Server URL alternative to the positional server argument."),
   },
   ({ serverArg, server }) => runLogin({ server: serverArg || server }),
-).pipe(Command.withDescription("Authenticate with a Scratchwork server"));
+).pipe(Command.withDescription("Authenticate this machine with a Scratchwork server"));
+
+const serverOption = textOption("server", "url", "Scratchwork app server. May be omitted inside a directory with .scratchwork.json.");
 
 const meCommand = Command.make(
   "me",
   {
-    server: Options.text("server").pipe(Options.withDefault("")),
+    server: serverOption,
   },
   runMe,
-).pipe(Command.withDescription("Print the current authenticated user"));
+).pipe(Command.withDescription("Show the authenticated user for a server"));
 
 const projectsCommand = Command.make(
   "projects",
   {
-    server: Options.text("server").pipe(Options.withDefault("")),
+    server: serverOption,
   },
   runProjects,
-).pipe(Command.withDescription("List my projects"));
+).pipe(Command.withDescription("List projects owned by the authenticated user"));
 
 const infoCommand = Command.make("info", projectRefOptions, runInfo).pipe(
-  Command.withDescription("Show project info"),
+  Command.withDescription("Show metadata for one published project"),
 );
 
 const unpublishCommand = Command.make("unpublish", projectRefOptions, runUnpublish).pipe(
-  Command.withDescription("Make a project private"),
+  Command.withDescription("Make a published project private"),
 );
 
 const deleteCommand = Command.make("delete", projectRefOptions, runDelete).pipe(
-  Command.withDescription("Delete a project"),
+  Command.withDescription("Delete a project pointer and route from the server"),
 );
 
 const cloneCommand = Command.make(
   "clone",
   {
-    pathOrUrl: pathArg("path-or-url"),
+    pathOrUrl: pathArg("path-or-url", ".", "Published project URL or a local path containing .scratchwork.json. Default: current directory. The destination directory is named after the project."),
   },
   runClone,
-).pipe(Command.withDescription("Clone a project"));
+).pipe(Command.withDescription("Download a published project into a local directory"));
 
 const streamCommand = Command.make(
   "stream",
   {
-    path: pathArg("path"),
+    path: pathArg("path", ".", "Local project directory to watch and publish. Default: current directory. Requires .scratchwork.json from a previous publish."),
   },
   runStream,
-).pipe(Command.withDescription("Stream edits to an existing project"));
+).pipe(Command.withDescription("Publish once, then republish on local file changes"));
 
 const versionCommand = Command.make("version", {}, () =>
   Console.log(pkg.version),
-).pipe(Command.withDescription("Print the version"));
+).pipe(Command.withDescription("Print the Scratchwork CLI version"));
 
 const scratchworkCommand = Command.make("scratchwork").pipe(
   Command.withDescription("CLI for Scratchwork projects"),
@@ -197,7 +186,7 @@ const MainLayer = Layer.mergeAll(
 );
 
 function runScratchworkCli(argv: ReadonlyArray<string> = process.argv): void {
-  const help = printHelpIfRequested(argv, pkg.version);
+  const help = printHelpIfRequested(argv, pkg.version, scratchworkCommand);
   if (help.handled) {
     process.exitCode = help.exitCode;
     return;

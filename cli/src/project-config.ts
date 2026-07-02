@@ -2,6 +2,7 @@ import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
+import { isRecord, parseJson } from "../../shared/src/util/json";
 import { normalizeServerUrl, readAuthRecord } from "./auth";
 import { CliError } from "./errors";
 
@@ -115,21 +116,6 @@ export function resolveProjectRef(input: {
   });
 }
 
-export function slugifyIdentifier(value: string, fallback: string): string {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^[._-]+|[._-]+$/g, "")
-    .replace(/[-_.]{2,}/g, "-")
-    .slice(0, 128);
-  return safeIdentifier(normalized) ? normalized : fallback;
-}
-
-export function safeIdentifier(value: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
-}
-
 export function projectApiUrl(ref: ResolvedProjectRef, suffix = ""): string {
   const url = new URL(`/api/projects/${encodeURIComponent(ref.workspace)}/${encodeURIComponent(ref.project)}${suffix}`, ref.server);
   return url.toString();
@@ -214,18 +200,6 @@ function decodeProjectConfig(value: unknown): ProjectConfigFile | null {
   return config;
 }
 
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 function nonEmpty(value: string | undefined): string | undefined {
   return value == null || value === "" ? undefined : value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
