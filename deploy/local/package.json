@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./run.ts"
+  },
   "scripts": {
     "deploy": "bun deploy.ts",
     "typecheck": "tsc -p tsconfig.json"

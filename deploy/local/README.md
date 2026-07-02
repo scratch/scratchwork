@@ -28,3 +28,22 @@ SCRATCHWORK_DEFAULT_VISIBILITY=public
 SCRATCHWORK_APP_URL=http://localhost:43118
 SCRATCHWORK_CONTENT_URL=http://localhost:43118
 ```
+
+## Running another deploy's config locally
+
+The package exports `runLocalServer`, which accepts the `server` section of a
+Cloudflare/AWS deploy config and runs it locally (environment variables still
+win over config values). Deploy projects use it to share one config module
+between their cloud deploy and a local run — see `deploy/sndbx.sh/local.ts`:
+
+```ts
+import { runLocalServer } from "@scratchwork/deploy-local";
+import { server } from "./server-config";
+
+await runLocalServer({ server });
+```
+
+When the config declares distinct app and content domains, the local run
+serves the app on `http://localhost:<port>` and content on
+`http://127.0.0.1:<port>` so host-separated behavior (like the private-content
+cookie handoff) works the same way locally.

@@ -20,6 +20,7 @@
     "deploy:cloudflare": "cd server && bun run deploy:cloudflare",
     "deploy:local": "cd deploy/local && bun run deploy",
     "deploy:sndbx.sh": "cd deploy/sndbx.sh && bun run deploy",
+    "local:sndbx.sh": "cd deploy/sndbx.sh && bun run local",
     "dev:server": "cd server && bun run dev",
     "dev:renderer": "cd renderer && bun run dev",
     "lint": "cd cli && bun run lint",

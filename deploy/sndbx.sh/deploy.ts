@@ -2,19 +2,10 @@ import {
   deployServer,
   type CloudflareDeployServerConfig,
 } from "@scratchwork/server-deploy-cloudflare";
+import { server } from "./server-config";
 
 const config = {
-  server: {
-    appDomain: "app.sndbx.sh",
-    contentDomain: "pages.sndbx.sh",
-    auth: "oauth",
-    authSessionSeconds: 2_592_000,
-    allowedUsers: "public",
-    maxVisibility: "public",
-    projectPath: "workspace/project",
-    defaultWorkspace: "personal",
-    defaultVisibility: "private",
-  },
+  server,
 
   deploy: {
     workerName: "scratchwork",
