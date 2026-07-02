@@ -41,6 +41,13 @@ describe("server app", () => {
     expect(css.status).toBe(200);
     expect(css.headers.get("content-type")).toContain("text/css");
     expect(await css.text()).toBe("body { color: red; }");
+
+    const encodedSlash = await handler(new Request("https://scratch.test/demo%2Fsite", { redirect: "manual" }));
+    expect(encodedSlash.status).toBe(404);
+
+    const encodedSegment = await handler(new Request("https://scratch.test/de%6Do/site/style.css"));
+    expect(encodedSegment.status).toBe(200);
+    expect(encodedSegment.headers.get("content-type")).toContain("text/css");
   });
 
   test("republishes by flipping the current revision", async () => {

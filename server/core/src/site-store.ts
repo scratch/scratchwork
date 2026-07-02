@@ -519,10 +519,12 @@ function buildRevision(
   });
 }
 
-/** Returns true when the user may read a project under server policy. */
+/** Returns true when the user may read a project under server policy. The owner can always
+ * read their own project, even when a later maxVisibility tightening exceeds the stored
+ * visibility — the ceiling gates other readers, not ownership. */
 export function canReadProject(record: SiteRecord, user: AuthUser | null, config: ServerConfigShape): boolean {
-  if (!accessGroupIsSubset(record.visibility, config.maxVisibility)) return false;
   if (user != null && canWriteProject(record, user)) return true;
+  if (!accessGroupIsSubset(record.visibility, config.maxVisibility)) return false;
   return accessGroupMatches(record.visibility, user);
 }
 
@@ -531,25 +533,35 @@ export function canWriteProject(record: SiteRecord, user: AuthUser): boolean {
   return record.owner.id === user.id || record.owner.email.toLowerCase() === user.email.toLowerCase();
 }
 
-/** Splits a content path into the longest route prefix and remaining site path. */
+/** Splits a content path into the longest route prefix and remaining site path. Each decoded
+ * segment must itself be a safe identifier, so an encoded slash cannot fabricate a
+ * multi-segment route from one raw segment. */
 export function candidateRoutePaths(pathname: string): ReadonlyArray<string> {
-  const segments = pathname.replace(/^\/+|\/+$/g, "").split("/").filter((segment) => segment !== "");
+  const segments = rawPathSegments(pathname);
   const candidates: Array<string> = [];
   for (let length = segments.length; length >= 1; length -= 1) {
-    const candidate = segments.slice(0, length).map(decodePathSegment).join("/");
+    const decoded = segments.slice(0, length).map(decodePathSegment);
+    if (!decoded.every(safeProjectIdentifier)) continue;
+    const candidate = decoded.join("/");
     if (safeRoutePath(candidate)) candidates.push(candidate);
   }
   return candidates;
 }
 
-/** Computes the site path remainder for a matched route path. */
+/** Computes the site path remainder for a matched route path. Compares decoded segments,
+ * matching candidateRoutePaths. Returns null when the route has no remainder (or does not
+ * prefix the path), which redirects to the canonical route root. */
 export function routeRest(pathname: string, routePath: string): string | null {
-  const normalized = `/${pathname.replace(/^\/+/, "")}`;
-  const route = `/${routePath}`;
-  if (normalized === route) return null;
-  if (normalized === `${route}/`) return "/";
-  if (!normalized.startsWith(`${route}/`)) return "/";
-  return normalized.slice(route.length);
+  const segments = rawPathSegments(pathname);
+  const routeSegments = routePath.split("/");
+  if (segments.length < routeSegments.length) return null;
+  for (let index = 0; index < routeSegments.length; index += 1) {
+    if (decodePathSegment(segments[index]) !== routeSegments[index]) return null;
+  }
+  const rest = segments.slice(routeSegments.length);
+  const trailingSlash = pathname.endsWith("/");
+  if (rest.length === 0) return trailingSlash ? "/" : null;
+  return `/${rest.join("/")}${trailingSlash ? "/" : ""}`;
 }
 
 /** Builds the stable project key used by API paths and DB records. */
@@ -733,6 +745,10 @@ function ownerIndexKey(owner: SiteOwner, workspace: string, project: string): st
 
 function encodeKeySegment(value: string): string {
   return encodeURIComponent(value).replace(/\./g, "%2E");
+}
+
+function rawPathSegments(pathname: string): ReadonlyArray<string> {
+  return pathname.split("/").filter((segment) => segment !== "");
 }
 
 function decodePathSegment(value: string): string {
