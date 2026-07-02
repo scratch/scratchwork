@@ -12,8 +12,6 @@
     "./storage": "./src/storage.ts"
   },
   "scripts": {
-    "start": "bun src/bun.ts",
-    "dev": "bun src/bun.ts",
     "check": "bun run typecheck && bun test",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -22,7 +20,6 @@
     "effect": "3.21.4"
   },
   "devDependencies": {
-    "@effect/platform-bun": "0.90.0",
     "@types/bun": "^1.3.14",
     "typescript": "^6.0.3"
   }

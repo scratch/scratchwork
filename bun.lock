@@ -29,14 +29,23 @@
         "typescript": "^6.0.3",
       },
     },
-    "deploy/local": {
-      "name": "@scratchwork/deploy-local",
+    "deploy/generic-aws": {
+      "name": "@scratchwork/deploy-generic-aws",
       "version": "0.1.0",
       "dependencies": {
-        "@effect/platform": "0.96.2",
-        "@effect/platform-bun": "0.90.0",
-        "@scratchwork/server-core": "0.1.0",
-        "effect": "3.21.4",
+        "@scratchwork/server-deploy-aws": "workspace:*",
+        "@scratchwork/server-deploy-local": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "deploy/local-dev": {
+      "name": "@scratchwork/deploy-local-dev",
+      "version": "0.1.0",
+      "dependencies": {
+        "@scratchwork/server-deploy-local": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -47,8 +56,8 @@
       "name": "@scratchwork/deploy-sndbx-sh",
       "version": "0.1.0",
       "dependencies": {
-        "@scratchwork/deploy-local": "0.1.0",
-        "@scratchwork/server-deploy-cloudflare": "0.1.0",
+        "@scratchwork/server-deploy-cloudflare": "workspace:*",
+        "@scratchwork/server-deploy-local": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -76,7 +85,6 @@
         "effect": "3.21.4",
       },
       "devDependencies": {
-        "@effect/platform-bun": "0.90.0",
         "@types/bun": "^1.3.14",
         "typescript": "^6.0.3",
       },
@@ -102,6 +110,20 @@
       "version": "0.1.0",
       "dependencies": {
         "@effect/platform": "0.96.2",
+        "@scratchwork/server-core": "workspace:*",
+        "effect": "3.21.4",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server/deploy-local": {
+      "name": "@scratchwork/server-deploy-local",
+      "version": "0.1.0",
+      "dependencies": {
+        "@effect/platform": "0.96.2",
+        "@effect/platform-bun": "0.90.0",
         "@scratchwork/server-core": "workspace:*",
         "effect": "3.21.4",
       },
@@ -284,7 +306,9 @@
 
     "@parcel/watcher-win32-x64": ["@parcel/watcher-win32-x64@2.5.6", "", { "os": "win32", "cpu": "x64" }, "sha512-hbQlYcCq5dlAX9Qx+kFb0FHue6vbjlf0FrNzSKdYK2APUf7tGfGxQCk2ihEREmbR6ZMc0MVAD5RIX/41gpUzTw=="],
 
-    "@scratchwork/deploy-local": ["@scratchwork/deploy-local@workspace:deploy/local"],
+    "@scratchwork/deploy-generic-aws": ["@scratchwork/deploy-generic-aws@workspace:deploy/generic-aws"],
+
+    "@scratchwork/deploy-local-dev": ["@scratchwork/deploy-local-dev@workspace:deploy/local-dev"],
 
     "@scratchwork/deploy-sndbx-sh": ["@scratchwork/deploy-sndbx-sh@workspace:deploy/sndbx.sh"],
 
@@ -293,6 +317,8 @@
     "@scratchwork/server-deploy-aws": ["@scratchwork/server-deploy-aws@workspace:server/deploy-aws"],
 
     "@scratchwork/server-deploy-cloudflare": ["@scratchwork/server-deploy-cloudflare@workspace:server/deploy-cloudflare"],
+
+    "@scratchwork/server-deploy-local": ["@scratchwork/server-deploy-local@workspace:server/deploy-local"],
 
     "@smithy/core": ["@smithy/core@3.26.0", "", { "dependencies": { "@aws-crypto/crc32": "5.2.0", "@smithy/types": "^4.15.0", "tslib": "^2.6.2" } }, "sha512-mLUktFAn+Pa2agl1J7VgtYNFWCX8/b4GMJSK1hCu4YCvtBfM6F8Os3EP4ry+DFFlXOf3wyvlgXhuUdFoy52D3g=="],
 

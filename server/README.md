@@ -2,19 +2,22 @@
 
 Effect-native publishing server for `scratchwork publish`.
 
-The server is split into three packages:
+The server is split into four packages:
 
-1. `core`: platform-neutral HTTP app, config, storage contract, and local Bun runner
+1. `core`: platform-neutral HTTP app, config, and storage contract
 2. `deploy-aws`: AWS Lambda Function URL adapter backed by S3
 3. `deploy-cloudflare`: Cloudflare Worker adapter backed by R2
+4. `deploy-local`: local Bun adapter backed by local files and an in-memory database
+
+These packages are libraries. Actual deployments live as projects under `deploy/` — one per domain the Scratchwork project owns (currently `deploy/sndbx.sh`), plus `deploy/local-dev` (local-only development server) and `deploy/generic-aws` (a placeholder AWS deploy).
 
 ## Local
 
 ```sh
-bun run server
+bun run local:local-dev
 ```
 
-By default the server listens on `3001` and stores published bundles under `.scratchwork-data/`.
+By default the server listens on `43118` and stores published bundles under `.scratchwork-local-data/`. Every deploy project can also run its own server config locally via `deploy-local`'s `runLocalServer` (for example `bun run local:sndbx.sh`) — see `server/deploy-local/README.md`.
 
 ## Google OAuth
 
@@ -27,28 +30,17 @@ SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
 ```
 
-Deploy scripts load environment values from files and the shell. Precedence is:
+Deploy projects load environment values from files and the shell. Precedence is:
 
 1. Shell environment
-2. Explicit `--env path/to/file`
-3. Deploy package `.env`, such as `server/deploy-cloudflare/.env`
-4. Shared `server/.env`
-5. Built-in defaults
+2. The project's `.env`, such as `deploy/sndbx.sh/.env`
+3. Built-in defaults
 
-Start from the example file:
+Start from the project's example file, then deploy:
 
 ```sh
-cp server/.env.example server/.env
-```
-
-Then deploy with either auto-loaded env files or an explicit file:
-
-```sh
-bun run deploy:aws
-bun run deploy:cloudflare
-
-bun run deploy:aws --env server/.env
-bun run deploy:cloudflare --env server/.env
+cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
+bun run deploy:sndbx.sh
 ```
 
 Configure your Google OAuth app with this redirect URI:
@@ -60,7 +52,7 @@ https://your-scratchwork-server.example/auth/callback/google
 For local testing, use:
 
 ```txt
-http://localhost:3001/auth/callback/google
+http://localhost:43118/auth/callback/google
 ```
 
 Optional restrictions:
@@ -80,10 +72,10 @@ scratchwork publish index.html
 
 ## AWS
 
-Deploy to AWS Lambda + S3:
+Deploy to AWS Lambda + S3 via the placeholder `deploy/generic-aws` project (kept around in case we invest more in AWS deploy capabilities):
 
 ```sh
-bun run deploy:aws
+bun run deploy:generic-aws
 ```
 
 The deploy command uses the AWS CLI credentials in your environment. It creates or updates:
@@ -108,10 +100,10 @@ SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
 
 ## Cloudflare
 
-Deploy to Cloudflare Workers + R2:
+Deploy to Cloudflare Workers + R2 via a deploy project, such as `deploy/sndbx.sh`:
 
 ```sh
-bun run deploy:cloudflare
+bun run deploy:sndbx.sh
 ```
 
 The deploy command uses the `wrangler` CLI credentials in your environment. It creates the R2 bucket if needed, writes a generated Wrangler config under `server/deploy-cloudflare/dist/`, and deploys the Worker.

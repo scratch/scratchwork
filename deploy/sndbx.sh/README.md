@@ -18,8 +18,8 @@ cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
 The server settings (domains, auth policy, visibility rules) live in
 `server-config.ts` and are shared by the Cloudflare deploy and the local run;
 `deploy.ts` adds the Cloudflare-specific bindings. Secrets are read from `.env`
-in this directory and the shell environment; this deploy project does not read
-`server/.env`. It binds the Worker with routes for `app.sndbx.sh/*` (app/API/auth),
+in this directory and the shell environment.
+It binds the Worker with routes for `app.sndbx.sh/*` (app/API/auth),
 `pages.sndbx.sh/*` (published content), and the legacy `www.sndbx.sh/*` and
 `sndbx.sh/*` routes. The Worker name is `scratchwork`, matching the existing
 Cloudflare route assignment for those hostnames.

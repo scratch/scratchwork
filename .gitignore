@@ -11,5 +11,7 @@ dist/
 # `scratchwork publish` into whatever directory you publish; not for committing.
 .scratchwork.json
 
-# Local publishing-server data dir (if you run the server from the repo root).
+# Local publishing-server data dirs, written by local server runs into the
+# deploy project's directory.
 .scratchwork-data/
+.scratchwork-local-data/

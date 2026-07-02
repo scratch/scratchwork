@@ -18,7 +18,8 @@
   },
   "include": [
     "deploy.ts",
-    "run.ts",
+    "local.ts",
+    "server-config.ts",
     "../../server/core/src/assets.d.ts",
     "../../shared/src/**/*.ts",
     "../../shared/**/*.js"

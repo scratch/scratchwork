@@ -1,5 +1,5 @@
 {
-  "name": "@scratchwork/deploy-sndbx-sh",
+  "name": "@scratchwork/deploy-generic-aws",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@scratchwork/server-deploy-cloudflare": "workspace:*",
+    "@scratchwork/server-deploy-aws": "workspace:*",
     "@scratchwork/server-deploy-local": "workspace:*"
   },
   "devDependencies": {

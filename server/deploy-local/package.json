@@ -1,19 +1,20 @@
 {
-  "name": "@scratchwork/deploy-local",
+  "name": "@scratchwork/server-deploy-local",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "private": true,
+  "description": "Local Bun deploy target for the Scratchwork server.",
   "exports": {
-    ".": "./run.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "deploy": "bun deploy.ts",
+    "check": "bun run typecheck",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@effect/platform": "0.96.2",
     "@effect/platform-bun": "0.90.0",
-    "@scratchwork/server-core": "0.1.0",
+    "@scratchwork/server-core": "workspace:*",
     "effect": "3.21.4"
   },
   "devDependencies": {

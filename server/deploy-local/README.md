@@ -1,13 +1,13 @@
 # Local Scratchwork deploy
 
-This package runs the shared Scratchwork server app as a local deploy target. It
-is intended for end-to-end verification when the Cloudflare deploy cannot be
-mutated.
+This package runs the shared Scratchwork server app as a local deploy target,
+with local file storage and an in-memory database. It lets any deploy project
+under `deploy/` run its server config locally.
 
-Run from the repo root:
+Run the generic local development server from the repo root:
 
 ```sh
-bun run deploy:local
+bun run local:local-dev
 ```
 
 OAuth credentials are required (auth cannot be disabled):
@@ -37,7 +37,7 @@ win over config values). Deploy projects use it to share one config module
 between their cloud deploy and a local run — see `deploy/sndbx.sh/local.ts`:
 
 ```ts
-import { runLocalServer } from "@scratchwork/deploy-local";
+import { runLocalServer } from "@scratchwork/server-deploy-local";
 import { server } from "./server-config";
 
 await runLocalServer({ server });
