@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import type { ServerConfigShape } from "../src/config";
-import { canReadProject, candidateRoutePaths, routeRest, type SiteRecord } from "../src/site-store";
+import { PrimitiveDb, PrimitiveDbError, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../src/db";
+import type { PublishRequest } from "../src/publish-request";
+import { SiteStore, SiteStoreLive, canReadProject, candidateRoutePaths, routeRest, type SiteRecord } from "../src/site-store";
+import { bundle, memoryStorageLayer } from "./helpers";
 
 const owner = { id: "user-1", email: "founder@example.com" };
 const reader = { id: "user-2", email: "reader@example.com" };
@@ -54,6 +59,47 @@ describe("canReadProject", () => {
     expect(canReadProject(record("public"), reader, config("public"))).toBe(true);
     expect(canReadProject(record("public"), null, config("public"))).toBe(true);
     expect(canReadProject(record("private"), reader, config("public"))).toBe(false);
+  });
+});
+
+describe("publish route allocation", () => {
+  test("releases the route when the project record write fails", async () => {
+    const memory = makeMemoryPrimitiveDb();
+    let failProjectWrite = true;
+    const db: PrimitiveDbShape = {
+      ...memory,
+      put: (namespace, key, value, options) => {
+        if (namespace === "projects" && failProjectWrite) {
+          failProjectWrite = false;
+          return Effect.fail(new PrimitiveDbError({ message: "injected write failure" }));
+        }
+        return memory.put(namespace, key, value, options);
+      },
+    };
+    const layers = Layer.provideMerge(
+      SiteStoreLive,
+      Layer.mergeAll(memoryStorageLayer(), Layer.succeed(PrimitiveDb, PrimitiveDb.of(db))),
+    );
+    const request = {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
+      totalBytes: 5,
+    } as PublishRequest;
+
+    const { failed, retried } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* SiteStore;
+        const failed = yield* store.publish(request, owner, config("public")).pipe(Effect.flip);
+        const retried = yield* store.publish(request, owner, config("public"));
+        return { failed, retried };
+      }).pipe(Effect.provide(layers)),
+    );
+
+    expect(failed.message).toContain("injected write failure");
+    expect(retried.routePath).toBe("demo/site");
   });
 });
 

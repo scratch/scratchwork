@@ -42,6 +42,13 @@ export function safeProjectIdentifier(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
 }
 
+const RESERVED_ROUTE_SLUGS: ReadonlySet<string> = new Set(["api", "auth", "health", "favicon.ico", "favicon.svg"]);
+
+/** Returns true when a slug would shadow a server-reserved route prefix (/api, /auth, ...). */
+export function isReservedSlug(value: string): boolean {
+  return RESERVED_ROUTE_SLUGS.has(value.toLowerCase());
+}
+
 /** Converts an email into the default personal workspace name. */
 export function workspaceFromEmail(email: string): string {
   const username = email.split("@", 1)[0]?.toLowerCase() ?? "user";

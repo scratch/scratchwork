@@ -745,6 +745,9 @@ describe("scratchwork project commands", () => {
         const url = new URL(request.url);
         seen.push(`${request.method} ${url.pathname}`);
         if (url.pathname === "/api/projects") return Response.json({ projects: [project] });
+        if (url.pathname === "/api/resolve" && url.searchParams.get("path") === "/founder/site/") {
+          return Response.json({ project });
+        }
         if (url.pathname === "/api/projects/founder/site" && request.method === "GET") return Response.json({ project });
         if (url.pathname === "/api/projects/founder/site/unpublish" && request.method === "POST") {
           return Response.json({ project: { ...project, visibility: "private" } });
@@ -773,6 +776,7 @@ describe("scratchwork project commands", () => {
       expect((await runCli(["clone", `${serverUrl}/founder/site/`], dir)).stdout).toContain("Cloned founder/site");
       expect(readFileSync(join(dir, "site", "index.html"), "utf8")).toBe("<h1>cloned</h1>");
       expect(seen).toContain("GET /api/projects");
+      expect(seen).toContain("GET /api/resolve");
       expect(seen).toContain("POST /api/projects/founder/site/unpublish");
       expect(seen).toContain("DELETE /api/projects/founder/site");
       expect(seen).toContain("GET /api/projects/founder/site/bundle");
@@ -791,6 +795,9 @@ describe("scratchwork project commands", () => {
       port,
       async fetch(request) {
         const url = new URL(request.url);
+        if (url.pathname === "/api/resolve") {
+          return Response.json({ project: { workspace: "founder", project: "site" } });
+        }
         if (url.pathname === "/api/projects/founder/site/bundle") {
           return Response.json({
             bundle: {

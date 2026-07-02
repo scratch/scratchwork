@@ -81,16 +81,20 @@ export function resolveProjectRef(input: {
   readonly project?: string;
 }): Effect.Effect<ResolvedProjectRef, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
-    const urlRef = parseProjectUrl(input.pathOrUrl);
-    if (urlRef != null) {
+    const projectUrl = parseProjectUrl(input.pathOrUrl);
+    if (projectUrl != null) {
       const server = yield* Effect.try({
-        try: () => normalizeServerUrl(nonEmpty(input.server) ?? urlRef.server),
+        try: () => normalizeServerUrl(nonEmpty(input.server) ?? projectUrl.server),
         catch: () => new CliError({ code: 1, message: `scratchwork ${input.command}: invalid server` }),
       });
+      const workspace = nonEmpty(input.workspace);
+      const project = nonEmpty(input.project);
+      if (workspace != null && project != null) return { server, workspace, project };
+      const resolved = yield* resolveProjectByPath(server, projectUrl.pathname, input.command);
       return {
         server,
-        workspace: nonEmpty(input.workspace) ?? urlRef.workspace,
-        project: nonEmpty(input.project) ?? urlRef.project,
+        workspace: workspace ?? resolved.workspace,
+        project: project ?? resolved.project,
       };
     }
 
@@ -109,11 +113,6 @@ export function resolveProjectRef(input: {
     }
     return { server, workspace, project };
   });
-}
-
-export function personalWorkspaceForEmail(email: string | undefined): string | undefined {
-  if (email == null) return undefined;
-  return slugifyIdentifier(email.split("@", 1)[0] ?? "", "user");
 }
 
 export function slugifyIdentifier(value: string, fallback: string): string {
@@ -157,20 +156,49 @@ function directoryForConfig(path: string): Effect.Effect<string, PlatformError, 
   });
 }
 
-function parseProjectUrl(value: string | undefined): ResolvedProjectRef | null {
+function parseProjectUrl(value: string | undefined): { readonly server: string; readonly pathname: string } | null {
   if (value == null || !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) return null;
   try {
     const url = new URL(value);
-    const segments = url.pathname.split("/").filter((segment) => segment !== "").map(decodeURIComponent);
-    if (segments.length < 2) return null;
-    return {
-      server: url.origin,
-      workspace: segments[0],
-      project: segments[1],
-    };
+    return { server: url.origin, pathname: url.pathname };
   } catch {
     return null;
   }
+}
+
+/** Asks the server which project a published content path belongs to. Route paths depend
+ * on server config (random slugs, username/project, ...), so only the server can map a
+ * URL back to its workspace/project. */
+function resolveProjectByPath(
+  server: string,
+  pathname: string,
+  command: string,
+): Effect.Effect<{ readonly workspace: string; readonly project: string }, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    const token = yield* authTokenForServer(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+    const resolveUrl = new URL("/api/resolve", server);
+    resolveUrl.searchParams.set("path", pathname === "" ? "/" : pathname);
+    const body = yield* Effect.tryPromise({
+      try: async () => {
+        const response = await fetch(resolveUrl.toString(), { headers: authHeaders(token) });
+        const text = await response.text();
+        const json = parseJson(text);
+        if (!response.ok) {
+          const message = isRecord(json) && typeof json.error === "string" ? json.error : `server returned ${response.status}`;
+          throw new CliError({ code: 1, message: `scratchwork ${command}: ${message}` });
+        }
+        return json;
+      },
+      catch: (cause) => cause instanceof CliError
+        ? cause
+        : new CliError({ code: 1, message: `scratchwork ${command}: could not resolve project URL` }),
+    });
+    const project = isRecord(body) && isRecord(body.project) ? body.project : null;
+    if (project == null || typeof project.workspace !== "string" || typeof project.project !== "string") {
+      return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: invalid server response` }));
+    }
+    return { workspace: project.workspace, project: project.project };
+  });
 }
 
 function decodeProjectConfig(value: unknown): ProjectConfigFile | null {

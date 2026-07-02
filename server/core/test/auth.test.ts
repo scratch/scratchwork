@@ -85,6 +85,32 @@ describe("readServerConfig", () => {
       "OAuth is required",
     );
   });
+
+  test("reads the required default workspace strategy", async () => {
+    const config = await Effect.runPromise(
+      readServerConfig({
+        SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+        SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+        SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+        SCRATCHWORK_DEFAULT_WORKSPACE: "required",
+      }),
+    );
+
+    expect(config.defaultWorkspace).toBe("required");
+  });
+
+  test("rejects unknown default workspace strategies", async () => {
+    await expect(
+      Effect.runPromise(
+        readServerConfig({
+          SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+          SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+          SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+          SCRATCHWORK_DEFAULT_WORKSPACE: "team",
+        }),
+      ),
+    ).rejects.toThrow("SCRATCHWORK_DEFAULT_WORKSPACE must be personal, random, or required");
+  });
 });
 
 function request(headers: Record<string, string>): HttpServerRequest.HttpServerRequest {

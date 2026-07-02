@@ -77,7 +77,7 @@ export function readServerConfig(
       maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
       shareAllowedDomains: domainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS),
       projectPath: yield* readProjectPath(env.SCRATCHWORK_PROJECT_PATH),
-      defaultWorkspace: readDefaultWorkspace(env.SCRATCHWORK_DEFAULT_WORKSPACE),
+      defaultWorkspace: yield* readDefaultWorkspace(env.SCRATCHWORK_DEFAULT_WORKSPACE),
       defaultVisibility: yield* readAccessGroup(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
       auth: yield* readAuthConfig(env),
     };
@@ -169,10 +169,14 @@ function readProjectPath(value: string | undefined): Effect.Effect<ProjectPathSt
   );
 }
 
-function readDefaultWorkspace(value: string | undefined): DefaultWorkspaceStrategy {
-  if (value === "random") return "random";
-  if (value === "") return "required";
-  return "personal";
+function readDefaultWorkspace(value: string | undefined): Effect.Effect<DefaultWorkspaceStrategy, ServerConfigError> {
+  const strategy = value == null || value === "" ? "personal" : value;
+  if (strategy === "personal" || strategy === "random" || strategy === "required") {
+    return Effect.succeed(strategy);
+  }
+  return Effect.fail(
+    new ServerConfigError({ message: "SCRATCHWORK_DEFAULT_WORKSPACE must be personal, random, or required" }),
+  );
 }
 
 function urlFromDomain(value: string | undefined): string | undefined {

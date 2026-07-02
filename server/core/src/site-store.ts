@@ -13,6 +13,7 @@ import {
   accessGroupIsSubset,
   accessGroupMatches,
   accessGroupUsesOnlyDomains,
+  isReservedSlug,
   safeProjectIdentifier,
   workspaceFromEmail,
   type AccessGroup,
@@ -235,6 +236,9 @@ function publishProject(
     }
     yield* requireProjectIdentifier("workspace", workspace);
     yield* requireProjectIdentifier("project", project);
+    if (isReservedSlug(workspace)) {
+      return yield* Effect.fail(new SiteStoreError({ status: 400, message: `Workspace name is reserved: ${workspace}` }));
+    }
 
     const loaded = yield* loadSiteRecord(db, workspace, project);
     const visibility = request.visibility ?? loaded?.value.visibility ?? config.defaultVisibility;
@@ -261,6 +265,13 @@ function createProject(
   return Effect.gen(function* () {
     for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
       const routePath = routePathForProject(config, user, workspace, project);
+      const firstSegment = routePath.split("/")[0] ?? "";
+      if (isReservedSlug(firstSegment)) {
+        return yield* Effect.fail(new SiteStoreError({
+          status: 400,
+          message: `Project URL /${routePath} would shadow the reserved /${firstSegment} route`,
+        }));
+      }
       const result = yield* writeNewProject(storage, db, request, user, workspace, project, routePath, visibility).pipe(
         Effect.catchTag("SiteStoreError", (error) =>
           error.status === 409 && config.projectPath === "random"
@@ -298,8 +309,14 @@ function writeNewProject(
       updatedAt: now,
       revision,
     });
-    yield* putRouteRecord(db, routePath, workspace, project, { ifNoneMatch: "*" });
-    const written = yield* putProjectRecord(db, record, { ifNoneMatch: "*" });
+    const route = yield* putRouteRecord(db, routePath, workspace, project, { ifNoneMatch: "*" });
+    // The route is claimed before the project record exists; release it on failure so a
+    // partial write cannot permanently squat the route path.
+    const written = yield* putProjectRecord(db, record, { ifNoneMatch: "*" }).pipe(
+      Effect.tapError(() =>
+        db.delete(ROUTES_NAMESPACE, routePath, { ifMatch: route.version }).pipe(Effect.catchAll(() => Effect.void)),
+      ),
+    );
     yield* putOwnerIndex(db, record).pipe(Effect.catchAll(() => Effect.void));
     return {
       workspace: written.value.workspace,
@@ -394,8 +411,15 @@ function listProjects(
   user: AuthUser,
 ): Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError> {
   return Effect.gen(function* () {
-    const index = yield* db.list<JsonValue>(OWNER_INDEX_NAMESPACE, { prefix: `${encodeKeySegment(user.id)}/` }).pipe(Effect.mapError(dbError));
-    const loaded = yield* Effect.forEach(index.records, (record) =>
+    const prefix = `${encodeKeySegment(user.id)}/`;
+    const index: Array<PrimitiveDbRecord<JsonValue>> = [];
+    let startAfter: string | undefined;
+    do {
+      const page = yield* db.list<JsonValue>(OWNER_INDEX_NAMESPACE, { prefix, startAfter, limit: 1000 }).pipe(Effect.mapError(dbError));
+      index.push(...page.records);
+      startAfter = page.cursor;
+    } while (startAfter != null);
+    const loaded = yield* Effect.forEach(index, (record) =>
       decodeDbRecord(record, OwnerProjectRecordSchema).pipe(
         Effect.flatMap((ownerRecord) => loadSiteRecord(db, ownerRecord.value.workspace, ownerRecord.value.project)),
       ),

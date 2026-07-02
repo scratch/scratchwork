@@ -111,6 +111,116 @@ describe("server app", () => {
     expect(svg.headers.get("content-security-policy")).toContain("sandbox");
   });
 
+  test("republishing without visibility preserves the project's visibility", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project", defaultVisibility: "private" } });
+    const first = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v1" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
+    }));
+    expect(first.status).toBe(200);
+
+    const second = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v2" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "site",
+    }));
+    expect(second.status).toBe(200);
+    expect(((await json(second)) as { visibility: string }).visibility).toBe("public");
+
+    const html = await handler(new Request("https://scratch.test/demo/site/"));
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain("v2");
+  });
+
+  test("rejects reserved slugs that would shadow server routes", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
+    for (const workspace of ["api", "auth", "health"]) {
+      const response = await handler(post("/api/publish", {
+        bundle: bundle({ "index.html": "hello" }),
+        openPath: "/",
+        workspace,
+        project: "docs",
+        visibility: "public",
+      }));
+      expect(response.status).toBe(400);
+    }
+
+    const usernameHandler = await appHandler({
+      auth: testAuth({ id: "user-2", email: "api@example.com" }),
+      config: { projectPath: "username/project" },
+    });
+    const shadowed = await usernameHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "docs",
+      visibility: "public",
+    }));
+    expect(shadowed.status).toBe(400);
+  });
+
+  test("resolves published content paths to their project", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    const published = await json(await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }))) as { workspace: string; routePath: string };
+    expect(published.routePath).not.toContain("/");
+
+    const resolved = await handler(new Request(`https://scratch.test/api/resolve?path=${encodeURIComponent(`/${published.routePath}/index.html`)}`));
+    expect(resolved.status).toBe(200);
+    const body = await json(resolved) as { project: { workspace: string; project: string } };
+    expect(body.project.workspace).toBe(published.workspace);
+    expect(body.project.project).toBe("site");
+
+    const missing = await handler(new Request("https://scratch.test/api/resolve?path=/no-such-route/"));
+    expect(missing.status).toBe(404);
+
+    const unauthenticated = await appHandler({ auth: testAuth(user, null), storage: undefined });
+    const denied = await unauthenticated(new Request(`https://scratch.test/api/resolve?path=/${published.routePath}/`));
+    expect(denied.status).toBe(401);
+  });
+
+  test("rejects publishes without a workspace when defaultWorkspace is required", async () => {
+    const handler = await appHandler({
+      auth: testAuth(user),
+      config: { defaultWorkspace: "required", projectPath: "workspace/project" },
+    });
+    const response = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toMatchObject({ error: "workspace is required" });
+  });
+
+  test("lists projects beyond a single database page", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
+    for (let index = 0; index < 120; index += 1) {
+      const published = await handler(post("/api/publish", {
+        bundle: bundle({ "index.html": "hello" }),
+        openPath: "/",
+        workspace: "demo",
+        project: `site-${String(index).padStart(3, "0")}`,
+        visibility: "public",
+      }));
+      expect(published.status).toBe(200);
+    }
+
+    const response = await handler(new Request("https://scratch.test/api/projects"));
+    expect(response.status).toBe(200);
+    const body = await json(response) as { projects: ReadonlyArray<{ project: string }> };
+    expect(body.projects).toHaveLength(120);
+  });
+
   test("requires bearer auth for publish when auth is enabled", async () => {
     const handler = await appHandler({ auth: testAuth(user, null) });
     const response = await handler(post("/api/publish", {

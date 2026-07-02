@@ -11,7 +11,6 @@ import { resolveDevTarget } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
 import {
   PROJECT_CONFIG_FILE,
-  personalWorkspaceForEmail,
   readProjectConfig,
   resolveServer,
   safeIdentifier,
@@ -44,37 +43,27 @@ export function runPublish(
     const server = yield* resolveServer(config.server, projectConfig, "publish");
     const authRecord = yield* readAuthRecord(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
     const project = yield* resolveProjectName(config, projectConfig);
-    const workspace = nonEmpty(config.workspace)
-      ?? nonEmpty(projectConfig?.workspace)
-      ?? personalWorkspaceForEmail(authRecord?.email)
-      ?? "default";
-    const visibility = nonEmpty(config.visibility) ?? nonEmpty(projectConfig?.visibility) ?? "private";
+    // Omitted workspace/visibility let the server preserve an existing project's
+    // visibility and apply its defaultWorkspace/defaultVisibility policy.
+    const workspace = nonEmpty(config.workspace) ?? nonEmpty(projectConfig?.workspace);
+    const visibility = nonEmpty(config.visibility) ?? nonEmpty(projectConfig?.visibility);
 
     const bundle = yield* createBundle(target.root);
-    let authToken = authRecord?.token;
-    const response = yield* postPublish(server, {
+    const body = {
       bundle,
       openPath: target.openPath,
       workspace,
       project,
       visibility,
-    }, authToken).pipe(
+    };
+    let authToken = authRecord?.token;
+    const response = yield* postPublish(server, body, authToken).pipe(
       Effect.catchIf((error) => error instanceof PublishAuthRequired, () =>
         Effect.gen(function* () {
           yield* runLogin({ server });
           const record = yield* readAuthRecord(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
           authToken = record?.token;
-          const retryWorkspace = nonEmpty(config.workspace)
-            ?? nonEmpty(projectConfig?.workspace)
-            ?? personalWorkspaceForEmail(record?.email)
-            ?? workspace;
-          return yield* postPublish(server, {
-            bundle,
-            openPath: target.openPath,
-            workspace: retryWorkspace,
-            project,
-            visibility,
-          }, authToken);
+          return yield* postPublish(server, body, authToken);
         }),
       ),
     );
@@ -159,9 +148,9 @@ function postPublish(
   body: {
     readonly bundle: PublishBundle;
     readonly openPath: string;
-    readonly workspace: string;
+    readonly workspace?: string;
     readonly project: string;
-    readonly visibility: string;
+    readonly visibility?: string;
   },
   authToken: string | undefined,
 ): Effect.Effect<PublishResponse, CliError> {

@@ -37,10 +37,14 @@ export interface DeletePrimitiveDbRecordOptions {
 export interface ListPrimitiveDbRecordsOptions {
   readonly prefix?: string;
   readonly limit?: number;
+  /** Exclusive pagination cursor: only keys strictly after this key are returned. */
+  readonly startAfter?: string;
 }
 
 export interface PrimitiveDbListResult<A extends JsonValue = JsonValue> {
   readonly records: ReadonlyArray<PrimitiveDbRecord<A>>;
+  /** Pass as startAfter to fetch the next page. Absent when the listing is complete. */
+  readonly cursor?: string;
 }
 
 export interface PrimitiveDbShape {
@@ -135,15 +139,20 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
       yield* requireSafeDbNamespace(namespace);
       const prefix = options?.prefix ?? "";
       yield* requireSafeDbKeyPrefix(prefix);
+      const startAfter = yield* normalizeListStartAfter(options?.startAfter);
       const limit = yield* normalizeListLimit(options?.limit);
       const namespacePrefix = `${namespace}\0`;
       const matches = [...records.entries()]
         .filter(([key]) => key.startsWith(namespacePrefix))
         .map(([key, record]) => [key.slice(namespacePrefix.length), record] as const)
         .filter(([key]) => key.startsWith(prefix))
-        .sort(([a], [b]) => compareUtf8Bytes(a, b))
-        .slice(0, limit);
-      return { records: yield* Effect.all(matches.map(([key, record]) => materializeRecord<A>(namespace, key, record))) };
+        .filter(([key]) => startAfter == null || compareUtf8Bytes(key, startAfter) > 0)
+        .sort(([a], [b]) => compareUtf8Bytes(a, b));
+      const page = matches.slice(0, limit);
+      return {
+        records: yield* Effect.all(page.map(([key, record]) => materializeRecord<A>(namespace, key, record))),
+        ...(matches.length > limit ? { cursor: page[page.length - 1][0] } : {}),
+      };
     });
 
   return { get, put, delete: deleteRecord, list };
@@ -230,6 +239,14 @@ export function validatePutOptions(options: PutPrimitiveDbRecordOptions | undefi
 /** Validates provider-independent delete preconditions. */
 export function validateDeleteOptions(options: DeletePrimitiveDbRecordOptions | undefined): Effect.Effect<void, PrimitiveDbError> {
   return validateVersionPrecondition(options?.ifMatch);
+}
+
+/** Validates the exclusive pagination cursor for provider implementations. */
+export function normalizeListStartAfter(startAfter: string | undefined): Effect.Effect<string | undefined, PrimitiveDbError> {
+  if (startAfter == null) return Effect.succeed(undefined);
+  return safeDbKey(startAfter)
+    ? Effect.succeed(startAfter)
+    : Effect.fail(new PrimitiveDbError({ message: `Invalid database list cursor: ${startAfter}` }));
 }
 
 /** Normalizes and caps list limits for provider implementations. */

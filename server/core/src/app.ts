@@ -90,6 +90,10 @@ function handleRequest(
       return yield* listProjects(request);
     }
 
+    if (url.pathname === "/api/resolve" && request.method === "GET") {
+      return yield* resolveProjectPath(request, url);
+    }
+
     const projectApi = projectApiPath(url.pathname);
     if (projectApi != null) {
       if (request.method === "GET" && projectApi.action == null) return yield* projectInfo(request, projectApi.workspace, projectApi.project);
@@ -140,6 +144,28 @@ function listProjects(
     const siteStore = yield* SiteStore;
     const projects = yield* siteStore.listProjects(user);
     return yield* jsonResponse({ projects: projects.map((project) => projectSummary(project)) }, 200);
+  });
+}
+
+/** Resolves a published content path (under any route strategy) to its project. */
+function resolveProjectPath(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
+  return Effect.gen(function* () {
+    const path = url.searchParams.get("path");
+    if (path == null || !path.startsWith("/")) {
+      return yield* Effect.fail(new HttpError({ status: 400, message: "Missing path" }));
+    }
+    const config = yield* ServerConfig;
+    const auth = yield* Auth;
+    const user = yield* auth.requireApiUser(request);
+    const site = yield* loadSiteForPath(path);
+    if (site == null) return yield* Effect.fail(new HttpError({ status: 404, message: "Project not found" }));
+    if (!canReadProject(site.record, user, config)) {
+      return yield* Effect.fail(new HttpError({ status: 403, message: "Project not found" }));
+    }
+    return yield* jsonResponse({ project: projectSummary(site.record, contentBaseUrl(request, config)) }, 200);
   });
 }
 

@@ -66,13 +66,20 @@ describe("CLI help", () => {
 
   test("supports help before or after the subcommand name", async () => {
     const before = await runCli(["help", "publish"]);
-    const after = await runCli(["publish", "help"]);
+    const after = await runCli(["publish", "--help"]);
 
     expect(before.code).toBe(0);
     expect(after.code).toBe(0);
     expect(before.stdout).toBe(after.stdout);
     expect(before.stdout).toContain("scratchwork publish [path] --server <url>");
     expect(before.stdout).toContain("--visibility <scope>");
+  });
+
+  test("treats a bare help token after the command as a positional argument", async () => {
+    const result = await runCli(["publish", "help"]);
+
+    expect(result.stdout).not.toContain("scratchwork publish [path] --server <url>");
+    expect(result.code).not.toBe(0);
   });
 
   test("keeps no-command behavior but prints the new root help", async () => {

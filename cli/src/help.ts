@@ -316,8 +316,10 @@ function helpRequest(args: ReadonlyArray<string>): { readonly command?: string; 
   const [first, second, ...rest] = args;
   if (first === "--help" || first === "-h") return { command: second };
   if (first === "help") return { command: second };
-  if (second === "--help" || second === "-h" || second === "help") return { command: first };
-  if (rest.includes("--help") || rest.includes("-h") || rest.includes("help")) return { command: first };
+  // A bare "help" after the command is a positional argument (a path or project
+  // name), not a help request; only flag forms trigger help there.
+  if (second === "--help" || second === "-h") return { command: first };
+  if (rest.includes("--help") || rest.includes("-h")) return { command: first };
   return null;
 }
 
