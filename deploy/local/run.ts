@@ -47,9 +47,11 @@ export interface RunLocalServerOptions {
  * and an in-memory database. Environment variables take precedence over `server` settings,
  * which take precedence over local defaults. The configured app/content *domains* are not
  * used as origins — a local run always serves loopback URLs. When the settings declare
- * distinct app and content domains, the local run mirrors that split with two loopback
- * origins (`http://localhost:<port>` and `http://127.0.0.1:<port>`) so host-separated
- * behavior such as the private-content cookie handoff works the same way locally.
+ * distinct app and content domains, the local run mirrors that split on one port with
+ * `http://localhost:<port>` (app — plain localhost keeps Google OAuth redirect URIs valid)
+ * and `http://pages.localhost:<port>` (content — *.localhost is loopback per RFC 6761),
+ * so host-separated behavior such as the private-content cookie handoff works the same
+ * way locally.
  */
 export async function runLocalServer(options: RunLocalServerOptions = {}): Promise<void> {
   const processEnv = options.processEnv ?? (process.env as EnvVars);
@@ -61,7 +63,7 @@ export async function runLocalServer(options: RunLocalServerOptions = {}): Promi
     ...processEnv,
     ...serverSettingsEnv(server, processEnv),
     SCRATCHWORK_APP_URL: appUrl,
-    SCRATCHWORK_CONTENT_URL: processEnv.SCRATCHWORK_CONTENT_URL ?? (splitHosts ? `http://127.0.0.1:${localPort}` : appUrl),
+    SCRATCHWORK_CONTENT_URL: processEnv.SCRATCHWORK_CONTENT_URL ?? (splitHosts ? `http://pages.localhost:${localPort}` : appUrl),
     PORT: localPort,
   };
 

@@ -528,7 +528,7 @@ function requestBaseUrl(
 function defaultProtoForHost(requestUrl: URL, host: string): "http" | "https" {
   if (requestUrl.hostname !== "scratchwork.local") return requestUrl.protocol === "http:" ? "http" : "https";
   const hostname = host.replace(/:\d+$/, "").toLowerCase();
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "[::1]" ? "http" : "https";
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "[::1]" || hostname.endsWith(".localhost") ? "http" : "https";
 }
 
 function sameOrigin(left: string, right: string): boolean {

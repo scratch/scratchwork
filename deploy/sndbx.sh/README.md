@@ -40,9 +40,11 @@ bun run local:sndbx.sh   # from the repo root, or `bun run local` here
 ```
 
 Because the config declares separate app and content domains, the local run
-mirrors that split with two loopback origins: the app/API on
-`http://localhost:43118` and published content on `http://127.0.0.1:43118`.
-Set `PORT` to change the port, and `SCRATCHWORK_STORAGE_DIR` to relocate
+mirrors that split on one port: the app/API on `http://localhost:43118` and
+published content on `http://pages.localhost:43118` (`*.localhost` names are
+loopback per RFC 6761; browsers and macOS resolve them without setup). The app
+stays on plain `localhost` because Google OAuth accepts it as an http redirect
+URI. Set `PORT` to change the port, and `SCRATCHWORK_STORAGE_DIR` to relocate
 storage (default `.scratchwork-local-data` in this directory). Any
 `SCRATCHWORK_*` environment variable overrides the shared config.
 

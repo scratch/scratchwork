@@ -128,7 +128,7 @@ function hasScheme(value: string): boolean {
 
 function defaultScheme(value: string): "http" | "https" {
   const host = hostFromServer(value).toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" ? "http" : "https";
+  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host.endsWith(".localhost") ? "http" : "https";
 }
 
 function isNakedPublicHost(host: string): boolean {

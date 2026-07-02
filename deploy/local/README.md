@@ -45,5 +45,7 @@ await runLocalServer({ server });
 
 When the config declares distinct app and content domains, the local run
 serves the app on `http://localhost:<port>` and content on
-`http://127.0.0.1:<port>` so host-separated behavior (like the private-content
-cookie handoff) works the same way locally.
+`http://pages.localhost:<port>` so host-separated behavior (like the
+private-content cookie handoff) works the same way locally. `*.localhost`
+names are loopback per RFC 6761; the app stays on plain `localhost` so the
+Google OAuth http redirect URI remains valid.

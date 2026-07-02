@@ -92,7 +92,9 @@ function readPublicUrl(value: string | undefined): Effect.Effect<string | undefi
     if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
       return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_PUBLIC_URL must be an origin, such as https://example.com" }));
     }
-    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+    // *.localhost is loopback per RFC 6761 and resolves locally on modern systems,
+    // giving local runs real hostname-per-role URLs (e.g. http://pages.localhost:43118).
+    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname.endsWith(".localhost");
     if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
       return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_PUBLIC_URL must use https, except loopback http for local development" }));
     }
