@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { base64UrlToBytes, bytesToBase64Url } from "../../../shared/src/encoding/base64";
 import { errorMessage, isRecord, parseJson } from "../../../shared/src/util/json";
+import { accessGroupMatches } from "./access";
 import { ServerConfig, type AuthConfig } from "./config";
 import { verifyGoogleIdToken, type GoogleIdTokenClaims } from "./google-jwt";
 import { timingSafeEqual } from "./tokens";
@@ -18,7 +19,10 @@ const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SESSION_VERSION = 1;
 const STATE_TTL_SECONDS = 10 * 60;
+const HANDOFF_TTL_SECONDS = 60;
 const REDIRECT_MAX_LENGTH = 2048;
+const PROJECT_ACCESS_COOKIE_PREFIX = "scratchwork_access_";
+const SECURE_PROJECT_ACCESS_COOKIE_PREFIX = "__Secure-scratchwork_access_";
 
 export interface AuthUser {
   readonly id: string;
@@ -43,6 +47,23 @@ interface OAuthState {
   readonly expiresAt: number;
 }
 
+/**
+ * `handoff` tokens ride the redirect from the app host to the content host and live for
+ * seconds (they pass through query strings, which land in proxy logs). `cookie` tokens are
+ * the redeemed form stored in the path-scoped content cookie and live as long as a session.
+ */
+export type ProjectAccessUse = "handoff" | "cookie";
+
+interface ProjectAccessPayload {
+  readonly version: typeof SESSION_VERSION;
+  readonly kind: "project-access";
+  readonly use: ProjectAccessUse;
+  readonly projectKey: string;
+  readonly routePath: string;
+  readonly email: string;
+  readonly expiresAt: number;
+}
+
 interface GoogleTokenResponse {
   readonly id_token?: string;
   readonly error?: string;
@@ -56,16 +77,15 @@ export class AuthError extends Data.TaggedError("AuthError")<{
 }> {}
 
 export interface AuthShape {
-  readonly enabled: boolean;
   readonly currentUser: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<AuthUser | null, AuthError>;
   readonly requireUser: (
     request: HttpServerRequest.HttpServerRequest,
-  ) => Effect.Effect<AuthUser | null, AuthError>;
+  ) => Effect.Effect<AuthUser, AuthError>;
   readonly requireApiUser: (
     request: HttpServerRequest.HttpServerRequest,
-  ) => Effect.Effect<AuthUser | null, AuthError>;
+  ) => Effect.Effect<AuthUser, AuthError>;
   readonly login: (
     request: HttpServerRequest.HttpServerRequest,
     url: URL,
@@ -78,6 +98,18 @@ export interface AuthShape {
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError>;
   readonly logout: (baseUrl: string) => HttpServerResponse.HttpServerResponse;
   readonly loginRedirect: (url: URL, baseUrl: string) => HttpServerResponse.HttpServerResponse;
+  readonly issueProjectAccessToken: (
+    projectKey: string,
+    routePath: string,
+    user: AuthUser,
+    use: ProjectAccessUse,
+  ) => Effect.Effect<string, AuthError>;
+  readonly verifyProjectAccessToken: (
+    token: string,
+    projectKey: string,
+    routePath: string,
+    use: ProjectAccessUse,
+  ) => Effect.Effect<AuthUser | null, AuthError>;
 }
 
 export class Auth extends Context.Tag("@scratchwork/server/Auth")<Auth, AuthShape>() {}
@@ -87,24 +119,9 @@ export const AuthLive: Layer.Layer<Auth, never, ServerConfig> = Layer.effect(
   Effect.map(ServerConfig, (config) => makeAuth(config.auth)),
 );
 
-/** Creates the auth service implementation for disabled or Google auth modes. */
+/** Creates the auth service implementation over Google OAuth. */
 export function makeAuth(config: AuthConfig): AuthShape {
-  if (config._tag === "Disabled") {
-    return Auth.of({
-      enabled: false,
-      currentUser: () => Effect.succeed(null),
-      requireUser: () => Effect.succeed(null),
-      requireApiUser: () => Effect.succeed(null),
-      login: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
-      callback: () => Effect.fail(new AuthError({ status: 404, message: "Authentication is disabled" })),
-      logout: () => HttpServerResponse.redirect("/", { status: 302 }),
-      loginRedirect: () => HttpServerResponse.redirect("/", { status: 302 }),
-    });
-  }
-
   return Auth.of({
-    enabled: true,
-
     currentUser: (request) =>
       Effect.gen(function* () {
         const token = bearerToken(request) ?? cookieToken(request);
@@ -218,13 +235,43 @@ export function makeAuth(config: AuthConfig): AuthShape {
       loginUrl.searchParams.set("returnTo", `${url.pathname}${url.search}`);
       return HttpServerResponse.redirect(loginUrl, { status: 302 });
     },
+
+    issueProjectAccessToken: (projectKey, routePath, user, use) =>
+      signValue(
+        {
+          version: SESSION_VERSION,
+          kind: "project-access",
+          use,
+          projectKey,
+          routePath,
+          email: user.email,
+          expiresAt: epochSeconds() + (use === "handoff" ? HANDOFF_TTL_SECONDS : config.sessionTtlSeconds),
+        } satisfies ProjectAccessPayload,
+        config.sessionSecret,
+      ),
+
+    verifyProjectAccessToken: (token, projectKey, routePath, use) =>
+      Effect.gen(function* () {
+        const payload = yield* verifySignedValue<ProjectAccessPayload>(token, config.sessionSecret);
+        if (
+          !isProjectAccessPayload(payload) ||
+          payload.use !== use ||
+          payload.expiresAt < epochSeconds() ||
+          payload.projectKey !== projectKey ||
+          payload.routePath !== routePath
+        ) {
+          return null;
+        }
+        const user = { id: payload.email, email: payload.email };
+        return allowedUser(user, config) ? user : null;
+      }),
   });
 }
 
 /** Signs a portable session token for browser cookies and CLI bearer auth. */
 export function createSessionToken(
   user: AuthUser,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<string, AuthError> {
   const issuedAt = epochSeconds();
   return signValue(
@@ -242,7 +289,7 @@ export function createSessionToken(
 /** Reads bearer or cookie credentials and verifies the contained session token. */
 function verifySessionTokenFromRequest(
   request: HttpServerRequest.HttpServerRequest,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<AuthUser | null, AuthError> {
   const token = bearerToken(request) ?? cookieToken(request);
   return token == null ? Effect.succeed(null) : verifySessionToken(token, config);
@@ -251,7 +298,7 @@ function verifySessionTokenFromRequest(
 /** Verifies one signed session token and applies current allow-list rules. */
 function verifySessionToken(
   token: string,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<AuthUser | null, AuthError> {
   return Effect.gen(function* () {
     const payload = yield* verifySignedValue<SessionPayload>(token, config.sessionSecret);
@@ -266,7 +313,7 @@ function exchangeGoogleCode(
   code: string,
   redirectUri: string,
   nonce: string,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): Effect.Effect<AuthUser, AuthError> {
   return Effect.gen(function* () {
     const idToken = yield* Effect.tryPromise({
@@ -315,7 +362,7 @@ function exchangeGoogleCode(
 /** Converts verified Google claims into the auth user shape. */
 function userFromClaims(
   claims: GoogleIdTokenClaims,
-  config: Extract<AuthConfig, { readonly _tag: "Google" }>,
+  config: AuthConfig,
 ): AuthUser | null {
   const user: AuthUser = {
     id: claims.sub,
@@ -327,11 +374,8 @@ function userFromClaims(
 }
 
 /** Checks whether a verified Google user passes email/domain allow lists. */
-function allowedUser(user: AuthUser, config: Extract<AuthConfig, { readonly _tag: "Google" }>): boolean {
-  if (config.allowedEmails.size === 0 && config.allowedDomains.size === 0) return true;
-  if (config.allowedEmails.has(user.email.toLowerCase())) return true;
-  const domain = user.email.split("@")[1]?.toLowerCase();
-  return domain != null && config.allowedDomains.has(domain);
+function allowedUser(user: AuthUser, config: AuthConfig): boolean {
+  return accessGroupMatches(config.allowedUsers, user);
 }
 
 /** Signs arbitrary JSON as a compact HMAC token. */
@@ -394,20 +438,56 @@ function oauthStateToken(request: HttpServerRequest.HttpServerRequest, baseUrl: 
 }
 
 /** Finds and decodes the first matching cookie value from the request. */
-function cookieValue(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): string | undefined {
+export function cookieValue(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): string | undefined {
+  return cookieValues(request, names)[0];
+}
+
+/** Finds and decodes every matching cookie value from the request. Duplicates happen
+ * legitimately (same name under different Path attributes), so token-cookie readers must
+ * try each value rather than trust the first. */
+export function cookieValues(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): ReadonlyArray<string> {
   const header = request.headers.cookie;
-  if (header == null) return undefined;
+  if (header == null) return [];
+  const values: Array<string> = [];
   for (const part of header.split(";")) {
     const [name, ...valueParts] = part.trim().split("=");
     if (names.includes(name)) {
       try {
-        return decodeURIComponent(valueParts.join("="));
+        values.push(decodeURIComponent(valueParts.join("=")));
       } catch {
-        return undefined;
+        // Skip undecodable values; other cookies under the same name may still verify.
       }
     }
   }
-  return undefined;
+  return values;
+}
+
+/** Names the per-project content-access cookie. Route paths are `[A-Za-z0-9._-]` segments,
+ * so flattening `/` to `_` yields a valid cookie name; the flattened form can collide across
+ * projects (`a/b` vs `a_b`), but their `Path` attributes differ and the signed value is bound
+ * to the exact route path, so a colliding cookie merely fails verification. */
+export function projectAccessCookieName(routePath: string, secure: boolean): string {
+  const prefix = secure ? SECURE_PROJECT_ACCESS_COOKIE_PREFIX : PROJECT_ACCESS_COOKIE_PREFIX;
+  return `${prefix}${routePath.replace(/\//g, "_")}`;
+}
+
+/** Builds the Set-Cookie header for a redeemed project-access token, scoped to the project
+ * path on the content host. */
+export function projectAccessCookie(token: string, routePath: string, baseUrl: string, ttlSeconds: number): string {
+  const secure = baseUrl.startsWith("https://");
+  return [
+    `${projectAccessCookieName(routePath, secure)}=${encodeURIComponent(token)}`,
+    `Path=/${routePath}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${ttlSeconds}`,
+    secure ? "Secure" : "",
+  ].filter(Boolean).join("; ");
+}
+
+/** Reads every candidate project-access cookie value for a route path. */
+export function projectAccessCookieValues(request: HttpServerRequest.HttpServerRequest, routePath: string): ReadonlyArray<string> {
+  return cookieValues(request, [projectAccessCookieName(routePath, true), projectAccessCookieName(routePath, false)]);
 }
 
 /** Builds the Set-Cookie header for a session token. */
@@ -519,6 +599,20 @@ function isSessionPayload(value: unknown): value is SessionPayload {
     isRecord(value.user) &&
     typeof value.user.id === "string" &&
     typeof value.user.email === "string"
+  );
+}
+
+/** Checks the decoded content-access token shape. */
+function isProjectAccessPayload(value: unknown): value is ProjectAccessPayload {
+  return (
+    isRecord(value) &&
+    value.version === SESSION_VERSION &&
+    value.kind === "project-access" &&
+    (value.use === "handoff" || value.use === "cookie") &&
+    typeof value.projectKey === "string" &&
+    typeof value.routePath === "string" &&
+    typeof value.email === "string" &&
+    typeof value.expiresAt === "number"
   );
 }
 

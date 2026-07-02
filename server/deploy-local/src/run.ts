@@ -1,0 +1,130 @@
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
+import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
+import * as BunPath from "@effect/platform-bun/BunPath";
+import { BunRuntime } from "@effect/platform-bun";
+import {
+  AuthLive,
+  LocalObjectStorageLive,
+  MemoryPrimitiveDbLive,
+  ServerConfig,
+  SiteStoreLive,
+  app,
+  makeServerConfigLayer,
+  type EnvVars,
+} from "@scratchwork/server-core";
+import * as Console from "effect/Console";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+
+/**
+ * Server settings a deploy target can run locally. Structurally compatible with the
+ * `server` section of the Cloudflare/AWS `ScratchworkServerConfig`, so a deploy project
+ * can share one config module between its cloud deploy and a local run.
+ */
+export interface LocalServerSettings {
+  readonly auth?: "oauth";
+  readonly googleClientId?: string;
+  readonly authAllowedEmails?: string;
+  readonly authAllowedDomains?: string;
+  readonly authSessionSeconds?: number;
+  readonly allowedUsers?: string;
+  readonly maxVisibility?: string;
+  readonly shareAllowedDomains?: string;
+  readonly appDomain?: string;
+  readonly contentDomain?: string;
+  readonly projectPath?: "workspace/project" | "domain/username/project" | "username/project" | "random";
+  readonly defaultWorkspace?: "personal" | "random" | "required";
+  readonly defaultVisibility?: string;
+}
+
+export interface RunLocalServerOptions {
+  readonly server?: LocalServerSettings;
+  readonly processEnv?: EnvVars;
+}
+
+/**
+ * Runs the Scratchwork server locally with the given server settings, local file storage,
+ * and an in-memory database. Environment variables take precedence over `server` settings,
+ * which take precedence over local defaults. The configured app/content *domains* are not
+ * used as origins — a local run always serves loopback URLs. When the settings declare
+ * distinct app and content domains, the local run mirrors that split on one port with
+ * `http://localhost:<port>` (app — plain localhost keeps Google OAuth redirect URIs valid)
+ * and `http://pages.localhost:<port>` (content — *.localhost is loopback per RFC 6761),
+ * so host-separated behavior such as the private-content cookie handoff works the same
+ * way locally.
+ */
+export async function runLocalServer(options: RunLocalServerOptions = {}): Promise<void> {
+  const processEnv = options.processEnv ?? (process.env as EnvVars);
+  const server = options.server ?? {};
+  const localPort = processEnv.PORT ?? processEnv.SCRATCHWORK_PORT ?? "43118";
+  const splitHosts = server.appDomain != null && server.contentDomain != null && server.appDomain !== server.contentDomain;
+  const appUrl = processEnv.SCRATCHWORK_APP_URL ?? `http://localhost:${localPort}`;
+  const env: EnvVars = {
+    ...processEnv,
+    ...serverSettingsEnv(server, processEnv),
+    SCRATCHWORK_APP_URL: appUrl,
+    SCRATCHWORK_CONTENT_URL: processEnv.SCRATCHWORK_CONTENT_URL ?? (splitHosts ? `http://pages.localhost:${localPort}` : appUrl),
+    PORT: localPort,
+  };
+
+  const storageDirectory = env.SCRATCHWORK_STORAGE_DIR ?? ".scratchwork-local-data";
+
+  const BaseLayer = Layer.mergeAll(
+    BunHttpServer.layerContext,
+    BunFileSystem.layer,
+    BunPath.layer,
+    makeServerConfigLayer(env),
+  );
+
+  const StorageLayer = Layer.provideMerge(
+    LocalObjectStorageLive(storageDirectory),
+    BaseLayer,
+  );
+
+  const MainLayer = Layer.provideMerge(
+    Layer.mergeAll(AuthLive, SiteStoreLive),
+    Layer.mergeAll(StorageLayer, MemoryPrimitiveDbLive()),
+  );
+
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      const config = yield* ServerConfig;
+      const httpServer = yield* BunHttpServer.make({ port: config.port, idleTimeout: 60 });
+      yield* httpServer.serve(app);
+      const resolvedAppUrl = config.appUrl ?? `http://localhost:${config.port}`;
+      const resolvedContentUrl = config.contentUrl ?? resolvedAppUrl;
+      yield* Console.log(
+        [
+          "scratchwork local deploy",
+          `app      ${resolvedAppUrl}`,
+          `content  ${resolvedContentUrl}`,
+          `storage  local:${storageDirectory}`,
+        ].join("\n"),
+      );
+      return yield* Effect.never;
+    }),
+  );
+
+  program.pipe(Effect.provide(MainLayer), BunRuntime.runMain);
+}
+
+/** Maps server settings onto their environment variables, keeping any already set. */
+function serverSettingsEnv(server: LocalServerSettings, processEnv: EnvVars): EnvVars {
+  const env: Record<string, string | undefined> = {};
+  const set = (key: string, value: string | undefined) => {
+    const resolved = processEnv[key] ?? value;
+    if (resolved != null) env[key] = resolved;
+  };
+  set("SCRATCHWORK_AUTH", server.auth);
+  set("SCRATCHWORK_GOOGLE_CLIENT_ID", server.googleClientId);
+  set("SCRATCHWORK_AUTH_ALLOWED_EMAILS", server.authAllowedEmails);
+  set("SCRATCHWORK_AUTH_ALLOWED_DOMAINS", server.authAllowedDomains);
+  set("SCRATCHWORK_AUTH_SESSION_SECONDS", server.authSessionSeconds == null ? undefined : String(server.authSessionSeconds));
+  set("SCRATCHWORK_ALLOWED_USERS", server.allowedUsers);
+  set("SCRATCHWORK_MAX_VISIBILITY", server.maxVisibility);
+  set("SCRATCHWORK_SHARE_ALLOWED_DOMAINS", server.shareAllowedDomains);
+  set("SCRATCHWORK_PROJECT_PATH", server.projectPath);
+  set("SCRATCHWORK_DEFAULT_WORKSPACE", server.defaultWorkspace);
+  set("SCRATCHWORK_DEFAULT_VISIBILITY", server.defaultVisibility);
+  return env;
+}

@@ -10,13 +10,11 @@ const user: AuthUser = {
   name: "Founder",
 };
 
-const googleConfig: Extract<AuthConfig, { readonly _tag: "Google" }> = {
-  _tag: "Google",
+const googleConfig: AuthConfig = {
   clientId: "google-client-id",
   clientSecret: "google-client-secret",
   sessionSecret: "session-secret-session-secret-32-bytes",
-  allowedEmails: new Set(),
-  allowedDomains: new Set(),
+  allowedUsers: "public",
   sessionTtlSeconds: 60,
 };
 
@@ -33,7 +31,7 @@ describe("Auth", () => {
   });
 
   test("rejects a signed token outside allowed domains", async () => {
-    const config = { ...googleConfig, allowedDomains: new Set(["yc.com"]) };
+    const config = { ...googleConfig, allowedUsers: "@yc.com" };
     const token = await Effect.runPromise(createSessionToken(user, config));
     const auth = makeAuth(config);
 
@@ -55,10 +53,10 @@ describe("Auth", () => {
 });
 
 describe("readServerConfig", () => {
-  test("enables Google auth from environment", async () => {
+  test("reads OAuth settings from environment", async () => {
     const config = await Effect.runPromise(
       readServerConfig({
-        SCRATCHWORK_AUTH: "google",
+        SCRATCHWORK_AUTH: "oauth",
         SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
         SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
         SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
@@ -66,10 +64,52 @@ describe("readServerConfig", () => {
       }),
     );
 
-    expect(config.auth._tag).toBe("Google");
-    if (config.auth._tag === "Google") {
-      expect(config.auth.allowedDomains.has("yc.com")).toBe(true);
-    }
+    expect(config.auth.allowedUsers).toBe("@example.com,@yc.com");
+  });
+
+  test("rejects auth modes other than oauth", async () => {
+    await expect(
+      Effect.runPromise(
+        readServerConfig({
+          SCRATCHWORK_AUTH: "google",
+          SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+          SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+          SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+        }),
+      ),
+    ).rejects.toThrow('SCRATCHWORK_AUTH must be "oauth" when set');
+  });
+
+  test("fails without OAuth credentials", async () => {
+    await expect(Effect.runPromise(readServerConfig({}))).rejects.toThrow(
+      "OAuth is required",
+    );
+  });
+
+  test("reads the required default workspace strategy", async () => {
+    const config = await Effect.runPromise(
+      readServerConfig({
+        SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+        SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+        SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+        SCRATCHWORK_DEFAULT_WORKSPACE: "required",
+      }),
+    );
+
+    expect(config.defaultWorkspace).toBe("required");
+  });
+
+  test("rejects unknown default workspace strategies", async () => {
+    await expect(
+      Effect.runPromise(
+        readServerConfig({
+          SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+          SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+          SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+          SCRATCHWORK_DEFAULT_WORKSPACE: "team",
+        }),
+      ),
+    ).rejects.toThrow("SCRATCHWORK_DEFAULT_WORKSPACE must be personal, random, or required");
   });
 });
 

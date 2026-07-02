@@ -6,12 +6,19 @@ import { createRunner, type RunOptions, type RunResult } from "./deploy-proc";
 
 export interface ScratchworkServerConfig {
   readonly publicUrl?: string;
-  readonly auth?: "google";
+  readonly auth?: "oauth";
   readonly googleClientId?: string;
   readonly authAllowedEmails?: string;
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
-  readonly allowPublicPublish?: boolean;
+  readonly allowedUsers?: string;
+  readonly maxVisibility?: string;
+  readonly shareAllowedDomains?: string;
+  readonly appDomain?: string;
+  readonly contentDomain?: string;
+  readonly projectPath?: "workspace/project" | "domain/username/project" | "username/project" | "random";
+  readonly defaultWorkspace?: "personal" | "random" | "required";
+  readonly defaultVisibility?: string;
 }
 
 export interface AwsDeployConfig {
@@ -20,6 +27,7 @@ export interface AwsDeployConfig {
   readonly functionName?: string;
   readonly roleName?: string;
   readonly s3Bucket?: string;
+  readonly dynamoDbTable?: string;
 }
 
 export interface AwsDeployServerConfig {
@@ -43,12 +51,14 @@ export interface AwsDeployResult {
   readonly roleName: string;
   readonly roleArn: string;
   readonly bucketName: string;
+  readonly dynamoDbTable: string;
   readonly region: string;
   readonly storageRegion: string;
 }
 
 interface ResolvedScratchworkServerConfig {
-  readonly publicUrl?: string;
+  readonly appUrl?: string;
+  readonly contentUrl?: string;
 }
 
 interface ResolvedAwsDeployConfig {
@@ -57,6 +67,7 @@ interface ResolvedAwsDeployConfig {
   readonly functionName: string;
   readonly roleName: string;
   readonly s3Bucket?: string;
+  readonly dynamoDbTable?: string;
 }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -105,10 +116,12 @@ export async function deployServer(
 
   const accountId = await awsText(["sts", "get-caller-identity", "--query", "Account", "--output", "text"]);
   const bucketName = resolvedDeploy.s3Bucket ?? `scratchwork-server-${accountId}-${resolvedDeploy.storageRegion}`;
+  const tableName = resolvedDeploy.dynamoDbTable ?? `${resolvedDeploy.functionName}-projects`;
 
   await ensureBucket(aws, bucketName, resolvedDeploy.storageRegion);
-  const roleArn = await ensureRole(aws, awsText, resolvedDeploy.roleName, resolvedDeploy.functionName, bucketName);
-  await writeEnvironment(env, bucketName, resolvedDeploy.storageRegion);
+  await ensureDynamoDbTable(aws, tableName);
+  const roleArn = await ensureRole(aws, awsText, resolvedDeploy.roleName, resolvedDeploy.functionName, bucketName, tableName, resolvedDeploy.region);
+  await writeEnvironment(env, bucketName, resolvedDeploy.storageRegion, tableName);
   await upsertFunction(aws, resolvedDeploy.functionName, roleArn);
   const url = await ensureFunctionUrl(aws, awsText, resolvedDeploy.functionName);
 
@@ -118,6 +131,7 @@ export async function deployServer(
     roleName: resolvedDeploy.roleName,
     roleArn,
     bucketName,
+    dynamoDbTable: tableName,
     region: resolvedDeploy.region,
     storageRegion: resolvedDeploy.storageRegion,
   };
@@ -129,7 +143,12 @@ function deployArgv(options: AwsDeployOptions): ReadonlyArray<string> {
 
 function resolveServerConfig(config: ScratchworkServerConfig, env: DeployEnv): ResolvedScratchworkServerConfig {
   return {
-    publicUrl: optional(config.publicUrl) ?? optional(env.SCRATCHWORK_PUBLIC_URL),
+    appUrl: optional(config.appDomain) == null
+      ? optional(config.publicUrl) ?? optional(env.SCRATCHWORK_APP_URL) ?? optional(env.SCRATCHWORK_PUBLIC_URL)
+      : `https://${config.appDomain}`,
+    contentUrl: optional(config.contentDomain) == null
+      ? optional(config.publicUrl) ?? optional(env.SCRATCHWORK_CONTENT_URL) ?? optional(env.SCRATCHWORK_PUBLIC_URL)
+      : `https://${config.contentDomain}`,
   };
 }
 
@@ -147,6 +166,7 @@ function resolveDeployConfig(config: AwsDeployConfig, env: DeployEnv): ResolvedA
     functionName,
     roleName: optional(config.roleName) ?? optional(env.SCRATCHWORK_AWS_ROLE_NAME) ?? `${functionName}-lambda-role`,
     s3Bucket: optional(config.s3Bucket) ?? optional(env.SCRATCHWORK_S3_BUCKET),
+    dynamoDbTable: optional(config.dynamoDbTable) ?? optional(env.SCRATCHWORK_DYNAMODB_TABLE),
   };
 }
 
@@ -157,8 +177,14 @@ function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScra
   if (config.authAllowedEmails != null) env.SCRATCHWORK_AUTH_ALLOWED_EMAILS = config.authAllowedEmails;
   if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
   if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
-  if (config.allowPublicPublish != null) env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH = config.allowPublicPublish ? "1" : "";
-  if (resolved.publicUrl != null) env.SCRATCHWORK_PUBLIC_URL = resolved.publicUrl;
+  if (config.allowedUsers != null) env.SCRATCHWORK_ALLOWED_USERS = config.allowedUsers;
+  if (config.maxVisibility != null) env.SCRATCHWORK_MAX_VISIBILITY = config.maxVisibility;
+  if (config.shareAllowedDomains != null) env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS = config.shareAllowedDomains;
+  if (config.projectPath != null) env.SCRATCHWORK_PROJECT_PATH = config.projectPath;
+  if (config.defaultWorkspace != null) env.SCRATCHWORK_DEFAULT_WORKSPACE = config.defaultWorkspace;
+  if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
+  if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
+  if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;
   return env;
 }
 
@@ -169,6 +195,7 @@ function deployConfigEnv(resolved: ResolvedAwsDeployConfig): DeployEnv {
   env.SCRATCHWORK_AWS_FUNCTION_NAME = resolved.functionName;
   env.SCRATCHWORK_AWS_ROLE_NAME = resolved.roleName;
   if (resolved.s3Bucket != null) env.SCRATCHWORK_S3_BUCKET = resolved.s3Bucket;
+  if (resolved.dynamoDbTable != null) env.SCRATCHWORK_DYNAMODB_TABLE = resolved.dynamoDbTable;
   return env;
 }
 
@@ -188,16 +215,39 @@ async function ensureBucket(
   await aws(args);
 }
 
-/** Refuses accidental public deploys and validates required Google auth secrets. */
+/** Creates the DynamoDB primitive DB table when it does not already exist. */
+async function ensureDynamoDbTable(
+  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
+  table: string,
+): Promise<void> {
+  const exists = await aws(["dynamodb", "describe-table", "--table-name", table], { allowFailure: true });
+  if (exists.ok) return;
+  await aws([
+    "dynamodb",
+    "create-table",
+    "--table-name",
+    table,
+    "--attribute-definitions",
+    "AttributeName=namespace,AttributeType=S",
+    "AttributeName=key,AttributeType=S",
+    "--key-schema",
+    "AttributeName=namespace,KeyType=HASH",
+    "AttributeName=key,KeyType=RANGE",
+    "--billing-mode",
+    "PAY_PER_REQUEST",
+  ]);
+  await aws(["dynamodb", "wait", "table-exists", "--table-name", table]);
+}
+
+/** Validates required OAuth secrets. Auth cannot be disabled. */
 function validateDeploymentAuth(env: DeployEnv): void {
-  if ((env.SCRATCHWORK_AUTH ?? "").toLowerCase() === "google") {
-    for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
-      if (!env[key]) throw new Error(`${key} is required when SCRATCHWORK_AUTH=google`);
-    }
-    return;
+  const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
+  if (authMode !== "" && authMode !== "oauth") {
+    throw new Error('SCRATCHWORK_AUTH must be "oauth" when set');
   }
-  if (env.SCRATCHWORK_ALLOW_PUBLIC_PUBLISH === "1") return;
-  throw new Error("AWS deploys require SCRATCHWORK_AUTH=google or explicit SCRATCHWORK_ALLOW_PUBLIC_PUBLISH=1");
+  for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
+    if (!env[key]) throw new Error(`${key} is required: AWS deploys always use OAuth`);
+  }
 }
 
 /** Creates or updates the Lambda execution role and bucket access policy. */
@@ -207,6 +257,8 @@ async function ensureRole(
   role: string,
   functionName: string,
   bucket: string,
+  table: string,
+  region: string,
 ): Promise<string> {
   const roleExists = await aws(["iam", "get-role", "--role-name", role], { allowFailure: true });
   if (!roleExists.ok) {
@@ -252,6 +304,11 @@ async function ensureRole(
           Action: ["s3:GetObject", "s3:PutObject"],
           Resource: [`arn:aws:s3:::${bucket}/*`],
         },
+        {
+          Effect: "Allow",
+          Action: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query"],
+          Resource: [`arn:aws:dynamodb:${region}:*:table/${table}`],
+        },
       ],
     }),
   );
@@ -270,13 +327,14 @@ async function ensureRole(
 }
 
 /** Writes the Lambda environment JSON passed to AWS CLI. */
-async function writeEnvironment(env: DeployEnv, bucket: string, bucketRegion: string): Promise<void> {
+async function writeEnvironment(env: DeployEnv, bucket: string, bucketRegion: string, table: string): Promise<void> {
   const variables: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (key.startsWith("SCRATCHWORK_") && value != null && value !== "") variables[key] = value;
   }
   variables.SCRATCHWORK_S3_BUCKET = bucket;
   variables.SCRATCHWORK_S3_REGION = bucketRegion;
+  variables.SCRATCHWORK_DYNAMODB_TABLE = table;
 
   await writeFile(environmentPath, JSON.stringify({ Variables: variables }));
 }

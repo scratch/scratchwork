@@ -3,9 +3,9 @@ import { normalizeServerUrl } from "../src/auth";
 
 describe("normalizeServerUrl", () => {
   test("defaults bare public hosts to the https app subdomain", () => {
-    expect(normalizeServerUrl("sndbx.sh")).toBe("https://www.sndbx.sh");
-    expect(normalizeServerUrl("sndbx.sh/")).toBe("https://www.sndbx.sh");
-    expect(normalizeServerUrl("https://sndbx.sh")).toBe("https://www.sndbx.sh");
+    expect(normalizeServerUrl("sndbx.sh")).toBe("https://app.sndbx.sh");
+    expect(normalizeServerUrl("sndbx.sh/")).toBe("https://app.sndbx.sh");
+    expect(normalizeServerUrl("https://sndbx.sh")).toBe("https://app.sndbx.sh");
   });
 
   test("defaults loopback hosts to http", () => {

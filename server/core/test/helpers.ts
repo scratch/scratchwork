@@ -7,6 +7,7 @@ import { bytesToHex } from "../../../shared/src/encoding/hex";
 import { app } from "../src/app";
 import { Auth, AuthError, AuthLive, type AuthShape, type AuthUser } from "../src/auth";
 import { ServerConfig, type ServerConfigShape } from "../src/config";
+import { MemoryPrimitiveDbLive } from "../src/db";
 import { SiteStoreLive } from "../src/site-store";
 import { ObjectStorage, StorageConflict, StorageError, safeObjectKey, type ObjectStorageShape, type StoredObject } from "../src/storage";
 
@@ -36,12 +37,26 @@ export async function appHandler(options: {
   const config: ServerConfigShape = {
     port: 3001,
     publicUrl: "https://scratch.test",
-    auth: { _tag: "Disabled" },
+    appUrl: "https://scratch.test",
+    contentUrl: "https://scratch.test",
+    maxVisibility: "public",
+    shareAllowedDomains: new Set(),
+    projectPath: "random",
+    defaultWorkspace: "personal",
+    defaultVisibility: "public",
+    auth: {
+      clientId: "test-client-id",
+      clientSecret: "test-client-secret",
+      sessionSecret: "test-session-secret-test-session-secret",
+      allowedUsers: "public",
+      sessionTtlSeconds: 60,
+    },
     ...options.config,
   };
   const base = Layer.mergeAll(
     Layer.succeed(ServerConfig, ServerConfig.of(config)),
     memoryStorageLayer(options.storage),
+    MemoryPrimitiveDbLive(),
   );
   const services = Layer.provideMerge(
     Layer.mergeAll(options.auth ?? AuthLive, SiteStoreLive),
@@ -60,7 +75,6 @@ export function memoryStorageLayer(
 /** Provides deterministic auth behavior for app tests. */
 export function testAuth(user: AuthUser | null, apiUser = user): Layer.Layer<Auth> {
   const shape: AuthShape = {
-    enabled: true,
     currentUser: () => Effect.succeed(user),
     requireUser: () => user == null
       ? Effect.fail(new AuthError({ status: 401, message: "Authentication required" }))
@@ -72,6 +86,10 @@ export function testAuth(user: AuthUser | null, apiUser = user): Layer.Layer<Aut
     callback: () => Effect.succeed(HttpServerResponse.redirect("/")),
     logout: () => HttpServerResponse.redirect("/"),
     loginRedirect: () => HttpServerResponse.redirect("/auth/login"),
+    issueProjectAccessToken: () => Effect.succeed("project-access-token"),
+    verifyProjectAccessToken: () => apiUser == null
+      ? Effect.succeed(null)
+      : Effect.succeed(apiUser),
   };
   return Layer.succeed(Auth, Auth.of(shape));
 }

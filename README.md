@@ -24,8 +24,8 @@ scratchwork dev [path]
 To publish to a running Scratchwork server:
 
 ```sh
-scratchwork login --server https://your-scratchwork-server.example
-scratchwork publish [path]
+scratchwork login https://your-scratchwork-server.example
+scratchwork publish --workspace myspace --project myproject [path]
 ```
 
 ## Local development
@@ -72,32 +72,31 @@ To customize Markdown rendering, add an `index.html` renderer file at or above t
 Run the publishing server locally:
 
 ```sh
-bun run server
+bun run local:local-dev
 ```
 
 Then publish a directory or file:
 
 ```sh
-scratchwork login --server http://localhost:3001
+scratchwork login --server http://localhost:43118
 scratchwork publish index.html
 ```
 
-The server stores the bundle in local object storage by default, returns a random slug URL such as `/abc123defg/`, and returns a token. The CLI saves the slug and token in `.scratchwork.json` so the next `scratchwork publish` republishes the same URL.
+The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `workspace`, `project`, `visibility`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
 
-Deploy the server with one command:
+Deployments live as projects under `deploy/`, one per domain, each deployable with one command:
 
 ```sh
-bun run deploy:aws
-bun run deploy:cloudflare
+bun run deploy:sndbx.sh
 ```
 
 Cloud runtime dependencies live in `server/deploy-aws` and `server/deploy-cloudflare`. See `server/README.md` for cloud setup details.
 
-Deploy secrets can be loaded from `server/.env` or an explicit env file:
+Deploy secrets load from the project's `.env`:
 
 ```sh
-cp server/.env.example server/.env
-bun run deploy:cloudflare --env server/.env
+cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
+bun run deploy:sndbx.sh
 ```
 
 ---

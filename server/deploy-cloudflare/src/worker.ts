@@ -1,10 +1,12 @@
 import * as HttpApp from "@effect/platform/HttpApp";
 import { AuthLive, app, makeServerConfigLayer, SiteStoreLive, type EnvVars } from "@scratchwork/server-core";
 import * as Layer from "effect/Layer";
+import { D1PrimitiveDbLive, type D1DatabaseBinding } from "./d1-db";
 import { R2ObjectStorageLive, type R2BucketBinding } from "./r2-storage";
 
-interface CloudflareEnv extends Record<string, R2BucketBinding | string | undefined> {
+interface CloudflareEnv extends Record<string, R2BucketBinding | D1DatabaseBinding | string | undefined> {
   readonly SCRATCHWORK_R2: R2BucketBinding;
+  readonly SCRATCHWORK_D1: D1DatabaseBinding;
 }
 
 interface ExecutionContextBinding {
@@ -28,7 +30,7 @@ function handlerFor(env: CloudflareEnv): (request: Request) => Promise<Response>
   const serverEnv = envVarsFromCloudflare(env);
   const layer = Layer.provideMerge(
     Layer.mergeAll(AuthLive, SiteStoreLive),
-    Layer.mergeAll(R2ObjectStorageLive(env.SCRATCHWORK_R2), makeServerConfigLayer(serverEnv)),
+    Layer.mergeAll(R2ObjectStorageLive(env.SCRATCHWORK_R2), D1PrimitiveDbLive(env.SCRATCHWORK_D1), makeServerConfigLayer(serverEnv)),
   );
   const web = HttpApp.toWebHandlerLayer(app, layer);
   handlers.set(env, web.handler);

@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "deploy": "bun deploy.ts",
+    "local": "bun local.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@scratchwork/server-deploy-cloudflare": "0.1.0"
+    "@scratchwork/server-deploy-cloudflare": "workspace:*",
+    "@scratchwork/server-deploy-local": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

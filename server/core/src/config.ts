@@ -2,28 +2,39 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { normalizeAccessGroup, type AccessGroup } from "./access";
 
 export type EnvVars = Readonly<Record<string, string | undefined>>;
 
 export interface ServerConfigShape {
   readonly port: number;
+  readonly appUrl?: string;
+  readonly contentUrl?: string;
+  /** @deprecated Use appUrl/contentUrl. */
   readonly publicUrl?: string;
+  readonly maxVisibility: AccessGroup;
+  readonly shareAllowedDomains: ReadonlySet<string>;
+  readonly projectPath: ProjectPathStrategy;
+  readonly defaultWorkspace: DefaultWorkspaceStrategy;
+  readonly defaultVisibility: AccessGroup;
   readonly auth: AuthConfig;
 }
 
-export type AuthConfig =
-  | {
-      readonly _tag: "Disabled";
-    }
-  | {
-      readonly _tag: "Google";
-      readonly clientId: string;
-      readonly clientSecret: string;
-      readonly sessionSecret: string;
-      readonly allowedEmails: ReadonlySet<string>;
-      readonly allowedDomains: ReadonlySet<string>;
-      readonly sessionTtlSeconds: number;
-    };
+export type ProjectPathStrategy =
+  | "workspace/project"
+  | "domain/username/project"
+  | "username/project"
+  | "random";
+
+export type DefaultWorkspaceStrategy = "personal" | "random" | "required";
+
+export interface AuthConfig {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly sessionSecret: string;
+  readonly allowedUsers: AccessGroup;
+  readonly sessionTtlSeconds: number;
+}
 
 export class ServerConfig extends Context.Tag("@scratchwork/server/Config")<
   ServerConfig,
@@ -61,6 +72,13 @@ export function readServerConfig(
     return {
       port,
       publicUrl: yield* readPublicUrl(env.SCRATCHWORK_PUBLIC_URL),
+      appUrl: yield* readPublicUrl(env.SCRATCHWORK_APP_URL ?? urlFromDomain(env.SCRATCHWORK_APP_DOMAIN) ?? env.SCRATCHWORK_PUBLIC_URL),
+      contentUrl: yield* readPublicUrl(env.SCRATCHWORK_CONTENT_URL ?? urlFromDomain(env.SCRATCHWORK_CONTENT_DOMAIN) ?? env.SCRATCHWORK_PUBLIC_URL),
+      maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
+      shareAllowedDomains: domainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS),
+      projectPath: yield* readProjectPath(env.SCRATCHWORK_PROJECT_PATH),
+      defaultWorkspace: yield* readDefaultWorkspace(env.SCRATCHWORK_DEFAULT_WORKSPACE),
+      defaultVisibility: yield* readAccessGroup(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
       auth: yield* readAuthConfig(env),
     };
   });
@@ -74,7 +92,9 @@ function readPublicUrl(value: string | undefined): Effect.Effect<string | undefi
     if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
       return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_PUBLIC_URL must be an origin, such as https://example.com" }));
     }
-    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+    // *.localhost is loopback per RFC 6761 and resolves locally on modern systems,
+    // giving local runs real hostname-per-role URLs (e.g. http://pages.localhost:43118).
+    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname.endsWith(".localhost");
     if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
       return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_PUBLIC_URL must use https, except loopback http for local development" }));
     }
@@ -84,42 +104,94 @@ function readPublicUrl(value: string | undefined): Effect.Effect<string | undefi
   }
 }
 
-/** Parses disabled or Google auth settings from environment variables. */
+/** Parses required OAuth settings from environment variables. Auth cannot be disabled. */
 function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigError> {
-  const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
-  const clientId = env.SCRATCHWORK_GOOGLE_CLIENT_ID ?? env.GOOGLE_CLIENT_ID;
-  const clientSecret = env.SCRATCHWORK_GOOGLE_CLIENT_SECRET ?? env.GOOGLE_CLIENT_SECRET;
-  const sessionSecret = env.SCRATCHWORK_SESSION_SECRET;
-  const wantsGoogle = authMode === "google" || clientId != null || clientSecret != null || sessionSecret != null;
+  return Effect.gen(function* () {
+    const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
+    const clientId = env.SCRATCHWORK_GOOGLE_CLIENT_ID ?? env.GOOGLE_CLIENT_ID;
+    const clientSecret = env.SCRATCHWORK_GOOGLE_CLIENT_SECRET ?? env.GOOGLE_CLIENT_SECRET;
+    const sessionSecret = env.SCRATCHWORK_SESSION_SECRET;
 
-  if (!wantsGoogle) return Effect.succeed({ _tag: "Disabled" });
-  if (authMode !== "" && authMode !== "google") {
-    return Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_AUTH must be \"google\" when set" }));
-  }
-  if (!clientId || !clientSecret || !sessionSecret) {
-    return Effect.fail(
-      new ServerConfigError({
-        message: "Google auth requires SCRATCHWORK_GOOGLE_CLIENT_ID, SCRATCHWORK_GOOGLE_CLIENT_SECRET, and SCRATCHWORK_SESSION_SECRET",
-      }),
-    );
-  }
-  if (new TextEncoder().encode(sessionSecret).byteLength < 32) {
-    return Effect.fail(
-      new ServerConfigError({
-        message: "SCRATCHWORK_SESSION_SECRET must be at least 32 bytes",
-      }),
-    );
-  }
+    if (authMode !== "" && authMode !== "oauth") {
+      return yield* Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_AUTH must be \"oauth\" when set" }));
+    }
+    if (!clientId || !clientSecret || !sessionSecret) {
+      return yield* Effect.fail(
+        new ServerConfigError({
+          message: "OAuth is required: set SCRATCHWORK_GOOGLE_CLIENT_ID, SCRATCHWORK_GOOGLE_CLIENT_SECRET, and SCRATCHWORK_SESSION_SECRET",
+        }),
+      );
+    }
+    if (new TextEncoder().encode(sessionSecret).byteLength < 32) {
+      return yield* Effect.fail(
+        new ServerConfigError({
+          message: "SCRATCHWORK_SESSION_SECRET must be at least 32 bytes",
+        }),
+      );
+    }
 
-  return Effect.succeed({
-    _tag: "Google",
-    clientId,
-    clientSecret,
-    sessionSecret,
-    allowedEmails: csvSet(env.SCRATCHWORK_AUTH_ALLOWED_EMAILS),
-    allowedDomains: csvSet(env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS),
-    sessionTtlSeconds: parsePositiveInteger(env.SCRATCHWORK_AUTH_SESSION_SECONDS) ?? 60 * 60 * 24 * 30,
+    return {
+      clientId,
+      clientSecret,
+      sessionSecret,
+      allowedUsers: yield* readAccessGroup(
+        env.SCRATCHWORK_ALLOWED_USERS ?? groupFromLegacyAuthAllowLists(env.SCRATCHWORK_AUTH_ALLOWED_EMAILS, env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS),
+        "public",
+        "SCRATCHWORK_ALLOWED_USERS",
+      ),
+      sessionTtlSeconds: parsePositiveInteger(env.SCRATCHWORK_AUTH_SESSION_SECONDS) ?? 60 * 60 * 24 * 30,
+    } as const;
   });
+}
+
+function readAccessGroup(
+  value: string | undefined,
+  fallback: string,
+  name: string,
+): Effect.Effect<AccessGroup, ServerConfigError> {
+  return normalizeAccessGroup(value == null || value === "" ? fallback : value).pipe(
+    Effect.mapError((cause) => new ServerConfigError({ message: `${name}: ${cause.message}` })),
+  );
+}
+
+function readProjectPath(value: string | undefined): Effect.Effect<ProjectPathStrategy, ServerConfigError> {
+  const projectPath = value == null || value === "" ? "random" : value;
+  if (
+    projectPath === "workspace/project" ||
+    projectPath === "domain/username/project" ||
+    projectPath === "username/project" ||
+    projectPath === "random"
+  ) {
+    return Effect.succeed(projectPath);
+  }
+  return Effect.fail(
+    new ServerConfigError({
+      message: "SCRATCHWORK_PROJECT_PATH must be workspace/project, domain/username/project, username/project, or random",
+    }),
+  );
+}
+
+function readDefaultWorkspace(value: string | undefined): Effect.Effect<DefaultWorkspaceStrategy, ServerConfigError> {
+  const strategy = value == null || value === "" ? "personal" : value;
+  if (strategy === "personal" || strategy === "random" || strategy === "required") {
+    return Effect.succeed(strategy);
+  }
+  return Effect.fail(
+    new ServerConfigError({ message: "SCRATCHWORK_DEFAULT_WORKSPACE must be personal, random, or required" }),
+  );
+}
+
+function urlFromDomain(value: string | undefined): string | undefined {
+  if (value == null || value === "") return undefined;
+  return value.includes("://") ? value : `https://${value}`;
+}
+
+function groupFromLegacyAuthAllowLists(emails: string | undefined, domains: string | undefined): string | undefined {
+  const parts = [
+    ...csvItems(emails),
+    ...csvItems(domains).map((domain) => domain.startsWith("@") ? domain : `@${domain}`),
+  ];
+  return parts.length === 0 ? undefined : parts.join(",");
 }
 
 /** Reads process.env when available without assuming a Node-like global. */
@@ -144,12 +216,14 @@ function parsePositiveInteger(value: string | undefined): number | null {
 }
 
 /** Converts a comma-separated allow-list to a lowercase set. */
-function csvSet(value: string | undefined): ReadonlySet<string> {
-  if (value == null || value === "") return new Set();
-  return new Set(
-    value
-      .split(",")
-      .map((item) => item.trim().toLowerCase())
-      .filter((item) => item !== ""),
-  );
+function domainSet(value: string | undefined): ReadonlySet<string> {
+  return new Set(csvItems(value).map((domain) => domain.replace(/^@/, "").toLowerCase()));
+}
+
+function csvItems(value: string | undefined): ReadonlyArray<string> {
+  if (value == null || value === "") return [];
+  return value
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item !== "");
 }

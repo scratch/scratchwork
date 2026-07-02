@@ -49,6 +49,27 @@ describe("PrimitiveDb", () => {
     expect(listed.records.map((record) => record.key)).toEqual(["alice/-", "alice/0", "alice/Z", "alice/_", "alice/a"]);
   });
 
+  test("paginates lists with startAfter cursors", async () => {
+    const db = makeMemoryPrimitiveDb();
+    for (const key of ["alice/a", "alice/b", "alice/c", "alice/d", "alice/e"]) {
+      await Effect.runPromise(db.put("projects", key, { key }));
+    }
+
+    const first = await Effect.runPromise(db.list("projects", { prefix: "alice/", limit: 2 }));
+    expect(first.records.map((record) => record.key)).toEqual(["alice/a", "alice/b"]);
+    expect(first.cursor).toBe("alice/b");
+
+    const second = await Effect.runPromise(db.list("projects", { prefix: "alice/", limit: 2, startAfter: first.cursor }));
+    expect(second.records.map((record) => record.key)).toEqual(["alice/c", "alice/d"]);
+    expect(second.cursor).toBe("alice/d");
+
+    const last = await Effect.runPromise(db.list("projects", { prefix: "alice/", limit: 2, startAfter: second.cursor }));
+    expect(last.records.map((record) => record.key)).toEqual(["alice/e"]);
+    expect(last.cursor).toBeUndefined();
+
+    await expect(Effect.runPromise(db.list("projects", { startAfter: "../etc" }))).rejects.toThrow("Invalid database list cursor");
+  });
+
   test("delete can be version-checked", async () => {
     const db = makeMemoryPrimitiveDb();
     const created = await Effect.runPromise(db.put("projects", "alice/docs", { ok: true }));

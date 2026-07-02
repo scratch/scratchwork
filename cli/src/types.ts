@@ -15,12 +15,28 @@ export interface TemplateConfig {
 export interface PublishConfig {
   readonly path?: string;
   readonly server?: string;
-  readonly slug?: string;
-  readonly token?: string;
+  readonly workspace?: string;
+  readonly project?: string;
+  readonly visibility?: string;
 }
 
 export interface LoginConfig {
   readonly server?: string;
+}
+
+export interface ServerConfig {
+  readonly server?: string;
+}
+
+export interface ProjectRefConfig {
+  readonly pathOrUrl?: string;
+  readonly server?: string;
+  readonly workspace?: string;
+  readonly project?: string;
+}
+
+export interface CloneConfig {
+  readonly pathOrUrl?: string;
 }
 
 export interface ReloadPayload {

@@ -6,9 +6,7 @@ import { StorageError } from "./storage";
 
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 const SLUG_LENGTH = 10;
-const TOKEN_BYTES = 32;
 const REVISION_BYTES = 16;
-const RESERVED_SLUGS = new Set(["api", "auth", "health", "favicon.ico", "favicon.svg"]);
 
 /** Generates a human-safe random publish slug. */
 export function randomSlug(): string {
@@ -18,33 +16,6 @@ export function randomSlug(): string {
 /** Generates a random revision identifier for immutable site revisions. */
 export function randomRevisionId(): string {
   return bytesToBase64Url(randomBytes(REVISION_BYTES));
-}
-
-/** Generates a URL-safe publish token returned to the CLI. */
-export function randomToken(): string {
-  return bytesToBase64Url(randomBytes(TOKEN_BYTES));
-}
-
-/** Checks whether a slug is syntactically safe and not route-reserved. */
-export function safeSlug(slug: string): boolean {
-  return /^[a-z0-9][a-z0-9-]{2,63}$/.test(slug) && !RESERVED_SLUGS.has(slug);
-}
-
-/** Checks whether a publish token uses the expected URL-safe format. */
-export function safeToken(token: string): boolean {
-  return /^[A-Za-z0-9_-]{16,256}$/.test(token);
-}
-
-/** Hashes a publish token for storage without keeping plaintext. */
-export function tokenHash(token: string): Effect.Effect<string, StorageError> {
-  return sha256Hex(new TextEncoder().encode(token)).pipe(
-    Effect.map((hash) => `sha256:${hash}`),
-    Effect.mapError((cause) =>
-      cause instanceof StorageError
-        ? new StorageError({ message: "Could not hash publish token", cause })
-        : cause,
-    ),
-  );
 }
 
 /** Computes a SHA-256 digest as lowercase hex. */

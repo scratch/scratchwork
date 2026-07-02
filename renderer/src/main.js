@@ -89,6 +89,8 @@ async function renderPage() {
   for (const cand of mdCandidates(location.pathname)) {
     const url = new URL(cand, location.origin).href;
     try {
+      // Same-origin fetch with default credentials: private projects are authenticated by
+      // a path-scoped cookie on the content host, which must ride along on every request.
       const r = await fetch(url);
       if (r.ok) { res = r; mdUrl = url; break; }
     } catch (err) {

@@ -9,9 +9,15 @@ describe("decodePublishRequest", () => {
     const request = await Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
       openPath: "//docs///",
+      workspace: "demo.space",
+      project: "site_docs",
+      visibility: "Founder@Example.com,@YC.com",
     }));
 
     expect(request.openPath).toBe("/docs/");
+    expect(request.workspace).toBe("demo.space");
+    expect(request.project).toBe("site_docs");
+    expect(request.visibility).toBe("founder@example.com,@yc.com");
     expect(request.totalBytes).toBe(5);
   });
 
@@ -50,11 +56,19 @@ describe("decodePublishRequest", () => {
     }))).rejects.toThrow("Invalid openPath");
   });
 
-  test("requires slug and token together", async () => {
+  test("validates workspace, project, and visibility", async () => {
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
-      slug: "abc123",
-    }))).rejects.toThrow("slug and token");
+      workspace: "../bad",
+      project: "site",
+    }))).rejects.toThrow("Invalid workspace");
+
+    await expect(Effect.runPromise(decodePublishRequest({
+      bundle: bundle({ "index.html": "hello" }),
+      workspace: "demo",
+      project: "site",
+      visibility: "public,@example.com",
+    }))).rejects.toThrow("Invalid access group");
   });
 
   test("enforces file count and byte limits", async () => {

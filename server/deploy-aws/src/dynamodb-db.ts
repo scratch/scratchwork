@@ -15,6 +15,7 @@ import {
   decodePrimitiveDbValue,
   encodePrimitiveDbValue,
   normalizeListLimit,
+  normalizeListStartAfter,
   requireSafeDbKey,
   requireSafeDbKeyPrefix,
   requireSafeDbNamespace,
@@ -166,6 +167,7 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
       yield* requireSafeDbNamespace(namespace);
       const prefix = options?.prefix ?? "";
       yield* requireSafeDbKeyPrefix(prefix);
+      const startAfter = yield* normalizeListStartAfter(options?.startAfter);
       const limit = yield* normalizeListLimit(options?.limit);
       const response = yield* Effect.tryPromise({
         try: () => client.send(new QueryCommand({
@@ -175,10 +177,15 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
           ExpressionAttributeValues: prefix === "" ? { ":namespace": { S: namespace } } : { ":namespace": { S: namespace }, ":prefix": { S: prefix } },
           Limit: limit,
           ScanIndexForward: true,
+          ExclusiveStartKey: startAfter == null ? undefined : keyAttributes(namespace, startAfter),
         })),
         catch: (cause) => new PrimitiveDbError({ message: `Could not list DynamoDB records: ${namespace}`, cause }),
       });
-      return { records: yield* Effect.all((response.Items ?? []).map((item) => itemToRecord<A>(item))) };
+      const lastEvaluatedKey = response.LastEvaluatedKey?.[KEY]?.S;
+      return {
+        records: yield* Effect.all((response.Items ?? []).map((item) => itemToRecord<A>(item))),
+        ...(lastEvaluatedKey == null ? {} : { cursor: lastEvaluatedKey }),
+      };
     });
 
   return { get, put, delete: deleteRecord, list };

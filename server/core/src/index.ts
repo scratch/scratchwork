@@ -1,4 +1,16 @@
 export { app } from "./app";
+export {
+  AccessGroupError,
+  accessGroupIsSubset,
+  accessGroupMatches,
+  accessGroupUsesOnlyDomains,
+  normalizeAccessGroup,
+  safeProjectIdentifier,
+  slugifyIdentifier,
+  workspaceFromEmail,
+  type AccessGroup,
+  type AccessPrincipal,
+} from "./access";
 export { Auth, AuthError, AuthLive, createSessionToken, makeAuth, type AuthShape, type AuthUser } from "./auth";
 export {
   makeServerConfigLayer,
@@ -7,7 +19,9 @@ export {
   ServerConfigError,
   ServerConfigLive,
   type AuthConfig,
+  type DefaultWorkspaceStrategy,
   type EnvVars,
+  type ProjectPathStrategy,
   type ServerConfigShape,
 } from "./config";
 export {
@@ -52,8 +66,14 @@ export {
   SiteStore,
   SiteStoreError,
   SiteStoreLive,
+  canReadProject,
+  canWriteProject,
+  candidateRoutePaths,
+  projectKey,
+  routeRest,
   type LoadedSite,
   type PublishResult,
+  type RouteRecord,
   type SiteFileObject,
   type SiteRecord,
   type SiteRevisionRecord,

@@ -7,8 +7,8 @@ import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
 import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath } from "../../../shared/src/site/paths";
 import { parseJson } from "../../../shared/src/util/json";
+import { normalizeAccessGroup, safeProjectIdentifier, type AccessGroup } from "./access";
 import { HttpError } from "./http-error";
-import { safeSlug, safeToken } from "./tokens";
 
 export const MAX_PUBLISH_BODY_BYTES = 30 * 1024 * 1024;
 export const MAX_PUBLISH_FILES = 1_000;
@@ -18,8 +18,9 @@ export const MAX_PUBLISH_TOTAL_BYTES = 25 * 1024 * 1024;
 export interface PublishRequest {
   readonly bundle: PublishBundle;
   readonly openPath: string;
-  readonly slug?: string;
-  readonly token?: string;
+  readonly workspace?: string;
+  readonly project?: string;
+  readonly visibility?: AccessGroup;
   readonly totalBytes: number;
 }
 
@@ -40,8 +41,9 @@ const PublishBundleSchema = Schema.Struct({
 const RawPublishRequestSchema = Schema.Struct({
   bundle: PublishBundleSchema,
   openPath: Schema.optional(Schema.String),
-  slug: Schema.optional(Schema.String.pipe(Schema.filter((slug) => safeSlug(slug) || "Invalid slug"))),
-  token: Schema.optional(Schema.String.pipe(Schema.filter((token) => safeToken(token) || "Invalid token"))),
+  workspace: Schema.optional(Schema.String.pipe(Schema.filter((workspace) => safeProjectIdentifier(workspace) || "Invalid workspace"))),
+  project: Schema.optional(Schema.String.pipe(Schema.filter((project) => safeProjectIdentifier(project) || "Invalid project"))),
+  visibility: Schema.optional(Schema.String),
 });
 
 type RawPublishRequest = Schema.Schema.Type<typeof RawPublishRequestSchema>;
@@ -117,17 +119,18 @@ function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishR
     if (openPath == null) {
       return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid openPath" }));
     }
-    if ((raw.slug == null) !== (raw.token == null)) {
-      return yield* Effect.fail(
-        new HttpError({ status: 400, message: "slug and token must be provided together" }),
+    const visibility = raw.visibility == null
+      ? undefined
+      : yield* normalizeAccessGroup(raw.visibility).pipe(
+        Effect.mapError((cause) => new HttpError({ status: 400, message: cause.message })),
       );
-    }
 
     return {
       bundle: raw.bundle,
       openPath,
-      slug: raw.slug,
-      token: raw.token,
+      workspace: raw.workspace,
+      project: raw.project,
+      visibility,
       totalBytes,
     };
   });

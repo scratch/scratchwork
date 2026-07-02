@@ -3,9 +3,10 @@ import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import { defaultServerUrl, decodeLoginCallback, loginUrl, normalizeServerUrl, writeAuthToken } from "../auth";
+import { decodeLoginCallback, loginUrl, normalizeServerUrl, writeAuthToken } from "../auth";
 import { openBrowser } from "../browser";
 import { CliError, errorMessage } from "../errors";
+import { readProjectConfig, resolveServer } from "../project-config";
 import type { LoginConfig } from "../types";
 
 interface LoginResult {
@@ -24,7 +25,9 @@ export function runLogin(
   config: LoginConfig,
 ): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
-    const server = defaultServerUrl(config.server);
+    const paths = yield* Path.Path;
+    const projectConfig = yield* readProjectConfig(paths.resolve(process.cwd(), "."));
+    const server = yield* resolveServer(config.server, projectConfig, "login");
     const callback = yield* startLoginServer();
     const url = loginUrl(server, callback.callbackUrl);
 

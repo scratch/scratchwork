@@ -5,6 +5,7 @@ import {
   decodePrimitiveDbValue,
   encodePrimitiveDbValue,
   normalizeListLimit,
+  normalizeListStartAfter,
   requireSafeDbKey,
   requireSafeDbKeyPrefix,
   requireSafeDbNamespace,
@@ -137,15 +138,27 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
       yield* requireSafeDbNamespace(namespace);
       const prefix = options?.prefix ?? "";
       yield* requireSafeDbKeyPrefix(prefix);
+      const startAfter = yield* normalizeListStartAfter(options?.startAfter);
       const limit = yield* normalizeListLimit(options?.limit);
+      const where = ["namespace = ?"];
+      const values: Array<string | number> = [namespace];
+      if (prefix !== "") {
+        where.push("substr(key, 1, length(?)) = ?");
+        values.push(prefix, prefix);
+      }
+      if (startAfter != null) {
+        where.push("key > ?");
+        values.push(startAfter);
+      }
       const rows = yield* d1All<D1RecordRow>(
         database,
-        prefix === ""
-          ? `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE namespace = ? ORDER BY key LIMIT ?`
-          : `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE namespace = ? AND substr(key, 1, length(?)) = ? ORDER BY key LIMIT ?`,
-        prefix === "" ? [namespace, limit] : [namespace, prefix, prefix, limit],
+        `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE ${where.join(" AND ")} ORDER BY key LIMIT ?`,
+        [...values, limit],
       );
-      return { records: yield* Effect.all(rows.map((row) => rowToRecord<A>(row))) };
+      return {
+        records: yield* Effect.all(rows.map((row) => rowToRecord<A>(row))),
+        ...(rows.length === limit ? { cursor: rows[rows.length - 1].key } : {}),
+      };
     });
 
   return { get, put, delete: deleteRecord, list };
