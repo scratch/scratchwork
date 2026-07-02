@@ -19,8 +19,10 @@ const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SESSION_VERSION = 1;
 const STATE_TTL_SECONDS = 10 * 60;
-const PROJECT_ACCESS_TTL_SECONDS = 10 * 60;
+const HANDOFF_TTL_SECONDS = 60;
 const REDIRECT_MAX_LENGTH = 2048;
+const PROJECT_ACCESS_COOKIE_PREFIX = "scratchwork_access_";
+const SECURE_PROJECT_ACCESS_COOKIE_PREFIX = "__Secure-scratchwork_access_";
 
 export interface AuthUser {
   readonly id: string;
@@ -45,9 +47,17 @@ interface OAuthState {
   readonly expiresAt: number;
 }
 
+/**
+ * `handoff` tokens ride the redirect from the app host to the content host and live for
+ * seconds (they pass through query strings, which land in proxy logs). `cookie` tokens are
+ * the redeemed form stored in the path-scoped content cookie and live as long as a session.
+ */
+export type ProjectAccessUse = "handoff" | "cookie";
+
 interface ProjectAccessPayload {
   readonly version: typeof SESSION_VERSION;
   readonly kind: "project-access";
+  readonly use: ProjectAccessUse;
   readonly projectKey: string;
   readonly routePath: string;
   readonly email: string;
@@ -92,11 +102,13 @@ export interface AuthShape {
     projectKey: string,
     routePath: string,
     user: AuthUser,
+    use: ProjectAccessUse,
   ) => Effect.Effect<string, AuthError>;
   readonly verifyProjectAccessToken: (
     token: string,
     projectKey: string,
     routePath: string,
+    use: ProjectAccessUse,
   ) => Effect.Effect<AuthUser | null, AuthError>;
 }
 
@@ -224,24 +236,26 @@ export function makeAuth(config: AuthConfig): AuthShape {
       return HttpServerResponse.redirect(loginUrl, { status: 302 });
     },
 
-    issueProjectAccessToken: (projectKey, routePath, user) =>
+    issueProjectAccessToken: (projectKey, routePath, user, use) =>
       signValue(
         {
           version: SESSION_VERSION,
           kind: "project-access",
+          use,
           projectKey,
           routePath,
           email: user.email,
-          expiresAt: epochSeconds() + PROJECT_ACCESS_TTL_SECONDS,
+          expiresAt: epochSeconds() + (use === "handoff" ? HANDOFF_TTL_SECONDS : config.sessionTtlSeconds),
         } satisfies ProjectAccessPayload,
         config.sessionSecret,
       ),
 
-    verifyProjectAccessToken: (token, projectKey, routePath) =>
+    verifyProjectAccessToken: (token, projectKey, routePath, use) =>
       Effect.gen(function* () {
         const payload = yield* verifySignedValue<ProjectAccessPayload>(token, config.sessionSecret);
         if (
           !isProjectAccessPayload(payload) ||
+          payload.use !== use ||
           payload.expiresAt < epochSeconds() ||
           payload.projectKey !== projectKey ||
           payload.routePath !== routePath
@@ -425,19 +439,55 @@ function oauthStateToken(request: HttpServerRequest.HttpServerRequest, baseUrl: 
 
 /** Finds and decodes the first matching cookie value from the request. */
 export function cookieValue(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): string | undefined {
+  return cookieValues(request, names)[0];
+}
+
+/** Finds and decodes every matching cookie value from the request. Duplicates happen
+ * legitimately (same name under different Path attributes), so token-cookie readers must
+ * try each value rather than trust the first. */
+export function cookieValues(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): ReadonlyArray<string> {
   const header = request.headers.cookie;
-  if (header == null) return undefined;
+  if (header == null) return [];
+  const values: Array<string> = [];
   for (const part of header.split(";")) {
     const [name, ...valueParts] = part.trim().split("=");
     if (names.includes(name)) {
       try {
-        return decodeURIComponent(valueParts.join("="));
+        values.push(decodeURIComponent(valueParts.join("=")));
       } catch {
-        return undefined;
+        // Skip undecodable values; other cookies under the same name may still verify.
       }
     }
   }
-  return undefined;
+  return values;
+}
+
+/** Names the per-project content-access cookie. Route paths are `[A-Za-z0-9._-]` segments,
+ * so flattening `/` to `_` yields a valid cookie name; the flattened form can collide across
+ * projects (`a/b` vs `a_b`), but their `Path` attributes differ and the signed value is bound
+ * to the exact route path, so a colliding cookie merely fails verification. */
+export function projectAccessCookieName(routePath: string, secure: boolean): string {
+  const prefix = secure ? SECURE_PROJECT_ACCESS_COOKIE_PREFIX : PROJECT_ACCESS_COOKIE_PREFIX;
+  return `${prefix}${routePath.replace(/\//g, "_")}`;
+}
+
+/** Builds the Set-Cookie header for a redeemed project-access token, scoped to the project
+ * path on the content host. */
+export function projectAccessCookie(token: string, routePath: string, baseUrl: string, ttlSeconds: number): string {
+  const secure = baseUrl.startsWith("https://");
+  return [
+    `${projectAccessCookieName(routePath, secure)}=${encodeURIComponent(token)}`,
+    `Path=/${routePath}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${ttlSeconds}`,
+    secure ? "Secure" : "",
+  ].filter(Boolean).join("; ");
+}
+
+/** Reads every candidate project-access cookie value for a route path. */
+export function projectAccessCookieValues(request: HttpServerRequest.HttpServerRequest, routePath: string): ReadonlyArray<string> {
+  return cookieValues(request, [projectAccessCookieName(routePath, true), projectAccessCookieName(routePath, false)]);
 }
 
 /** Builds the Set-Cookie header for a session token. */
@@ -558,6 +608,7 @@ function isProjectAccessPayload(value: unknown): value is ProjectAccessPayload {
     isRecord(value) &&
     value.version === SESSION_VERSION &&
     value.kind === "project-access" &&
+    (value.use === "handoff" || value.use === "cookie") &&
     typeof value.projectKey === "string" &&
     typeof value.routePath === "string" &&
     typeof value.email === "string" &&

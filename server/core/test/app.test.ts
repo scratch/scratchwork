@@ -34,7 +34,8 @@ describe("server app", () => {
 
     const html = await handler(new Request("https://scratch.test/demo/site/"));
     expect(html.status).toBe(200);
-    expect(html.headers.get("content-security-policy")).toContain("sandbox");
+    expect(html.headers.get("content-security-policy")).toBeNull();
+    expect(html.headers.get("referrer-policy")).toBe("same-origin");
     expect(await html.text()).toContain("Hello");
 
     const css = await handler(new Request("https://scratch.test/demo/site/style.css"));
@@ -76,10 +77,10 @@ describe("server app", () => {
     expect(removed.status).toBe(404);
   });
 
-  test("serves rendered markdown with sandbox and public asset CORS", async () => {
+  test("serves rendered markdown unsandboxed with public asset CORS", async () => {
     const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
     const published = await json(await handler(post("/api/publish", {
-      bundle: bundle({ "index.md": "# Hello" }),
+      bundle: bundle({ "index.md": "# Hello", "evil.svg": "<svg><script>alert(1)</script></svg>" }),
       openPath: "/",
       workspace: "demo",
       project: "docs",
@@ -88,27 +89,16 @@ describe("server app", () => {
 
     const html = await handler(new Request(`https://scratch.test/${published.routePath}/`));
     expect(html.status).toBe(200);
-    expect(html.headers.get("content-security-policy")).toContain("sandbox");
+    expect(html.headers.get("content-security-policy")).toBeNull();
     expect(html.headers.get("access-control-allow-origin")).toBe("*");
 
     const markdown = await handler(new Request(`https://scratch.test/${published.routePath}/index.md`));
     expect(markdown.status).toBe(200);
     expect(markdown.headers.get("access-control-allow-origin")).toBe("*");
-  });
-
-  test("sandboxes published SVG assets", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
-    const published = await json(await handler(post("/api/publish", {
-      bundle: bundle({ "evil.svg": "<svg><script>alert(1)</script></svg>" }),
-      openPath: "/evil.svg",
-      workspace: "demo",
-      project: "svg",
-      visibility: "public",
-    }))) as { routePath: string };
 
     const svg = await handler(new Request(`https://scratch.test/${published.routePath}/evil.svg`));
     expect(svg.status).toBe(200);
-    expect(svg.headers.get("content-security-policy")).toContain("sandbox");
+    expect(svg.headers.get("content-security-policy")).toBeNull();
   });
 
   test("republishing without visibility preserves the project's visibility", async () => {
@@ -358,7 +348,7 @@ describe("server app", () => {
     expect(location.searchParams.get("returnTo")).toBe("https://pages.scratch.test/demo/secret/hello-world.svg");
   });
 
-  test("serves private content and its subresources through a token-prefixed URL", async () => {
+  test("authenticates private content through a handoff token and path-scoped cookie", async () => {
     const authConfig = {
       clientId: "client-id",
       clientSecret: "client-secret",
@@ -385,37 +375,65 @@ describe("server app", () => {
     }, token));
     expect(publish.status).toBe(200);
 
-    // The app host authenticates the viewer and redirects to a token-prefixed content URL
-    // (no cookie handoff).
+    // The app host authenticates the viewer and redirects back with a one-time handoff
+    // token in the query string; the app response itself sets no content cookie.
     const appRedirect = await handler(new Request(
       "https://app.scratch.test/auth/project?route=demo/secret&returnTo=https%3A%2F%2Fpages.scratch.test%2Fdemo%2Fsecret%2F",
       { headers: { authorization: `Bearer ${token}` }, redirect: "manual" },
     ));
     expect(appRedirect.status).toBe(302);
-    const tokenized = new URL(appRedirect.headers.get("location") ?? "https://invalid");
-    expect(tokenized.origin).toBe("https://pages.scratch.test");
-    expect(tokenized.pathname).toMatch(/^\/_a\/[^/]+\/demo\/secret\/$/);
+    const handoffUrl = new URL(appRedirect.headers.get("location") ?? "https://invalid");
+    expect(handoffUrl.origin).toBe("https://pages.scratch.test");
+    expect(handoffUrl.pathname).toBe("/demo/secret/");
+    expect(handoffUrl.searchParams.get("_scratchwork_handoff")).not.toBeNull();
     expect(appRedirect.headers.get("set-cookie")).toBeNull();
 
-    // The top-level document loads at the tokenized URL with no cookie present.
-    const doc = await handler(new Request(tokenized.toString(), { redirect: "manual" }));
+    // The content host redeems the handoff token into a project-path cookie and redirects
+    // to the clean URL, keeping the token out of the address bar and shareable links.
+    const redeem = await handler(new Request(handoffUrl.toString(), { redirect: "manual" }));
+    expect(redeem.status).toBe(302);
+    expect(redeem.headers.get("location")).toBe("/demo/secret/");
+    const setCookie = redeem.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("__Secure-scratchwork_access_demo_secret=");
+    expect(setCookie).toContain("Path=/demo/secret");
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Lax");
+    expect(setCookie).toContain("Secure");
+    const cookie = setCookie.split(";")[0];
+
+    // The clean URL now serves the document with the cookie, without a sandbox CSP.
+    const doc = await handler(new Request("https://pages.scratch.test/demo/secret/", {
+      headers: { cookie, "sec-fetch-dest": "document" },
+    }));
     expect(doc.status).toBe(200);
     expect(await doc.text()).toContain("private page body");
+    expect(doc.headers.get("content-security-policy")).toBeNull();
+    expect(doc.headers.get("referrer-policy")).toBe("same-origin");
+    expect(doc.headers.get("access-control-allow-origin")).toBeNull();
 
-    // A subresource under the same prefix authenticates via the path — the case a
-    // SameSite cookie could not cover from a sandboxed, opaque-origin page.
-    const accessToken = tokenized.pathname.split("/")[2];
-    const asset = await handler(new Request(`https://pages.scratch.test/_a/${accessToken}/demo/secret/data.json`));
+    // Renderer subresource fetches carry the cookie plus a same-project referer.
+    const asset = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+      headers: { cookie, "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/demo/secret/" },
+    }));
     expect(asset.status).toBe(200);
     expect(await asset.text()).toContain("secret");
 
-    // A missing trailing slash on the tokenized route canonicalizes while keeping the prefix.
-    const noSlash = await handler(new Request(`https://pages.scratch.test/_a/${accessToken}/demo/secret`, { redirect: "manual" }));
+    // Clients without Sec-Fetch headers (old browsers, curl with the cookie) still work.
+    const legacy = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+      headers: { cookie },
+    }));
+    expect(legacy.status).toBe(200);
+
+    // A missing trailing slash canonicalizes onto the cookie's path scope.
+    const noSlash = await handler(new Request("https://pages.scratch.test/demo/secret", {
+      headers: { cookie },
+      redirect: "manual",
+    }));
     expect(noSlash.status).toBe(308);
-    expect(noSlash.headers.get("location")).toBe(`/_a/${accessToken}/demo/secret/`);
+    expect(noSlash.headers.get("location")).toBe("/demo/secret/");
   });
 
-  test("bounces an invalid or mismatched content token back to the clean URL", async () => {
+  test("rejects cross-project and unauthenticated access to private content", async () => {
     const authConfig = {
       clientId: "client-id",
       clientSecret: "client-secret",
@@ -435,7 +453,7 @@ describe("server app", () => {
 
     for (const project of ["secret", "other"]) {
       const publish = await handler(post("/api/publish", {
-        bundle: bundle({ "index.html": `${project} body` }),
+        bundle: bundle({ "index.html": `${project} body`, "data.json": "{}" }),
         openPath: "/",
         workspace: "demo",
         project,
@@ -444,20 +462,53 @@ describe("server app", () => {
       expect(publish.status).toBe(200);
     }
 
-    // A bogus token string is refused and bounced to the clean URL (which re-auths).
-    const garbage = await handler(new Request("https://pages.scratch.test/_a/not-a-real-token/demo/secret/", { redirect: "manual" }));
-    expect(garbage.status).toBe(302);
-    expect(garbage.headers.get("location")).toBe("/demo/secret/");
-
-    // A token minted for demo/secret cannot open a different project.
     const appRedirect = await handler(new Request(
       "https://app.scratch.test/auth/project?route=demo/secret&returnTo=https%3A%2F%2Fpages.scratch.test%2Fdemo%2Fsecret%2F",
       { headers: { authorization: `Bearer ${token}` }, redirect: "manual" },
     ));
-    const secretToken = new URL(appRedirect.headers.get("location") ?? "https://invalid").pathname.split("/")[2];
-    const crossProject = await handler(new Request(`https://pages.scratch.test/_a/${secretToken}/demo/other/`, { redirect: "manual" }));
+    const handoffUrl = new URL(appRedirect.headers.get("location") ?? "https://invalid");
+    const redeem = await handler(new Request(handoffUrl.toString(), { redirect: "manual" }));
+    const cookie = (redeem.headers.get("set-cookie") ?? "").split(";")[0];
+
+    // Another project's page cannot fetch private content even with the cookie attached:
+    // its referer is outside the project.
+    const crossFetch = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+      headers: { cookie, "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/evil/" },
+    }));
+    expect(crossFetch.status).toBe(403);
+
+    // Neither can it iframe the project, or strip the referrer to hide where it came from.
+    const crossFrame = await handler(new Request("https://pages.scratch.test/demo/secret/", {
+      headers: { cookie, "sec-fetch-dest": "iframe", referer: "https://pages.scratch.test/evil/" },
+    }));
+    expect(crossFrame.status).toBe(403);
+    const strippedReferer = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+      headers: { cookie, "sec-fetch-dest": "empty" },
+    }));
+    expect(strippedReferer.status).toBe(403);
+
+    // A cookie minted for demo/secret does not open a different project.
+    const crossProject = await handler(new Request("https://pages.scratch.test/demo/other/", {
+      headers: { cookie },
+      redirect: "manual",
+    }));
     expect(crossProject.status).toBe(302);
-    expect(crossProject.headers.get("location")).toBe("/demo/other/");
+    expect(new URL(crossProject.headers.get("location") ?? "https://invalid").pathname).toBe("/auth/project");
+
+    // An unauthenticated subresource request fails fast instead of redirecting into OAuth.
+    const anonFetch = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+      headers: { "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/demo/secret/" },
+    }));
+    expect(anonFetch.status).toBe(401);
+
+    // A bogus handoff token bounces to the clean URL (re-running the handoff) with no cookie.
+    const garbage = await handler(new Request(
+      "https://pages.scratch.test/demo/secret/?_scratchwork_handoff=not-a-real-token",
+      { redirect: "manual" },
+    ));
+    expect(garbage.status).toBe(302);
+    expect(garbage.headers.get("location")).toBe("/demo/secret/");
+    expect(garbage.headers.get("set-cookie")).toBeNull();
   });
 
   test("binds OAuth callback state to a browser cookie", async () => {

@@ -6,8 +6,8 @@ import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
 import { servePath } from "../../../shared/src/site/serve";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
-import { Auth, AuthError } from "./auth";
-import { ServerConfig } from "./config";
+import { Auth, AuthError, projectAccessCookie, projectAccessCookieValues, type AuthShape, type AuthUser } from "./auth";
+import { ServerConfig, type ServerConfigShape } from "./config";
 import { errorJson, HttpError, jsonResponse, securityHeaders } from "./http-error";
 import { readPublishRequest } from "./publish-request";
 import {
@@ -23,14 +23,12 @@ import { StorageError } from "./storage";
 
 const NO_STORE = "no-store, must-revalidate";
 /**
- * Reserved first path segment carrying a signed project-access token for private content,
- * e.g. `/_a/<token>/<routePath>/...`. The token lives in the path (not a cookie) so that
- * relative subresource fetches from the sandboxed, opaque-origin content page inherit it —
- * a `SameSite` cookie is never attached to those cross-site subresource requests. `_a` starts
- * with an underscore, so it can never collide with a route path (identifiers must start
- * alphanumeric).
+ * Reserved query parameter carrying the one-time handoff token minted by the app host after
+ * it authenticates a private-content viewer. The content host redeems it into a path-scoped
+ * cookie and immediately redirects to the clean URL, so the token never stays in the address
+ * bar or becomes part of a shareable link.
  */
-const CONTENT_ACCESS_PREFIX = "_a";
+const HANDOFF_PARAM = "_scratchwork_handoff";
 
 export const app: HttpApp.Default<never, ServerConfig | SiteStore | Auth> =
   Effect.gen(function* () {
@@ -253,7 +251,7 @@ function deleteProject(
   });
 }
 
-/** Authenticates on the app host and sends a one-time content token to the content host. */
+/** Authenticates on the app host and sends a one-time handoff token to the content host. */
 function issueProjectAccess(
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
@@ -280,58 +278,15 @@ function issueProjectAccess(
       return yield* Effect.fail(new HttpError({ status: 403, message: "Project not found" }));
     }
 
-    const token = yield* auth.issueProjectAccessToken(projectKey(site.record.workspace, site.record.project), site.record.routePath, user);
-    return HttpServerResponse.redirect(tokenizedContentUrl(returnTo, token), { status: 302 });
+    const token = yield* auth.issueProjectAccessToken(projectKey(site.record.workspace, site.record.project), site.record.routePath, user, "handoff");
+    const target = new URL(returnTo);
+    target.searchParams.set(HANDOFF_PARAM, token);
+    return HttpServerResponse.redirect(target.toString(), { status: 302 });
   });
 }
 
-/** Routes a published-content request to tokenized (private) or clean (public) serving. */
+/** Serves public content at its clean URL, or gates private content behind the cookie flow. */
 function servePublishedSite(
-  request: HttpServerRequest.HttpServerRequest,
-  url: URL,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
-  return Effect.gen(function* () {
-    const access = parseAccessPrefix(url.pathname);
-    if (access != null) {
-      return yield* serveTokenizedContent(request, url, access);
-    }
-    return yield* serveCleanContent(request, url);
-  });
-}
-
-/** Serves private content addressed as `/_a/<token>/<routePath>/...` after verifying the token. */
-function serveTokenizedContent(
-  request: HttpServerRequest.HttpServerRequest,
-  url: URL,
-  access: { readonly token: string; readonly innerPath: string },
-): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
-  return Effect.gen(function* () {
-    const site = yield* loadSiteForPath(access.innerPath);
-    if (site == null) {
-      return yield* Effect.fail(new HttpError({ status: 404, message: "Not found" }));
-    }
-    const auth = yield* Auth;
-    const config = yield* ServerConfig;
-    const tokenUser = yield* auth
-      .verifyProjectAccessToken(access.token, projectKey(site.record.workspace, site.record.project), site.record.routePath)
-      .pipe(Effect.catchAll(() => Effect.succeed(null)));
-    if (tokenUser == null || !canReadProject(site.record, tokenUser, config)) {
-      // Missing/expired/mismatched token, or access revoked since issuance: bounce to the
-      // clean URL, which re-runs the app-host authentication handoff and mints a fresh token.
-      return HttpServerResponse.redirect(`${access.innerPath}${url.search}`, { status: 302 });
-    }
-
-    const prefix = `/${CONTENT_ACCESS_PREFIX}/${access.token}/${site.record.routePath}`;
-    const rest = routeRest(access.innerPath, site.record.routePath);
-    if (rest == null) {
-      return HttpServerResponse.redirect(`${prefix}/`, { status: 308 });
-    }
-    return yield* serveSiteFiles(site, rest, url.search, prefix);
-  });
-}
-
-/** Serves public content at its clean URL, or sends private content through the auth handoff. */
-function serveCleanContent(
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
@@ -347,19 +302,115 @@ function serveCleanContent(
       });
     }
     const config = yield* ServerConfig;
-    // Only anonymously-readable (public) projects serve at their clean URL. Anything gated
-    // is redirected to the app host, which authenticates the viewer and returns a token-prefixed
-    // URL so sandboxed subresource fetches (which carry no cookies) stay authenticated.
-    if (!canReadProject(site.record, null, config)) {
-      return projectAccessRedirect(request, url, site, config);
+    if (canReadProject(site.record, null, config)) {
+      return yield* serveProjectContent(site, url, true);
+    }
+    return yield* servePrivateContent(request, url, site, config);
+  });
+}
+
+/** Serves gated content: redeems a handoff token into a path-scoped cookie, honors an
+ * existing cookie, or sends the viewer through the app-host authentication handoff. */
+function servePrivateContent(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+  site: LoadedSite,
+  config: ServerConfigShape,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError | AuthError | SiteStoreError | StorageError, ServerConfig | SiteStore | Auth> {
+  return Effect.gen(function* () {
+    const auth = yield* Auth;
+    const routePath = site.record.routePath;
+    const key = projectKey(site.record.workspace, site.record.project);
+
+    const handoffToken = url.searchParams.get(HANDOFF_PARAM);
+    if (handoffToken != null) {
+      return yield* redeemHandoffToken(request, url, site, config, auth, handoffToken);
     }
 
-    const rest = routeRest(url.pathname, site.record.routePath);
-    if (rest == null) {
-      return HttpServerResponse.redirect(`/${site.record.routePath}/`, { status: 308 });
+    const cookieUser = yield* projectAccessUser(request, auth, key, site, config);
+    if (cookieUser != null) {
+      // Everything on the content host is same-origin, so another project's JS could
+      // fetch/iframe this project with the viewer's cookie attached. Subresource requests
+      // must therefore prove (via Referer, unforgeable from scripts) that the requesting
+      // page lives inside this project. Top-level navigations stay unrestricted.
+      if (blockedCrossProjectSubresource(request, routePath)) {
+        return yield* Effect.fail(new HttpError({ status: 403, message: "Cross-project request rejected" }));
+      }
+      return yield* serveProjectContent(site, url, false);
     }
-    return yield* serveSiteFiles(site, rest, url.search, `/${site.record.routePath}`);
+
+    if (isSubresourceRequest(request)) {
+      // A fetch/img/script can't complete the OAuth redirect dance; fail fast instead of
+      // bouncing it through the app host.
+      return yield* Effect.fail(new HttpError({ status: 401, message: "Authentication required" }));
+    }
+    return projectAccessRedirect(request, url, site, config);
   });
+}
+
+/** Exchanges a valid handoff token for a path-scoped content cookie and redirects to the
+ * clean canonical URL; an invalid token redirects clean so the handoff re-runs. */
+function redeemHandoffToken(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+  site: LoadedSite,
+  config: ServerConfigShape,
+  auth: AuthShape,
+  token: string,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError, never> {
+  return Effect.gen(function* () {
+    const routePath = site.record.routePath;
+    // Rebuild the redirect target from the canonical route path so the cookie's Path
+    // attribute always matches it, even when the request path was percent-encoded.
+    const cleanTarget = canonicalContentPath(url, routePath);
+    const user = yield* auth
+      .verifyProjectAccessToken(token, projectKey(site.record.workspace, site.record.project), routePath, "handoff")
+      .pipe(Effect.catchAll(() => Effect.succeed(null)));
+    if (user == null || !canReadProject(site.record, user, config)) {
+      return HttpServerResponse.redirect(cleanTarget, { status: 302 });
+    }
+    const cookieToken = yield* auth.issueProjectAccessToken(projectKey(site.record.workspace, site.record.project), routePath, user, "cookie");
+    return HttpServerResponse.redirect(cleanTarget, {
+      status: 302,
+      headers: {
+        "set-cookie": projectAccessCookie(cookieToken, routePath, contentBaseUrl(request, config), config.auth.sessionTtlSeconds),
+      },
+    });
+  });
+}
+
+/** Verifies the request's project-access cookies and current read access, if any. */
+function projectAccessUser(
+  request: HttpServerRequest.HttpServerRequest,
+  auth: AuthShape,
+  key: string,
+  site: LoadedSite,
+  config: ServerConfigShape,
+): Effect.Effect<AuthUser | null, never, never> {
+  return Effect.gen(function* () {
+    for (const value of projectAccessCookieValues(request, site.record.routePath)) {
+      const user = yield* auth
+        .verifyProjectAccessToken(value, key, site.record.routePath, "cookie")
+        .pipe(Effect.catchAll(() => Effect.succeed(null)));
+      // Re-check visibility on every request so revocation applies immediately even
+      // though the cookie itself is long-lived.
+      if (user != null && canReadProject(site.record, user, config)) return user;
+    }
+    return null;
+  });
+}
+
+/** Serves the resolved project at its canonical clean URL. */
+function serveProjectContent(
+  site: LoadedSite,
+  url: URL,
+  isPublic: boolean,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError, ServerConfig> {
+  const rest = routeRest(url.pathname, site.record.routePath);
+  if (rest == null) {
+    return Effect.succeed(HttpServerResponse.redirect(`/${site.record.routePath}/`, { status: 308 }));
+  }
+  return serveSiteFiles(site, rest, url.search, `/${site.record.routePath}`, isPublic);
 }
 
 /** Serves one file from a loaded site under the given canonical path prefix. */
@@ -368,11 +419,12 @@ function serveSiteFiles(
   rest: string,
   search: string,
   pathPrefix: string,
+  isPublic: boolean,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError, ServerConfig> {
   return servePath(rest, search, {
     cacheControl: () => NO_STORE,
     defaultFaviconSvg: FIGURE_SVG,
-    headers: publishedSiteHeaders,
+    headers: () => publishedSiteHeaders(isPublic),
     pathPrefix,
     rendererFallback: Effect.succeed(defaultRendererHtml),
   }).pipe(
@@ -414,15 +466,14 @@ function rejectCrossOriginApiRequest(
   return Effect.void;
 }
 
-/** Adds isolation and static-asset headers for published content. */
-function publishedSiteHeaders(path: string, responseContentType: string): Record<string, string> {
+/** Adds static-asset headers for published content. Content responses send full same-origin
+ * referrers (and nothing cross-origin) so the private-content subresource guard can verify
+ * which page issued a request. Only public content is CORS-readable. */
+function publishedSiteHeaders(isPublic: boolean): Record<string, string> {
   const headers = securityHeaders();
-  headers["Access-Control-Allow-Origin"] = "*";
-  if (responseContentType.startsWith("text/html") || responseContentType === "image/svg+xml") {
-    headers["Content-Security-Policy"] = "sandbox allow-scripts allow-forms allow-downloads; base-uri 'none'";
-  }
-  if (path.endsWith(".md")) {
-    headers["X-Content-Type-Options"] = "nosniff";
+  headers["Referrer-Policy"] = "same-origin";
+  if (isPublic) {
+    headers["Access-Control-Allow-Origin"] = "*";
   }
   return headers;
 }
@@ -533,27 +584,40 @@ function projectApiPath(pathname: string): { readonly workspace: string; readonl
   }
 }
 
-/** Splits `/_a/<token>/<rest...>` into the token and the remaining content path, or null. */
-function parseAccessPrefix(pathname: string): { readonly token: string; readonly innerPath: string } | null {
-  const segments = pathname.split("/").filter((segment) => segment !== "");
-  if (segments.length < 2 || segments[0] !== CONTENT_ACCESS_PREFIX) return null;
-  let token: string;
-  try {
-    token = decodeURIComponent(segments[1]);
-  } catch {
-    return null;
-  }
-  const innerSegments = segments.slice(2);
-  const trailingSlash = innerSegments.length > 0 && pathname.endsWith("/");
-  const innerPath = `/${innerSegments.join("/")}${trailingSlash ? "/" : ""}`;
-  return { token, innerPath };
+/** Rebuilds the request's clean canonical URL (path + query) on the stored route path,
+ * dropping the handoff parameter. */
+function canonicalContentPath(url: URL, routePath: string): string {
+  const rest = routeRest(url.pathname, routePath) ?? "/";
+  const params = new URLSearchParams(url.search);
+  params.delete(HANDOFF_PARAM);
+  const search = params.toString();
+  return `/${routePath}${rest}${search === "" ? "" : `?${search}`}`;
 }
 
-/** Rewrites a validated content return URL into its token-prefixed form `/_a/<token>/...`. */
-function tokenizedContentUrl(returnTo: string, token: string): string {
-  const target = new URL(returnTo);
-  target.pathname = `/${CONTENT_ACCESS_PREFIX}/${token}${target.pathname}`;
-  return target.toString();
+/** Detects browser subresource loads (fetch/img/script/frame/...) via Sec-Fetch-Dest.
+ * Requests without the header (non-browsers, old browsers) count as navigations. */
+function isSubresourceRequest(request: HttpServerRequest.HttpServerRequest): boolean {
+  const dest = request.headers["sec-fetch-dest"]?.toLowerCase();
+  return dest != null && dest !== "document";
+}
+
+/** Returns true for a private-content subresource request whose initiating page is outside
+ * this project. The Referer is script-unforgeable, and content responses set
+ * `Referrer-Policy: same-origin`, so in-project pages always send a usable full path while
+ * another project's page sends its own path (or nothing, if it strips the referrer) and is
+ * refused. Top-level navigations are never blocked. */
+function blockedCrossProjectSubresource(
+  request: HttpServerRequest.HttpServerRequest,
+  routePath: string,
+): boolean {
+  if (!isSubresourceRequest(request)) return false;
+  const referer = request.headers.referer;
+  if (referer == null) return true;
+  try {
+    return routeRest(new URL(referer).pathname, routePath) == null;
+  } catch {
+    return true;
+  }
 }
 
 function projectAccessRedirect(
