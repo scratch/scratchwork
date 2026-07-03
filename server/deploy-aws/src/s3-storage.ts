@@ -3,7 +3,8 @@ import { ObjectStorage, StorageConflict, StorageError, requireSafeObjectKey, typ
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-interface AwsStorageConfig {
+/** S3 client and bucket settings read from the deploy environment. */
+interface S3StorageConfig {
   readonly bucket: string;
   readonly region: string;
   readonly endpoint?: string;
@@ -11,13 +12,13 @@ interface AwsStorageConfig {
 }
 
 /** Adapts S3 to the server object storage contract. */
-export function AwsObjectStorageLive(
+export function S3ObjectStorageLive(
   env: Readonly<Record<string, string | undefined>>,
 ): Layer.Layer<ObjectStorage, StorageError> {
   return Layer.effect(
     ObjectStorage,
     Effect.gen(function* () {
-      const config = yield* readAwsStorageConfig(env);
+      const config = yield* readS3StorageConfig(env);
       const client = new S3Client({
         region: config.region,
         endpoint: config.endpoint,
@@ -84,8 +85,6 @@ export function AwsObjectStorageLive(
       return ObjectStorage.of({
         getObject,
         putObject,
-        getText: (key) =>
-          getObject(key).pipe(Effect.map((object) => object == null ? null : new TextDecoder().decode(object.body))),
         putText: (key, value, options) => putObject(key, new TextEncoder().encode(value), options),
       });
     }),
@@ -93,9 +92,9 @@ export function AwsObjectStorageLive(
 }
 
 /** Reads S3 bucket and client settings from deployment environment values. */
-function readAwsStorageConfig(
+function readS3StorageConfig(
   env: Readonly<Record<string, string | undefined>>,
-): Effect.Effect<AwsStorageConfig, StorageError> {
+): Effect.Effect<S3StorageConfig, StorageError> {
   const bucket = env.SCRATCHWORK_S3_BUCKET;
   if (!bucket) {
     return Effect.fail(

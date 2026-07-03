@@ -4,12 +4,15 @@ import * as Layer from "effect/Layer";
 import type { ServerConfigShape } from "../src/config";
 import { PrimitiveDb, PrimitiveDbError, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../src/db";
 import type { PublishRequest } from "../src/publish-request";
-import { SiteStore, SiteStoreLive, canReadProject, candidateRoutePaths, routeRest, type SiteRecord } from "../src/site-store";
+import { candidateRoutePaths, routeRest } from "../src/routes";
+import type { SiteRecord } from "../src/site-records";
+import { SiteStore, SiteStoreLive, canReadProject } from "../src/site-store";
 import { bundle, memoryStorageLayer } from "./helpers";
 
 const owner = { id: "user-1", email: "founder@example.com" };
 const reader = { id: "user-2", email: "reader@example.com" };
 
+/** Builds a SiteRecord fixture with the given visibility. */
 function record(visibility: string): SiteRecord {
   return {
     version: 3,
@@ -27,6 +30,7 @@ function record(visibility: string): SiteRecord {
   };
 }
 
+/** Builds a ServerConfigShape fixture with the given visibility ceiling. */
 function config(maxVisibility: string): ServerConfigShape {
   return {
     port: 3001,

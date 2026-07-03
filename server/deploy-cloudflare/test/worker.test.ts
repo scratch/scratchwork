@@ -16,14 +16,14 @@ describe("envVarsFromCloudflare", () => {
         }),
       },
       SCRATCHWORK_AUTH: "oauth",
-      SCRATCHWORK_PUBLIC_URL: "https://scratch.test",
+      SCRATCHWORK_APP_URL: "https://scratch.test",
       GOOGLE_CLIENT_ID: "client-id",
       PORT: "3001",
       NOT_INCLUDED: "no",
     });
 
     expect(vars.SCRATCHWORK_AUTH).toBe("oauth");
-    expect(vars.SCRATCHWORK_PUBLIC_URL).toBe("https://scratch.test");
+    expect(vars.SCRATCHWORK_APP_URL).toBe("https://scratch.test");
     expect(vars.GOOGLE_CLIENT_ID).toBe("client-id");
     expect(vars.PORT).toBe("3001");
     expect(vars.NOT_INCLUDED).toBeUndefined();

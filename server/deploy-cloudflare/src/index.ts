@@ -6,7 +6,6 @@ export {
   type CloudflareDeployServerConfig,
   type CloudflareR2BucketConfig,
   type CloudflareRouteConfig,
-  type CloudflareServerConfig,
   type ScratchworkServerConfig,
 } from "./deploy";
 export { D1PrimitiveDbLive, makeD1PrimitiveDb, type D1DatabaseBinding, type D1PreparedStatementBinding, type D1PrimitiveDbOptions } from "./d1-db";

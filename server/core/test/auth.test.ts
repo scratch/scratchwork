@@ -113,6 +113,7 @@ describe("readServerConfig", () => {
   });
 });
 
+/** Fabricates an HttpServerRequest carrying the given headers. */
 function request(headers: Record<string, string>): HttpServerRequest.HttpServerRequest {
   return { headers } as HttpServerRequest.HttpServerRequest;
 }

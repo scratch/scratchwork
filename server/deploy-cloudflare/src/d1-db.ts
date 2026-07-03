@@ -21,10 +21,12 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+/** The subset of Cloudflare's D1 binding the adapter uses. */
 export interface D1DatabaseBinding {
   readonly prepare: (query: string) => D1PreparedStatementBinding;
 }
 
+/** One prepared D1 statement. */
 export interface D1PreparedStatementBinding {
   readonly bind: (...values: ReadonlyArray<string | number>) => D1PreparedStatementBinding;
   readonly first: <A = unknown>() => Promise<A | null>;
@@ -32,11 +34,13 @@ export interface D1PreparedStatementBinding {
   readonly run: () => Promise<{ readonly meta?: { readonly changes?: number } }>;
 }
 
+/** Layer options: table name and whether to CREATE TABLE IF NOT EXISTS on startup. */
 export interface D1PrimitiveDbOptions {
   readonly tableName?: string;
   readonly ensureTable?: boolean;
 }
 
+/** One row of the records table. */
 interface D1RecordRow {
   readonly namespace: string;
   readonly key: string;
@@ -46,6 +50,7 @@ interface D1RecordRow {
 }
 
 const DEFAULT_TABLE = "scratchwork_records";
+const DEFAULT_QUOTED_TABLE = `"${DEFAULT_TABLE}"`;
 
 /** Adapts a Cloudflare D1 binding to the primitive DB contract. */
 export function D1PrimitiveDbLive(
@@ -55,7 +60,7 @@ export function D1PrimitiveDbLive(
   return Layer.effect(
     PrimitiveDb,
     Effect.gen(function* () {
-      const table = yield* sqlIdentifierEffect(options.tableName ?? DEFAULT_TABLE);
+      const table = yield* sqlIdentifier(options.tableName ?? DEFAULT_TABLE);
       if (options.ensureTable !== false) yield* ensureTable(database, table);
       return PrimitiveDb.of(makeD1PrimitiveDb(database, table));
     }),
@@ -63,7 +68,7 @@ export function D1PrimitiveDbLive(
 }
 
 /** Creates the primitive DB shape over an existing D1 table. */
-export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName = sqlIdentifier(DEFAULT_TABLE)): PrimitiveDbShape {
+export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName = DEFAULT_QUOTED_TABLE): PrimitiveDbShape {
   const get: PrimitiveDbShape["get"] = <A extends JsonValue = JsonValue>(namespace: string, key: string) =>
     Effect.gen(function* () {
       yield* requireSafeDbNamespace(namespace);
@@ -164,6 +169,7 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
   return { get, put, delete: deleteRecord, list };
 }
 
+/** Creates the records table when it does not already exist. */
 function ensureTable(database: D1DatabaseBinding, quotedTableName: string): Effect.Effect<void, PrimitiveDbError> {
   return d1Run(database, `CREATE TABLE IF NOT EXISTS ${quotedTableName} (
     namespace TEXT NOT NULL,
@@ -175,12 +181,14 @@ function ensureTable(database: D1DatabaseBinding, quotedTableName: string): Effe
   )`).pipe(Effect.asVoid);
 }
 
+/** Converts a table row back into the public record shape. */
 function rowToRecord<A extends JsonValue>(row: D1RecordRow): Effect.Effect<PrimitiveDbRecord<A>, PrimitiveDbError> {
   return decodePrimitiveDbValue(row.value).pipe(
     Effect.map((value) => ({ namespace: row.namespace, key: row.key, value: value as A, version: row.version, updatedAt: row.updated_at })),
   );
 }
 
+/** Runs one D1 query and returns the first row, mapping causes via `mapCause` when given. */
 function d1First<A>(
   database: D1DatabaseBinding,
   query: string,
@@ -204,6 +212,7 @@ function d1First<A>(
   });
 }
 
+/** Runs one D1 query and returns every result row. */
 function d1All<A>(database: D1DatabaseBinding, query: string, values: ReadonlyArray<string | number>): Effect.Effect<ReadonlyArray<A>, PrimitiveDbError> {
   return Effect.tryPromise({
     try: async () => (await database.prepare(query).bind(...values).all<A>()).results,
@@ -211,6 +220,7 @@ function d1All<A>(database: D1DatabaseBinding, query: string, values: ReadonlyAr
   });
 }
 
+/** Runs one D1 statement for its side effect and change count. */
 function d1Run(database: D1DatabaseBinding, query: string, values: ReadonlyArray<string | number> = []): Effect.Effect<{ readonly meta?: { readonly changes?: number } }, PrimitiveDbError> {
   return Effect.tryPromise({
     try: () => database.prepare(query).bind(...values).run(),
@@ -218,20 +228,14 @@ function d1Run(database: D1DatabaseBinding, query: string, values: ReadonlyArray
   });
 }
 
-function sqlIdentifier(name: string): string {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new PrimitiveDbError({ message: `Invalid D1 table name: ${name}` });
-  }
-  return `"${name}"`;
+/** Validates a table name and returns it double-quoted for interpolation into SQL. */
+function sqlIdentifier(name: string): Effect.Effect<string, PrimitiveDbError> {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+    ? Effect.succeed(`"${name}"`)
+    : Effect.fail(new PrimitiveDbError({ message: `Invalid D1 table name: ${name}` }));
 }
 
-function sqlIdentifierEffect(name: string): Effect.Effect<string, PrimitiveDbError> {
-  return Effect.try({
-    try: () => sqlIdentifier(name),
-    catch: (cause) => cause instanceof PrimitiveDbError ? cause : new PrimitiveDbError({ message: `Invalid D1 table name: ${name}`, cause }),
-  });
-}
-
+/** Detects D1 unique-constraint failures from their error message. */
 function isConstraintError(cause: unknown): boolean {
   return String((cause as { readonly message?: unknown }).message ?? cause).toLowerCase().includes("constraint");
 }

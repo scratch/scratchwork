@@ -1,29 +1,40 @@
+/**
+ * Google-OAuth auth service and the three signed HMAC token kinds it mints:
+ * session tokens (browser cookie or CLI bearer, session TTL), OAuth state tokens
+ * (10-minute, browser-bound), and project-access tokens ("handoff": ~60s,
+ * query-string form; "cookie": session-length redeemed form).
+ */
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { base64UrlToBytes, bytesToBase64Url } from "../../../shared/src/encoding/base64";
-import { errorMessage, isRecord, parseJson } from "../../../shared/src/util/json";
+import { errorMessage, parseJson } from "../../../shared/src/util/json";
 import { accessGroupMatches } from "./access";
 import { ServerConfig, type AuthConfig } from "./config";
+import {
+  clearSessionCookie,
+  cookieToken,
+  oauthStateCookie,
+  oauthStateToken,
+  sessionCookie,
+  STATE_TTL_SECONDS,
+} from "./cookies";
 import { verifyGoogleIdToken, type GoogleIdTokenClaims } from "./google-jwt";
 import { timingSafeEqual } from "./tokens";
 
-const COOKIE_NAME = "scratchwork_session";
-const SECURE_COOKIE_NAME = "__Host-scratchwork_session";
-const OAUTH_STATE_COOKIE_NAME = "scratchwork_oauth_state";
-const SECURE_OAUTH_STATE_COOKIE_NAME = "__Host-scratchwork_oauth_state";
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+/** Bumping this invalidates every outstanding session, state, and project-access token. */
 const SESSION_VERSION = 1;
-const STATE_TTL_SECONDS = 10 * 60;
+/** Handoff tokens ride redirect query strings (which land in proxy logs), so they live seconds. */
 const HANDOFF_TTL_SECONDS = 60;
 const REDIRECT_MAX_LENGTH = 2048;
-const PROJECT_ACCESS_COOKIE_PREFIX = "scratchwork_access_";
-const SECURE_PROJECT_ACCESS_COOKIE_PREFIX = "__Secure-scratchwork_access_";
 
+/** The authenticated identity attached to sessions and API requests. */
 export interface AuthUser {
   readonly id: string;
   readonly email: string;
@@ -31,21 +42,33 @@ export interface AuthUser {
   readonly picture?: string;
 }
 
-interface SessionPayload {
-  readonly version: typeof SESSION_VERSION;
-  readonly provider: "google";
-  readonly user: AuthUser;
-  readonly issuedAt: number;
-  readonly expiresAt: number;
-}
+/** The user object embedded in every session-token payload. */
+const AuthUserSchema = Schema.Struct({
+  id: Schema.String,
+  email: Schema.String,
+  name: Schema.optional(Schema.String),
+  picture: Schema.optional(Schema.String),
+});
 
-interface OAuthState {
-  readonly version: typeof SESSION_VERSION;
-  readonly returnTo: string;
-  readonly cliRedirect?: string;
-  readonly nonce: string;
-  readonly expiresAt: number;
-}
+/** Payload of a session token (browser cookie or CLI bearer). */
+const SessionPayloadSchema = Schema.Struct({
+  version: Schema.Literal(SESSION_VERSION),
+  provider: Schema.Literal("google"),
+  user: AuthUserSchema,
+  issuedAt: Schema.Number,
+  expiresAt: Schema.Number,
+});
+type SessionPayload = typeof SessionPayloadSchema.Type;
+
+/** Payload of the OAuth state token that rides the login redirect round-trip. */
+const OAuthStateSchema = Schema.Struct({
+  version: Schema.Literal(SESSION_VERSION),
+  returnTo: Schema.String,
+  cliRedirect: Schema.optional(Schema.String),
+  nonce: Schema.String,
+  expiresAt: Schema.Number,
+});
+type OAuthState = typeof OAuthStateSchema.Type;
 
 /**
  * `handoff` tokens ride the redirect from the app host to the content host and live for
@@ -54,56 +77,64 @@ interface OAuthState {
  */
 export type ProjectAccessUse = "handoff" | "cookie";
 
-interface ProjectAccessPayload {
-  readonly version: typeof SESSION_VERSION;
-  readonly kind: "project-access";
-  readonly use: ProjectAccessUse;
-  readonly projectKey: string;
-  readonly routePath: string;
-  readonly email: string;
-  readonly expiresAt: number;
-}
+/** Payload of a project-access token, bound to one project and route path. */
+const ProjectAccessPayloadSchema = Schema.Struct({
+  version: Schema.Literal(SESSION_VERSION),
+  kind: Schema.Literal("project-access"),
+  use: Schema.Literal("handoff", "cookie"),
+  projectKey: Schema.String,
+  routePath: Schema.String,
+  email: Schema.String,
+  expiresAt: Schema.Number,
+});
+type ProjectAccessPayload = typeof ProjectAccessPayloadSchema.Type;
 
+/** Google's token-endpoint response shape, as much of it as the exchange needs. */
 interface GoogleTokenResponse {
   readonly id_token?: string;
   readonly error?: string;
   readonly error_description?: string;
 }
 
+/** Auth failure; `status` becomes the HTTP response status. */
 export class AuthError extends Data.TaggedError("AuthError")<{
   readonly status: number;
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
+/** The auth service contract. */
 export interface AuthShape {
+  /** Resolves the bearer- or cookie-authenticated user, or null when absent/invalid. */
   readonly currentUser: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<AuthUser | null, AuthError>;
-  readonly requireUser: (
-    request: HttpServerRequest.HttpServerRequest,
-  ) => Effect.Effect<AuthUser, AuthError>;
+  /** Like currentUser but bearer-token only (API calls) and 401 when unauthenticated. */
   readonly requireApiUser: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<AuthUser, AuthError>;
+  /** Starts the Google OAuth flow: sets the state cookie and redirects to Google. */
   readonly login: (
     request: HttpServerRequest.HttpServerRequest,
     url: URL,
     baseUrl: string,
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError>;
+  /** Completes the OAuth flow: verifies state, exchanges the code, sets the session cookie. */
   readonly callback: (
     request: HttpServerRequest.HttpServerRequest,
     url: URL,
     baseUrl: string,
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError>;
+  /** Clears the session cookie and redirects home. */
   readonly logout: (baseUrl: string) => HttpServerResponse.HttpServerResponse;
-  readonly loginRedirect: (url: URL, baseUrl: string) => HttpServerResponse.HttpServerResponse;
+  /** Signs a token granting one user read access to one project route. */
   readonly issueProjectAccessToken: (
     projectKey: string,
     routePath: string,
     user: AuthUser,
     use: ProjectAccessUse,
   ) => Effect.Effect<string, AuthError>;
+  /** Verifies a project-access token against the expected project, route, and use. */
   readonly verifyProjectAccessToken: (
     token: string,
     projectKey: string,
@@ -112,8 +143,10 @@ export interface AuthShape {
   ) => Effect.Effect<AuthUser | null, AuthError>;
 }
 
+/** Service tag for the auth service. */
 export class Auth extends Context.Tag("@scratchwork/server/Auth")<Auth, AuthShape>() {}
 
+/** Provides the Google OAuth auth service from server config. */
 export const AuthLive: Layer.Layer<Auth, never, ServerConfig> = Layer.effect(
   Auth,
   Effect.map(ServerConfig, (config) => makeAuth(config.auth)),
@@ -126,16 +159,7 @@ export function makeAuth(config: AuthConfig): AuthShape {
       Effect.gen(function* () {
         const token = bearerToken(request) ?? cookieToken(request);
         if (token == null) return null;
-        return yield* verifySessionToken(token, config).pipe(Effect.catchAll(() => Effect.succeed(null)));
-      }),
-
-    requireUser: (request) =>
-      Effect.gen(function* () {
-        const user = yield* verifySessionTokenFromRequest(request, config);
-        if (user == null) {
-          return yield* Effect.fail(new AuthError({ status: 401, message: "Authentication required" }));
-        }
-        return user;
+        return yield* verifySessionToken(token, config).pipe(Effect.orElseSucceed(() => null));
       }),
 
     requireApiUser: (request) =>
@@ -198,8 +222,8 @@ export function makeAuth(config: AuthConfig): AuthShape {
           return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid OAuth state cookie" }));
         }
 
-        const state = yield* verifySignedValue<OAuthState>(stateToken, config.sessionSecret);
-        if (!isOAuthState(state) || state.expiresAt < epochSeconds()) {
+        const state = yield* verifySignedValue(stateToken, config.sessionSecret, OAuthStateSchema);
+        if (state.expiresAt < epochSeconds()) {
           return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid or expired OAuth state" }));
         }
 
@@ -230,12 +254,6 @@ export function makeAuth(config: AuthConfig): AuthShape {
         },
       }),
 
-    loginRedirect: (url, baseUrl) => {
-      const loginUrl = new URL("/auth/login", baseUrl);
-      loginUrl.searchParams.set("returnTo", `${url.pathname}${url.search}`);
-      return HttpServerResponse.redirect(loginUrl, { status: 302 });
-    },
-
     issueProjectAccessToken: (projectKey, routePath, user, use) =>
       signValue(
         {
@@ -252,9 +270,8 @@ export function makeAuth(config: AuthConfig): AuthShape {
 
     verifyProjectAccessToken: (token, projectKey, routePath, use) =>
       Effect.gen(function* () {
-        const payload = yield* verifySignedValue<ProjectAccessPayload>(token, config.sessionSecret);
+        const payload = yield* verifySignedValue(token, config.sessionSecret, ProjectAccessPayloadSchema);
         if (
-          !isProjectAccessPayload(payload) ||
           payload.use !== use ||
           payload.expiresAt < epochSeconds() ||
           payload.projectKey !== projectKey ||
@@ -286,23 +303,14 @@ export function createSessionToken(
   );
 }
 
-/** Reads bearer or cookie credentials and verifies the contained session token. */
-function verifySessionTokenFromRequest(
-  request: HttpServerRequest.HttpServerRequest,
-  config: AuthConfig,
-): Effect.Effect<AuthUser | null, AuthError> {
-  const token = bearerToken(request) ?? cookieToken(request);
-  return token == null ? Effect.succeed(null) : verifySessionToken(token, config);
-}
-
 /** Verifies one signed session token and applies current allow-list rules. */
 function verifySessionToken(
   token: string,
   config: AuthConfig,
 ): Effect.Effect<AuthUser | null, AuthError> {
   return Effect.gen(function* () {
-    const payload = yield* verifySignedValue<SessionPayload>(token, config.sessionSecret);
-    if (!isSessionPayload(payload) || payload.expiresAt < epochSeconds()) return null;
+    const payload = yield* verifySignedValue(token, config.sessionSecret, SessionPayloadSchema);
+    if (payload.expiresAt < epochSeconds()) return null;
     if (!allowedUser(payload.user, config)) return null;
     return payload.user;
   });
@@ -316,36 +324,35 @@ function exchangeGoogleCode(
   config: AuthConfig,
 ): Effect.Effect<AuthUser, AuthError> {
   return Effect.gen(function* () {
-    const idToken = yield* Effect.tryPromise({
+    const { ok, json } = yield* Effect.tryPromise({
       try: async () => {
-      const body = new URLSearchParams({
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        code,
-        grant_type: "authorization_code",
-        redirect_uri: redirectUri,
-      });
+        const body = new URLSearchParams({
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: redirectUri,
+        });
         const response = await fetch(GOOGLE_TOKEN_URL, {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
           body,
         });
         const json = (await response.json().catch(() => null)) as GoogleTokenResponse | null;
-        if (!response.ok || json == null || json.id_token == null) {
-          throw new AuthError({
-            status: 401,
-            message: json?.error_description ?? json?.error ?? "Google token exchange failed",
-          });
-        }
-        return json.id_token;
+        return { ok: response.ok, json };
       },
-      catch: (cause) =>
-        cause instanceof AuthError
-          ? cause
-          : new AuthError({ status: 500, message: errorMessage(cause) }),
+      catch: (cause) => new AuthError({ status: 500, message: errorMessage(cause) }),
     });
+    if (!ok || json?.id_token == null) {
+      return yield* Effect.fail(
+        new AuthError({
+          status: 401,
+          message: json?.error_description ?? json?.error ?? "Google token exchange failed",
+        }),
+      );
+    }
 
-    const claims = yield* verifyGoogleIdToken(idToken, {
+    const claims = yield* verifyGoogleIdToken(json.id_token, {
       clientId: config.clientId,
       expectedNonce: nonce,
     }).pipe(
@@ -373,7 +380,7 @@ function userFromClaims(
   return allowedUser(user, config) ? user : null;
 }
 
-/** Checks whether a verified Google user passes email/domain allow lists. */
+/** Checks a user (from Google claims or a verified token payload) against the allow lists. */
 function allowedUser(user: AuthUser, config: AuthConfig): boolean {
   return accessGroupMatches(config.allowedUsers, user);
 }
@@ -390,8 +397,12 @@ function signValue(value: unknown, secret: string): Effect.Effect<string, AuthEr
   });
 }
 
-/** Verifies and decodes a compact HMAC JSON token. */
-function verifySignedValue<A>(token: string, secret: string): Effect.Effect<A, AuthError> {
+/** Verifies a compact HMAC token and decodes its payload against the expected schema. */
+function verifySignedValue<A, I>(
+  token: string,
+  secret: string,
+  schema: Schema.Schema<A, I, never>,
+): Effect.Effect<A, AuthError> {
   return Effect.tryPromise({
     try: async () => {
       const [payload, signature] = token.split(".");
@@ -400,10 +411,16 @@ function verifySignedValue<A>(token: string, secret: string): Effect.Effect<A, A
       if (!timingSafeEqual(signature, expected)) throw new Error("invalid token signature");
       const bytes = base64UrlToBytes(payload);
       if (bytes == null) throw new Error("invalid token payload");
-      return parseJson(new TextDecoder().decode(bytes)) as A;
+      return parseJson(new TextDecoder().decode(bytes));
     },
     catch: () => new AuthError({ status: 401, message: "Invalid auth token" }),
-  });
+  }).pipe(
+    Effect.flatMap((value) =>
+      Schema.decodeUnknown(schema)(value).pipe(
+        Effect.mapError(() => new AuthError({ status: 401, message: "Invalid auth token" })),
+      ),
+    ),
+  );
 }
 
 /** Computes a base64url HMAC signature for signed auth values. */
@@ -425,121 +442,6 @@ function bearerToken(request: HttpServerRequest.HttpServerRequest): string | und
   if (header == null) return undefined;
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   return match?.[1];
-}
-
-/** Extracts the session token from either secure or local-dev cookie names. */
-function cookieToken(request: HttpServerRequest.HttpServerRequest): string | undefined {
-  return cookieValue(request, [COOKIE_NAME, SECURE_COOKIE_NAME]);
-}
-
-/** Extracts the browser-bound OAuth state cookie for the current origin mode. */
-function oauthStateToken(request: HttpServerRequest.HttpServerRequest, baseUrl: string): string | undefined {
-  return cookieValue(request, [oauthStateCookieName(baseUrl)]);
-}
-
-/** Finds and decodes the first matching cookie value from the request. */
-export function cookieValue(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): string | undefined {
-  return cookieValues(request, names)[0];
-}
-
-/** Finds and decodes every matching cookie value from the request. Duplicates happen
- * legitimately (same name under different Path attributes), so token-cookie readers must
- * try each value rather than trust the first. */
-export function cookieValues(request: HttpServerRequest.HttpServerRequest, names: ReadonlyArray<string>): ReadonlyArray<string> {
-  const header = request.headers.cookie;
-  if (header == null) return [];
-  const values: Array<string> = [];
-  for (const part of header.split(";")) {
-    const [name, ...valueParts] = part.trim().split("=");
-    if (names.includes(name)) {
-      try {
-        values.push(decodeURIComponent(valueParts.join("=")));
-      } catch {
-        // Skip undecodable values; other cookies under the same name may still verify.
-      }
-    }
-  }
-  return values;
-}
-
-/** Names the per-project content-access cookie. Route paths are `[A-Za-z0-9._-]` segments,
- * so flattening `/` to `_` yields a valid cookie name; the flattened form can collide across
- * projects (`a/b` vs `a_b`), but their `Path` attributes differ and the signed value is bound
- * to the exact route path, so a colliding cookie merely fails verification. */
-export function projectAccessCookieName(routePath: string, secure: boolean): string {
-  const prefix = secure ? SECURE_PROJECT_ACCESS_COOKIE_PREFIX : PROJECT_ACCESS_COOKIE_PREFIX;
-  return `${prefix}${routePath.replace(/\//g, "_")}`;
-}
-
-/** Builds the Set-Cookie header for a redeemed project-access token, scoped to the project
- * path on the content host. */
-export function projectAccessCookie(token: string, routePath: string, baseUrl: string, ttlSeconds: number): string {
-  const secure = baseUrl.startsWith("https://");
-  return [
-    `${projectAccessCookieName(routePath, secure)}=${encodeURIComponent(token)}`,
-    `Path=/${routePath}`,
-    "HttpOnly",
-    "SameSite=Lax",
-    `Max-Age=${ttlSeconds}`,
-    secure ? "Secure" : "",
-  ].filter(Boolean).join("; ");
-}
-
-/** Reads every candidate project-access cookie value for a route path. */
-export function projectAccessCookieValues(request: HttpServerRequest.HttpServerRequest, routePath: string): ReadonlyArray<string> {
-  return cookieValues(request, [projectAccessCookieName(routePath, true), projectAccessCookieName(routePath, false)]);
-}
-
-/** Builds the Set-Cookie header for a session token. */
-function sessionCookie(token: string, baseUrl: string, ttlSeconds: number): string {
-  const secure = secureCookie(baseUrl);
-  return [
-    `${cookieName(baseUrl)}=${encodeURIComponent(token)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    `Max-Age=${ttlSeconds}`,
-    secure,
-  ].filter(Boolean).join("; ");
-}
-
-/** Builds the browser-bound OAuth state cookie. */
-function oauthStateCookie(state: string, baseUrl: string): string {
-  return [
-    `${oauthStateCookieName(baseUrl)}=${encodeURIComponent(state)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    `Max-Age=${STATE_TTL_SECONDS}`,
-    secureCookie(baseUrl),
-  ].filter(Boolean).join("; ");
-}
-
-/** Builds the Set-Cookie header that clears the session token. */
-function clearSessionCookie(baseUrl: string): string {
-  return [
-    `${cookieName(baseUrl)}=`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    "Max-Age=0",
-    secureCookie(baseUrl),
-  ].filter(Boolean).join("; ");
-}
-
-/** Returns the Secure cookie attribute when the public origin is HTTPS. */
-function secureCookie(baseUrl: string): string {
-  return baseUrl.startsWith("https://") ? "Secure" : "";
-}
-
-/** Chooses the session cookie name for HTTPS or local HTTP. */
-function cookieName(baseUrl: string): string {
-  return baseUrl.startsWith("https://") ? SECURE_COOKIE_NAME : COOKIE_NAME;
-}
-
-/** Chooses the OAuth state cookie name for HTTPS or local HTTP. */
-function oauthStateCookieName(baseUrl: string): string {
-  return baseUrl.startsWith("https://") ? SECURE_OAUTH_STATE_COOKIE_NAME : OAUTH_STATE_COOKIE_NAME;
 }
 
 /** Sanitizes a post-login redirect path to stay on the server origin. */
@@ -574,46 +476,6 @@ function safeCliRedirect(value: string | null): string | undefined {
 /** Builds the configured Google OAuth callback URL. */
 function callbackUrl(baseUrl: string): string {
   return `${baseUrl}/auth/callback/google`;
-}
-
-/** Checks the decoded OAuth state token shape. */
-function isOAuthState(value: unknown): value is OAuthState {
-  return (
-    isRecord(value) &&
-    value.version === SESSION_VERSION &&
-    typeof value.returnTo === "string" &&
-    typeof value.nonce === "string" &&
-    typeof value.expiresAt === "number" &&
-    (value.cliRedirect == null || typeof value.cliRedirect === "string")
-  );
-}
-
-/** Checks the decoded session token payload shape. */
-function isSessionPayload(value: unknown): value is SessionPayload {
-  return (
-    isRecord(value) &&
-    value.version === SESSION_VERSION &&
-    value.provider === "google" &&
-    typeof value.issuedAt === "number" &&
-    typeof value.expiresAt === "number" &&
-    isRecord(value.user) &&
-    typeof value.user.id === "string" &&
-    typeof value.user.email === "string"
-  );
-}
-
-/** Checks the decoded content-access token shape. */
-function isProjectAccessPayload(value: unknown): value is ProjectAccessPayload {
-  return (
-    isRecord(value) &&
-    value.version === SESSION_VERSION &&
-    value.kind === "project-access" &&
-    (value.use === "handoff" || value.use === "cookie") &&
-    typeof value.projectKey === "string" &&
-    typeof value.routePath === "string" &&
-    typeof value.email === "string" &&
-    typeof value.expiresAt === "number"
-  );
 }
 
 /** Returns the current Unix timestamp in seconds. */

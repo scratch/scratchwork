@@ -3,8 +3,8 @@ import * as Effect from "effect/Effect";
 import { contentType } from "../../../shared/src/site/content";
 import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
 import type { SitePath } from "../../../shared/src/site/paths";
+import type { SiteRevisionRecord } from "./site-records";
 import type { ObjectStorageShape } from "./storage";
-import type { SiteRevisionRecord } from "./site-store";
 
 /** Builds a SiteFiles service backed by revision metadata and object storage. */
 export function makeObjectSiteFiles(

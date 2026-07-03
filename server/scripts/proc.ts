@@ -1,9 +1,11 @@
+/** Options for one spawned command. */
 export interface RunOptions {
   readonly allowFailure?: boolean;
   readonly capture?: boolean;
   readonly cwd?: string;
 }
 
+/** Exit status and captured output of one spawned command. */
 export interface RunResult {
   readonly ok: boolean;
   readonly stdout: string;

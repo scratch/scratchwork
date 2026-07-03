@@ -8,13 +8,18 @@ import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/
 import { isSafeSitePath } from "../../../shared/src/site/paths";
 import { parseJson } from "../../../shared/src/util/json";
 import { normalizeAccessGroup, safeProjectIdentifier, type AccessGroup } from "./access";
-import { HttpError } from "./http-error";
+import { HttpError } from "./http";
 
+/** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
 export const MAX_PUBLISH_BODY_BYTES = 30 * 1024 * 1024;
+/** Maximum number of files in one publish bundle. */
 export const MAX_PUBLISH_FILES = 1_000;
+/** Maximum decoded size of a single published file. */
 export const MAX_PUBLISH_FILE_BYTES = 10 * 1024 * 1024;
+/** Maximum decoded size of the whole bundle. */
 export const MAX_PUBLISH_TOTAL_BYTES = 25 * 1024 * 1024;
 
+/** A validated publish request: the bundle plus normalized publish options. */
 export interface PublishRequest {
   readonly bundle: PublishBundle;
   readonly openPath: string;
@@ -24,6 +29,7 @@ export interface PublishRequest {
   readonly totalBytes: number;
 }
 
+/** Runtime validators for the untrusted publish request body. */
 const PublishBundleFileSchema = Schema.Struct({
   path: Schema.String.pipe(
     Schema.filter((path) => isSafeSitePath(path) || "Invalid site path"),
@@ -137,7 +143,7 @@ function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishR
 }
 
 /** Normalizes the path the published URL should open after upload. */
-export function normalizeOpenPath(value: string): string | null {
+function normalizeOpenPath(value: string): string | null {
   if (!value.startsWith("/") || value.includes("\0") || value.includes("\\") || value.includes("?") || value.includes("#")) return null;
   let decoded: string;
   try {

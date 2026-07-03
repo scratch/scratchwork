@@ -11,6 +11,7 @@ import { MemoryPrimitiveDbLive } from "../src/db";
 import { SiteStoreLive } from "../src/site-store";
 import { ObjectStorage, StorageConflict, StorageError, safeObjectKey, type ObjectStorageShape, type StoredObject } from "../src/storage";
 
+/** One object held by the in-memory test storage. */
 export interface MemoryStoredObject {
   readonly body: Uint8Array;
   readonly contentType?: string;
@@ -36,7 +37,6 @@ export async function appHandler(options: {
 } = {}) {
   const config: ServerConfigShape = {
     port: 3001,
-    publicUrl: "https://scratch.test",
     appUrl: "https://scratch.test",
     contentUrl: "https://scratch.test",
     maxVisibility: "public",
@@ -76,16 +76,12 @@ export function memoryStorageLayer(
 export function testAuth(user: AuthUser | null, apiUser = user): Layer.Layer<Auth> {
   const shape: AuthShape = {
     currentUser: () => Effect.succeed(user),
-    requireUser: () => user == null
-      ? Effect.fail(new AuthError({ status: 401, message: "Authentication required" }))
-      : Effect.succeed(user),
     requireApiUser: () => apiUser == null
       ? Effect.fail(new AuthError({ status: 401, message: "Authentication required" }))
       : Effect.succeed(apiUser),
     login: () => Effect.succeed(HttpServerResponse.redirect("/auth/login")),
     callback: () => Effect.succeed(HttpServerResponse.redirect("/")),
     logout: () => HttpServerResponse.redirect("/"),
-    loginRedirect: () => HttpServerResponse.redirect("/auth/login"),
     issueProjectAccessToken: () => Effect.succeed("project-access-token"),
     verifyProjectAccessToken: () => apiUser == null
       ? Effect.succeed(null)
@@ -136,7 +132,6 @@ function memoryStorage(map: Map<string, MemoryStoredObject>): ObjectStorageShape
   return {
     getObject,
     putObject,
-    getText: (key) => getObject(key).pipe(Effect.map((object) => object == null ? null : new TextDecoder().decode(object.body))),
     putText: (key, value, options) => putObject(key, new TextEncoder().encode(value), options),
   };
 }

@@ -6,15 +6,17 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context as LambdaContext,
 } from "aws-lambda";
-import { AwsPrimitiveDbLive } from "./dynamodb-db";
-import { AwsObjectStorageLive } from "./storage";
+import { DynamoDbPrimitiveDbLive } from "./dynamodb-db";
+import { S3ObjectStorageLive } from "./s3-storage";
 
 const env = process.env as EnvVars;
+/** The full service graph for the Lambda runtime, built from process.env. */
 const MainLayer = Layer.provideMerge(
   Layer.mergeAll(AuthLive, SiteStoreLive),
-  Layer.mergeAll(AwsObjectStorageLive(env), AwsPrimitiveDbLive(env), makeServerConfigLayer(env)),
+  Layer.mergeAll(S3ObjectStorageLive(env), DynamoDbPrimitiveDbLive(env), makeServerConfigLayer(env)),
 );
 
+/** The core app as a Web fetch handler with the layers provided. */
 const web = HttpApp.toWebHandlerLayer(app, MainLayer);
 
 /** Handles one API Gateway v2 event with the shared server app. */
@@ -25,13 +27,6 @@ export async function handler(
   const request = eventToRequest(event);
   const response = await web.handler(request);
   return responseToResult(response);
-}
-
-/** Creates a testable Lambda handler from a Web Fetch handler. */
-export function makeAwsHandler(
-  webHandler: (request: Request) => Promise<Response>,
-): (event: APIGatewayProxyEventV2, context: LambdaContext) => Promise<APIGatewayProxyStructuredResultV2> {
-  return async (event) => responseToResult(await webHandler(eventToRequest(event)));
 }
 
 /** Converts an API Gateway v2 event into a standard Web Request. */

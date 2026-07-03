@@ -4,18 +4,22 @@ import * as Layer from "effect/Layer";
 import { D1PrimitiveDbLive, type D1DatabaseBinding } from "./d1-db";
 import { R2ObjectStorageLive, type R2BucketBinding } from "./r2-storage";
 
+/** The Worker environment: the two service bindings plus string config vars. */
 interface CloudflareEnv extends Record<string, R2BucketBinding | D1DatabaseBinding | string | undefined> {
   readonly SCRATCHWORK_R2: R2BucketBinding;
   readonly SCRATCHWORK_D1: D1DatabaseBinding;
 }
 
+/** The subset of Cloudflare's execution context the fetch signature requires. */
 interface ExecutionContextBinding {
   readonly waitUntil: (promise: Promise<unknown>) => void;
   readonly passThroughOnException: () => void;
 }
 
+/** One handler per environment-binding object, so layers build once per isolate. */
 const handlers = new WeakMap<CloudflareEnv, (request: Request) => Promise<Response>>();
 
+/** The Worker entry point. */
 export default {
   fetch(request: Request, env: CloudflareEnv, _context: ExecutionContextBinding): Promise<Response> {
     return handlerFor(env)(request);
@@ -37,7 +41,7 @@ function handlerFor(env: CloudflareEnv): (request: Request) => Promise<Response>
   return web.handler;
 }
 
-/** Copies string Cloudflare bindings that should be visible to server config. */
+/** Copies the string environment vars (PORT, SCRATCHWORK_*, GOOGLE_*) for server config, excluding the R2/D1 service bindings. */
 export function envVarsFromCloudflare(env: CloudflareEnv): EnvVars {
   const vars: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {

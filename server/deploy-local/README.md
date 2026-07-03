@@ -40,7 +40,7 @@ between their cloud deploy and a local run — see `deploy/sndbx.sh/local.ts`:
 import { runLocalServer } from "@scratchwork/server-deploy-local";
 import { server } from "./server-config";
 
-await runLocalServer({ server });
+runLocalServer({ server });
 ```
 
 When the config declares distinct app and content domains, the local run

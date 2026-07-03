@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+/** An environment map assembled from dotenv files and the shell. */
 export type DeployEnv = Record<string, string | undefined>;
 
+/** Options for loadDeployEnv; packageRoot anchors the default .env file locations. */
 interface LoadDeployEnvOptions {
   readonly packageRoot: string;
   readonly argv?: ReadonlyArray<string>;
@@ -11,11 +13,13 @@ interface LoadDeployEnvOptions {
   readonly explicitEnvRoots?: ReadonlyArray<string>;
 }
 
+/** One parsed dotenv file. */
 interface LoadedEnvFile {
   readonly path: string;
   readonly values: Record<string, string>;
 }
 
+/** The merged environment plus the list of files that contributed to it. */
 export interface LoadedDeployEnv {
   readonly env: DeployEnv;
   readonly files: ReadonlyArray<string>;
@@ -61,7 +65,7 @@ export async function loadDeployEnv(options: LoadDeployEnvOptions): Promise<Load
   };
 }
 
-/** Copies one defined environment value into a concrete string map. */
+/** Copies one non-empty environment value into a concrete string map. */
 export function copyEnv(target: Record<string, string>, env: DeployEnv, key: string): void {
   const value = env[key];
   if (value != null && value !== "") target[key] = value;
@@ -129,7 +133,7 @@ function parseDotenv(text: string): Record<string, string> {
   return values;
 }
 
-/** Unquotes and unescapes one dotenv value. */
+/** Unquotes and unescapes one dotenv value; strips trailing ` #comment` text from unquoted values. */
 function parseValue(value: string): string {
   if (value.startsWith('"') && value.endsWith('"')) {
     return value.slice(1, -1).replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
