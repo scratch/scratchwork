@@ -177,14 +177,14 @@ async function runCli(args, cwd, { env = {} } = {}) {
   return { code, stdout, stderr };
 }
 
-// The embedded-fallback test relies on the renderer shell at
-// renderer/dist/shell.js (which `bun cli/src/index.ts` loads when no project
+// The embedded-fallback test relies on the built renderer at
+// renderer/dist/index.html (which `bun cli/src/index.ts` loads when no project
 // marked index.html is found). Build it once if absent so `bun test` works
 // from a clean checkout.
 // (src/index.ts would build it on demand too, but pre-building keeps tests fast.)
 const RENDERER_DIR = join(CLI_DIR, "..", "renderer");
 beforeAll(() => {
-  if (existsSync(join(RENDERER_DIR, "dist", "shell.js"))) return;
+  if (existsSync(join(RENDERER_DIR, "dist", "index.html"))) return;
   const r = Bun.spawnSync(["bun", "build.js"], { cwd: RENDERER_DIR, stdout: "pipe", stderr: "pipe" });
   if (!r.success) throw new Error(`failed to build renderer shell:\n${r.stderr.toString()}`);
 });
@@ -705,7 +705,7 @@ describe("scratchwork publish", () => {
       );
 
       const { code, stdout, stderr } = await runCli(["publish", "index.html"], dir, {
-        env: { SCRATCHWORK_SERVER_URL: "", SCRATCHWORK_HOME: configDir },
+        env: { SCRATCHWORK_HOME: configDir },
       });
 
       expect(code).toBe(0);
@@ -834,6 +834,148 @@ describe("scratchwork stream", () => {
       const { code, stderr } = await runCli(["stream", "."], dir);
       expect(code).toBe(1);
       expect(stderr).toContain("scratchwork stream: server is required");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("publishes once, then republishes when a watched file changes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-stream-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-stream-config-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const publishes = [];
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        publishes.push(await request.json());
+        return Response.json({
+          workspace: "founder",
+          project: "site",
+          routePath: "founder/site",
+          visibility: "public",
+          openPath: "/",
+          url: `${serverUrl}/founder/site/`,
+        });
+      },
+    });
+
+    writeFileSync(join(dir, "index.html"), staticPage("stream-v1"));
+    writeFileSync(
+      join(dir, ".scratchwork.json"),
+      `${JSON.stringify({ server: serverUrl, workspace: "founder", project: "site" }, null, 2)}\n`,
+    );
+
+    const proc = Bun.spawn(["bun", SCRATCHWORK, "stream", "."], {
+      cwd: dir,
+      // SCRATCHWORK_HOME isolates the test from the developer's real auth.json.
+      env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", SCRATCHWORK_HOME: configDir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    try {
+      await readOutputUntil(proc, "Streaming changes");
+      expect(publishes.length).toBe(1);
+
+      // A content change must trigger a second publish carrying the new bytes.
+      // Republishing is debounced behind a file watcher, so poll for it.
+      writeFileSync(join(dir, "index.html"), staticPage("stream-v2"));
+      const deadline = Date.now() + 8000;
+      while (publishes.length < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(publishes.length).toBeGreaterThanOrEqual(2);
+      const last = publishes[publishes.length - 1];
+      const contents = Buffer.from(
+        last.bundle.files.find((file) => file.path === "index.html").contentBase64,
+        "base64",
+      ).toString("utf8");
+      expect(contents).toContain("static@stream-v2");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("publish and auth safety", () => {
+  test("publishing a subdirectory does not reuse the ancestor's project", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-subdir-publish-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-subdir-publish-config-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    let publishBody;
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        publishBody = await request.json();
+        return Response.json({
+          workspace: publishBody.workspace ?? "founder",
+          project: publishBody.project,
+          routePath: `founder/${publishBody.project}`,
+          visibility: "public",
+          openPath: "/",
+          url: `${serverUrl}/founder/${publishBody.project}/`,
+        });
+      },
+    });
+
+    try {
+      // The ancestor config names the parent project; only its server may be
+      // inherited when publishing the docs/ subdirectory.
+      writeFileSync(
+        join(dir, ".scratchwork.json"),
+        `${JSON.stringify({ server: serverUrl, workspace: "founder", project: "parent-site" }, null, 2)}\n`,
+      );
+      mkdirSync(join(dir, "docs"), { recursive: true });
+      writeFileSync(join(dir, "docs", "index.html"), staticPage("docs"));
+
+      const { code } = await runCli(["publish", "docs"], dir, {
+        env: { SCRATCHWORK_HOME: configDir },
+      });
+      expect(code).toBe(0);
+      expect(publishBody.project).toBe("docs");
+      expect(publishBody.workspace).toBeUndefined();
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a corrupt auth.json fails loudly instead of acting logged out", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-corrupt-auth-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-corrupt-auth-config-"));
+    try {
+      writeFileSync(join(configDir, "auth.json"), "{ this is not json");
+      const { code, stderr } = await runCli(["me", "--server", "http://localhost:9"], dir, {
+        env: { SCRATCHWORK_HOME: configDir },
+      });
+      expect(code).toBe(1);
+      expect(stderr).toContain("is corrupt");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("clone refuses a project name that would escape the destination", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-clone-escape-"));
+    try {
+      writeFileSync(
+        join(dir, ".scratchwork.json"),
+        `${JSON.stringify({ server: "http://localhost:9", workspace: "founder", project: "../evil" }, null, 2)}\n`,
+      );
+      const { code, stderr } = await runCli(["clone", "."], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("unsafe project name");
+      expect(existsSync(join(dirname(dir), "evil"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

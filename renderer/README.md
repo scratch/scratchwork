@@ -59,14 +59,14 @@ single-file artifact — formatted theme (`src/prose.css`) + formatted page shel
 (`shell.js`) + minified engine — and writes:
 
 - **`dist/index.html`** — the single-file renderer, served as a file.
-- **`dist/shell.js`** — the same HTML as an importable JS module.
 - **`../shared/src/site/default-renderer.generated.js`** — the generated module
   imported by the CLI so Bun embeds the renderer in standalone builds.
 
 ```bash
 bun install
-bun run build   # esbuild bundle + assemble -> dist/index.html + dist/shell.js
+bun run build   # esbuild bundle + assemble -> dist/index.html + shared module
 bun run dev     # same, then watch src/ + shell.js and preview the sample (:5180)
+bun test        # parser + renderer unit tests (test/)
 ```
 
 Override the dev port with `PORT=4321 bun run dev`. `dist/` is gitignored.
@@ -84,8 +84,8 @@ CLI in one step.
 | Layer | File(s) | Notes |
 |-------|---------|-------|
 | Entry / boot / routing | `src/main.js` | Fetches the page, mounts React, exposes `window.React` / `window.ReactDOM` / `window.Prism` / `window.html`, reads `window.SCRATCHWORK.layout` (with a minimal fallback) |
-| Markdown + JSX parser | `src/parser.js` | Hand-rolled, dependency-free. Markdown + `<Component/>` tags + `className`/`style`. Not full MDX (no `{expressions}` / `import`) |
-| React rendering | `src/render.js` | Blocks → React elements, headings, code blocks, tables |
+| Markdown + JSX parser | `src/parser.js` | Hand-rolled, dependency-free. See "Supported markdown" below |
+| React rendering | `src/render.js` | Blocks → React elements: inline markdown, headings, code blocks, lists, tables |
 | Component resolution | `src/components.js` | Lazy `import()` of `./components/*.js` (NOT bundled); inline-first resolution lives in `main.js` |
 | Syntax highlighting | `src/highlight.js` | Prism + a curated language set |
 
@@ -97,6 +97,29 @@ CLI in one step.
 | Page shell | `shell.js` | Default `window.SCRATCHWORK.layout` (chrome/footer) + inline components, in htm. The default lives here, not in the engine |
 
 **Build-only:** `build.js` (esbuild bundle + assembly + dev server).
+
+## Supported markdown
+
+The parser implements CommonMark plus the GFM extensions in everyday use — a
+deliberate, dependency-free subset (see `src/parser.js`):
+
+- ATX (`#`) and setext (`===`/`---`) headings, with deduped anchor ids
+  (h2/h3 also get a hover `#` link)
+- Paragraphs with hard line breaks (trailing double-space or `\`),
+  backslash escapes, and HTML comments stripped
+- Emphasis (`*` `_` `**` `***`), `~~strikethrough~~`, multi-backtick code spans
+- Links (inline, reference-style `[text][ref]`, autolink `<https://…>`, bare
+  URLs), images (`![alt](src)` and `![alt][ref]`; relative `src` resolves
+  against the markdown's directory), and the badge pattern `[![alt](img)](url)`
+- Lists: nested, ordered (with `start`), GFM task lists, lazy continuation,
+  fenced code inside items
+- Fenced code (``` and `~~~`, info strings), indented code blocks,
+  GFM tables (alignment, escaped pipes), blockquotes (nested + lazy), hrs
+- `<Component/>` / raw HTML tags with `className`, `style="…"` strings, and
+  `{braced}` attribute values passed through as strings
+
+Deliberately **not** supported: `{javascript}` expressions, `import`
+statements (not full MDX), footnotes, and definition lists.
 
 ## Styling model
 

@@ -1,7 +1,7 @@
 /*
  * Scratchwork renderer styles — everything the artifact needs, with NO CSS
  * framework. Three parts:
- *   1. Page chrome (.scratchwork-page, .scratchwork-prose, footer, headings, code UI)
+ *   1. Page chrome (.scratchwork-page, .scratchwork-prose, headings, code UI)
  *   2. Prose typography for rendered markdown (a hand-written `prose`)
  *   3. A github-light Prism token theme
  *
@@ -30,6 +30,7 @@
   --prose-body: var(--gray-700);
   --prose-headings: var(--gray-900);
   --prose-links: var(--gray-900);
+  --prose-max-width: 42rem; /* ~70 characters per line at 1rem */
   --code-bg: #ffffff;
   --code-fg: #24292e;
 }
@@ -60,31 +61,13 @@ body {
 .scratchwork-prose {
   flex: 1 1 auto;
   width: 100%;
-  max-width: 56rem;
+  max-width: var(--prose-max-width);
   margin: 0 auto;
   padding: 4rem 1.5rem 1.5rem;
   font-size: 1rem;
   line-height: 1.6;
   color: var(--prose-body);
 }
-
-.scratchwork-footer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 2rem 0;
-}
-.scratchwork-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  color: var(--gray-400);
-  font-size: 0.875rem;
-  text-decoration: none;
-}
-.scratchwork-badge img { height: 2.25rem; padding-bottom: 0.125rem; }
-.scratchwork-copyright { color: var(--gray-400); font-size: 0.875rem; margin: 0; }
 
 .scratchwork-missing { color: #b91c1c; }
 
@@ -101,7 +84,8 @@ body {
   user-select: none;
   transition: opacity 150ms ease, color 150ms ease;
 }
-.scratchwork-heading:hover .heading-anchor { opacity: 1; }
+.scratchwork-heading:hover .heading-anchor,
+.heading-anchor:focus-visible { opacity: 1; }
 .heading-anchor:hover { color: var(--gray-600); }
 
 /* ---------- Code blocks + copy button ---------- */
@@ -122,8 +106,22 @@ body {
   cursor: pointer;
   transition: opacity 150ms ease, color 150ms ease;
 }
-.scratchwork-codeblock:hover .scratchwork-copy { opacity: 1; }
+.scratchwork-codeblock:hover .scratchwork-copy,
+.scratchwork-copy:focus-visible { opacity: 1; }
 .scratchwork-copy:hover { color: var(--gray-700); }
+/* Touch screens have no hover — keep the button visible. */
+@media (hover: none) {
+  .scratchwork-copy { opacity: 1; }
+}
+
+/* Keyboard focus */
+.scratchwork-copy:focus-visible,
+.heading-anchor:focus-visible,
+.scratchwork-prose a:focus-visible,
+.scratchwork-prose pre:focus-visible {
+  outline: 2px solid var(--gray-400);
+  outline-offset: 2px;
+}
 
 /* ---------- Prose typography (scoped, .not-prose excluded) ---------- */
 
@@ -132,25 +130,35 @@ body {
 
 .scratchwork-prose p:not(.not-prose *) { margin: 0.8em 0; }
 
+/* Anchored headings land with breathing room, not flush at the viewport top. */
+.scratchwork-prose h1:not(.not-prose *),
+.scratchwork-prose h2:not(.not-prose *),
+.scratchwork-prose h3:not(.not-prose *),
+.scratchwork-prose h4:not(.not-prose *),
+.scratchwork-prose h5:not(.not-prose *),
+.scratchwork-prose h6:not(.not-prose *) { scroll-margin-top: 1.5rem; }
+
 .scratchwork-prose h1:not(.not-prose *) {
-  font-size: 1.75em;
+  font-size: 2em;
   font-weight: 800;
   line-height: 1.15;
-  margin: 0 0 0.4em;
+  margin: 1.5em 0 0.5em;
   color: var(--prose-headings);
+  text-wrap: balance;
 }
 .scratchwork-prose h2:not(.not-prose *) {
-  font-size: 1.25em;
+  font-size: 1.4em;
   font-weight: 700;
   line-height: 1.3;
-  margin: 1.3em 0 0.5em;
+  margin: 1.4em 0 0.5em;
   color: var(--prose-headings);
+  text-wrap: balance;
 }
 .scratchwork-prose h3:not(.not-prose *) {
-  font-size: 1.1em;
+  font-size: 1.15em;
   font-weight: 600;
   line-height: 1.4;
-  margin: 1.1em 0 0.35em;
+  margin: 1.2em 0 0.35em;
   color: var(--prose-headings);
 }
 .scratchwork-prose h4:not(.not-prose *) {
@@ -159,21 +167,57 @@ body {
   margin: 1em 0 0.35em;
   color: var(--prose-headings);
 }
+.scratchwork-prose h5:not(.not-prose *) {
+  font-size: 0.875em;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 1em 0 0.35em;
+  color: var(--prose-headings);
+}
+.scratchwork-prose h6:not(.not-prose *) {
+  font-size: 0.875em;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 1em 0 0.35em;
+  color: var(--gray-500);
+}
 
-.scratchwork-prose a:not(.not-prose *) {
+.scratchwork-prose a:not(.heading-anchor):not(.not-prose *) {
   color: var(--prose-links);
   font-weight: 500;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: var(--gray-300);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2.5px;
+  transition: text-decoration-color 150ms ease;
+}
+.scratchwork-prose a:not(.heading-anchor):not(.not-prose *):hover {
+  text-decoration-color: var(--gray-500);
 }
 .scratchwork-prose strong:not(.not-prose *) { color: var(--prose-headings); font-weight: 600; }
 .scratchwork-prose em:not(.not-prose *) { font-style: italic; }
+.scratchwork-prose del:not(.not-prose *) { color: var(--gray-500); }
 
 .scratchwork-prose ul:not(.not-prose *),
 .scratchwork-prose ol:not(.not-prose *) { margin: 0.8em 0; padding-left: 1.625em; }
 .scratchwork-prose ul:not(.not-prose *) { list-style: disc; }
 .scratchwork-prose ol:not(.not-prose *) { list-style: decimal; }
 .scratchwork-prose li:not(.not-prose *) { margin: 0.3em 0; padding-left: 0.375em; }
-.scratchwork-prose li::marker { color: var(--gray-400); }
+.scratchwork-prose li:not(.not-prose *)::marker { color: var(--gray-400); }
+
+/* Nested lists: tighter margins, classic disc -> circle -> square markers. */
+.scratchwork-prose li > ul:not(.not-prose *),
+.scratchwork-prose li > ol:not(.not-prose *) { margin: 0.25em 0; }
+.scratchwork-prose ul ul:not(.not-prose *) { list-style: circle; }
+.scratchwork-prose ul ul ul:not(.not-prose *) { list-style: square; }
+
+/* GFM task lists: the checkbox replaces the bullet. */
+.scratchwork-prose li.task-list-item:not(.not-prose *) { list-style: none; }
+.scratchwork-prose li.task-list-item input[type="checkbox"]:not(.not-prose *) {
+  margin: 0 0.5em 0.2em -1.5em;
+  vertical-align: middle;
+  accent-color: var(--gray-600);
+}
 
 .scratchwork-prose blockquote:not(.not-prose *) {
   margin: 1.1em 0;
@@ -182,10 +226,12 @@ body {
   font-style: italic;
   color: var(--prose-headings);
 }
+/* Slanted monospace reads as broken — keep code upright inside quotes. */
+.scratchwork-prose blockquote code:not(.not-prose *) { font-style: normal; }
 
 .scratchwork-prose hr:not(.not-prose *) { border: 0; border-top: 1px solid var(--gray-200); margin: 2em 0; }
 
-.scratchwork-prose img:not(.not-prose *) { max-width: 100%; height: auto; }
+.scratchwork-prose img:not(.not-prose *) { max-width: 100%; height: auto; border-radius: 0.375rem; }
 
 /* Inline code (not inside <pre>) — matches the previous Scratchwork build */
 .scratchwork-prose code:not(pre code):not(.not-prose *) {
@@ -231,6 +277,13 @@ body {
 }
 .scratchwork-table-wrap td { padding: 0.5em 0.75em; border-bottom: 1px solid var(--gray-200); }
 
+/* ---------- Print ---------- */
+
+@media print {
+  .scratchwork-copy, .heading-anchor { display: none; }
+  .scratchwork-prose pre:not(.not-prose *) { white-space: pre-wrap; }
+}
+
 /* ---------- Prism github-light token theme ---------- */
 
 .token.comment, .token.prolog, .token.doctype, .token.cdata { color: #6a737d; }
@@ -247,3 +300,7 @@ body {
 .token.regex, .token.important, .token.variable { color: #e36209; }
 .token.important, .token.bold { font-weight: bold; }
 .token.italic { font-style: italic; }
+
+/* Diff blocks read as diffs: green additions, red deletions (GitHub colors). */
+.language-diff .token.inserted { color: #22863a; background: #f0fff4; }
+.language-diff .token.deleted { color: #b31d28; background: #ffeef0; }
