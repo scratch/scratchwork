@@ -8,10 +8,12 @@ import * as Args from "@effect/cli/Args";
 import * as CliConfig from "@effect/cli/CliConfig";
 import * as Command from "@effect/cli/Command";
 import * as Options from "@effect/cli/Options";
+import * as FetchHttpClient from "@effect/platform/FetchHttpClient";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import pkg from "../package.json";
 import { runExample } from "./commands/example";
 import { runLogin } from "./commands/login";
@@ -22,12 +24,15 @@ import { runTemplate } from "./commands/template";
 import { CliError } from "./errors";
 import { printHelpIfRequested } from "./help";
 
+/** Declares a positional path argument with a default and help text. */
 const pathArg = (name: string, fallback: string, description: string) =>
   Args.text({ name }).pipe(Args.withDefault(fallback), Args.withDescription(description));
 
+/** Declares an optional text flag that reads as `undefined` when omitted. */
 const textOption = (name: string, pseudoName: string, description: string) =>
   Options.text(name).pipe(
-    Options.withDefault(""),
+    Options.optional,
+    Options.map(Option.getOrUndefined),
     Options.withPseudoName(pseudoName),
     Options.withDescription(description),
   );
@@ -91,12 +96,12 @@ const loginCommand = Command.make(
   "login",
   {
     serverArg: Args.text({ name: "server" }).pipe(
-      Args.withDefault(""),
+      Args.optional,
       Args.withDescription("Scratchwork app server to authenticate with. Naked public domains normalize to their app subdomain, for example sndbx.sh -> https://app.sndbx.sh."),
     ),
     server: textOption("server", "url", "Server URL alternative to the positional server argument."),
   },
-  ({ serverArg, server }) => runLogin({ server: serverArg || server }),
+  ({ serverArg, server }) => runLogin({ server: Option.getOrUndefined(serverArg) ?? server }),
 ).pipe(Command.withDescription("Authenticate this machine with a Scratchwork server"));
 
 const serverOption = textOption("server", "url", "Scratchwork app server. May be omitted inside a directory with .scratchwork.json.");
@@ -168,6 +173,7 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
   ]),
 );
 
+/** Rewrites the `-v` shorthand to `--version` before @effect/cli parses argv. */
 function normalizeArgv(argv: ReadonlyArray<string>): ReadonlyArray<string> {
   if (argv.length < 3) return argv;
   const normalized = [...argv];
@@ -180,11 +186,18 @@ const cli = Command.run(scratchworkCommand, {
   version: pkg.version,
 });
 
+/** Services every command may use: CLI config, the Bun runtime context, and an HTTP client. */
 const MainLayer = Layer.mergeAll(
   CliConfig.layer({ showBuiltIns: false }),
   BunHttpServer.layerContext,
+  FetchHttpClient.layer,
 );
 
+/**
+ * Runs the CLI: renders help requests without booting the Effect runtime,
+ * otherwise executes the command graph and adapts CliError failures into
+ * stderr messages and process exit codes.
+ */
 function runScratchworkCli(argv: ReadonlyArray<string> = process.argv): void {
   const help = printHelpIfRequested(argv, pkg.version, scratchworkCommand);
   if (help.handled) {
@@ -192,17 +205,7 @@ function runScratchworkCli(argv: ReadonlyArray<string> = process.argv): void {
     return;
   }
 
-  const normalizedArgv = normalizeArgv(argv);
-  const noCommand = normalizedArgv.length < 3;
-
-  Effect.suspend(() => cli(normalizedArgv)).pipe(
-    Effect.tap(() =>
-      noCommand
-        ? Effect.sync(() => {
-            process.exitCode = 1;
-          })
-        : Effect.void,
-    ),
+  Effect.suspend(() => cli(normalizeArgv(argv))).pipe(
     Effect.catchAll((error) =>
       error instanceof CliError
         ? (error.message ? Console.error(error.message) : Effect.void).pipe(

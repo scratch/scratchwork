@@ -1,3 +1,12 @@
+/*
+ * The fallback renderer shell, used when a markdown route has no marked project
+ * index.html anywhere up the served tree.
+ *
+ * Production CLI builds import the generated shared module below, so Bun embeds
+ * the renderer HTML directly into the standalone binary. Source runs
+ * (`bun cli/src/index.ts ...`) compare the generated module's source hash against
+ * the current renderer source and rebuild automatically when it changed.
+ */
 import * as Command from "@effect/platform/Command";
 import type * as CommandExecutor from "@effect/platform/CommandExecutor";
 import * as FileSystem from "@effect/platform/FileSystem";
@@ -11,16 +20,10 @@ import {
   defaultRendererSourceHash,
 } from "../../../shared/src/site/default-renderer.generated.js";
 
-// The fallback renderer shell, used when a markdown route has no marked project
-// index.html anywhere up the served tree.
-//
-// Production CLI builds import the generated shared module above, so Bun embeds
-// the renderer HTML directly into the standalone binary. Source runs
-// (`bun cli/src/index.ts ...`) compare the generated module's source hash against
-// the current renderer source and rebuild automatically when it changed.
-
 const rendererRootUrl = new URL("../../../renderer/", import.meta.url);
 const rendererRoot = fileURLToPath(rendererRootUrl);
+
+/** Resolves a path inside the renderer package's source tree. */
 const rendererPath = (path: string) => fileURLToPath(new URL(path, rendererRootUrl));
 
 const buildScript = rendererPath("build.js");
@@ -33,6 +36,11 @@ const rendererRootFiles = ["build.js", "bun.lock", "package.json", "shell.js"].m
 let currentShell = defaultRendererHtml;
 let currentSourceHash = defaultRendererSourceHash;
 
+/**
+ * Returns the default renderer shell HTML, rebuilding it first when the
+ * renderer source on disk has changed since the shell was generated. Returns
+ * null when no shell is available (build failed and none was embedded).
+ */
 export function loadShell(): Effect.Effect<
   string | null,
   never,
@@ -52,14 +60,7 @@ export function loadShell(): Effect.Effect<
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
-export function bakedShell(): Effect.Effect<
-  string | null,
-  never,
-  CommandExecutor.CommandExecutor | FileSystem.FileSystem
-> {
-  return loadShell();
-}
-
+/** Runs the renderer package's build and reads the produced shell HTML. */
 function buildShell(reason: string): Effect.Effect<
   string | null,
   never,
@@ -81,6 +82,7 @@ function buildShell(reason: string): Effect.Effect<
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
+/** Hashes the renderer's source files, or returns null when they are not on disk. */
 function currentRendererSourceHash(): Effect.Effect<string | null, never, FileSystem.FileSystem> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -97,6 +99,7 @@ function currentRendererSourceHash(): Effect.Effect<string | null, never, FileSy
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
+/** Lists the files that participate in the source hash, or null when incomplete. */
 function rendererSourceFiles(): Effect.Effect<ReadonlyArray<string> | null, never, FileSystem.FileSystem> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -112,6 +115,7 @@ function rendererSourceFiles(): Effect.Effect<ReadonlyArray<string> | null, neve
   }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 }
 
+/** Recursively lists regular files under a directory, tolerating read failures. */
 function collectFiles(dir: string): Effect.Effect<ReadonlyArray<string>, never, FileSystem.FileSystem> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

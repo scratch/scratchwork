@@ -1,3 +1,8 @@
+/*
+ * Resolution of the CLI's path argument for `dev` and `publish`: a directory
+ * becomes the served root, a file becomes its parent directory plus the
+ * browser route for that file.
+ */
 import * as FileSystem from "@effect/platform/FileSystem";
 import type { PlatformError } from "@effect/platform/Error";
 import * as Path from "@effect/platform/Path";
@@ -34,7 +39,7 @@ export function resolveDevTarget(
   });
 }
 
-/** Builds the extensionless browser path for a file passed to `scratchwork dev`. */
+/** Builds the extensionless browser path for a file passed as the target. */
 function openPathForFile(filename: string): string {
   const lower = filename.toLowerCase();
   const route = lower.endsWith(".html")

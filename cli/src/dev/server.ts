@@ -1,3 +1,8 @@
+/*
+ * The `scratchwork dev` HTTP server: binds the first free port at or above the
+ * requested one, then serves site routes through the shared serving pipeline
+ * with live reload injected into HTML responses.
+ */
 import type * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
@@ -6,8 +11,8 @@ import * as Effect from "effect/Effect";
 import { serveRequest } from "../../../shared/src/site/serve";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
 import { CliError, errorMessage } from "../errors";
-import { bakedShell } from "../renderer/default";
-import * as SiteFilesLive from "../serve/file-system-site-files";
+import { loadShell } from "../renderer/default";
+import * as SiteFilesLive from "./site-files";
 import { logServeEvent } from "./diagnostics";
 import { injectReloadClient, RELOAD_PATH, sseResponse } from "./live-reload";
 import { logDebug } from "./output";
@@ -88,7 +93,7 @@ function handleRequest(
       defaultFaviconSvg: FIGURE_SVG,
       htmlTransforms: [injectReloadClient],
       onServeEvent: (event) => logServeEvent(state, event),
-      rendererFallback: bakedShell(),
+      rendererFallback: loadShell(),
     });
   });
 }

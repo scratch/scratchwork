@@ -1,3 +1,7 @@
+/*
+ * Terminal output helpers for the long-running dev server: compact status
+ * lines for users and structured debug logs behind --verbose.
+ */
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 

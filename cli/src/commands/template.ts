@@ -1,18 +1,24 @@
+/*
+ * `scratchwork template` - write the default Markdown renderer shell to a
+ * local HTML file so a project can customize its own renderer.
+ */
 import type * as CommandExecutor from "@effect/platform/CommandExecutor";
 import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+import { markMarkdownRenderer } from "../../../shared/src/site/marker";
 import { CliError } from "../errors";
 import { loadShell } from "../renderer/default";
-import { markMarkdownRenderer } from "../renderer/renderer";
 import type { TemplateConfig } from "../types";
 
-// `scratchwork template [file]` - write the default markdown renderer to a file.
-// Defaults to index.html and refuses to clobber existing files.
+/**
+ * Runs `scratchwork template`: writes the default markdown renderer shell to
+ * a file (default index.html), refusing to clobber existing files.
+ */
 export function runTemplate({
-  file: dest = "index.html",
+  file: dest,
 }: TemplateConfig): Effect.Effect<
   void,
   PlatformError | CliError,

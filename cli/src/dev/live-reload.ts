@@ -1,14 +1,20 @@
+/*
+ * Live reload for `scratchwork dev`: watches the served tree, pushes change
+ * events to browsers over an SSE endpoint, and injects the client script that
+ * listens for them. Markdown changes trigger an in-page re-render; anything
+ * else triggers a full reload.
+ */
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import type { HtmlTransform } from "../../../shared/src/site/html";
 import { errorMessage, CliError } from "../errors";
-import type { ReloadPayload } from "../types";
 import { status } from "./output";
-import type { DevState } from "./types";
+import type { DevState, ReloadPayload } from "./types";
 
 export const RELOAD_PATH = "/__scratchwork_reload";
 
@@ -107,19 +113,36 @@ function reloadPayload(
   });
 }
 
-/** Watches the site root and emits debounced reload payloads for known file types. */
+/**
+ * Watches the site root and emits exactly one reload payload per burst of
+ * changes (50ms of quiet ends a burst). A markdown save cannot mask a
+ * simultaneous CSS/JS/HTML change: if the burst contained any non-markdown
+ * change, that payload is emitted instead, forcing a full reload.
+ */
 function watchReloads(
   state: DevState,
 ): Stream.Stream<ReloadPayload, CliError, FileSystem.FileSystem | Path.Path> {
   return Stream.unwrap(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      return fs.watch(state.root, { recursive: true });
+      // Remembers the burst's most recent non-markdown change across the
+      // debounce boundary, and is cleared again on every emission.
+      const nonMarkdown = yield* Ref.make(Option.none<ReloadPayload>());
+      return fs.watch(state.root, { recursive: true }).pipe(
+        Stream.mapEffect((event) => reloadPayload(event.path)),
+        Stream.filterMap((payload) => payload),
+        Stream.tap((payload) =>
+          payload.ext === "md" ? Effect.void : Ref.set(nonMarkdown, Option.some(payload)),
+        ),
+        Stream.debounce("50 millis"),
+        Stream.mapEffect((payload) =>
+          Ref.getAndSet(nonMarkdown, Option.none()).pipe(
+            Effect.map(Option.getOrElse(() => payload)),
+          ),
+        ),
+      );
     }),
   ).pipe(
-    Stream.mapEffect((event) => reloadPayload(event.path)),
-    Stream.filterMap((payload) => payload),
-    Stream.debounce("50 millis"),
     Stream.mapError(
       (error) =>
         new CliError({
