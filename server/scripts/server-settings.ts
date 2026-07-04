@@ -18,8 +18,9 @@ export interface ScratchworkServerConfig {
   readonly shareAllowedDomains?: string;
   readonly appDomain?: string;
   readonly contentDomain?: string;
-  readonly projectPath?: "workspace/project" | "domain/username/project" | "username/project" | "random";
-  readonly defaultWorkspace?: "personal" | "random" | "required";
+  readonly projectRoutingMode?: "workspace/project" | "userDomain/workspace/project";
+  readonly defaultWorkspace?: "username" | "random";
+  readonly usersCanCreateWorkspaces?: boolean;
   readonly defaultVisibility?: string;
 }
 
@@ -65,8 +66,9 @@ export function serverConfigEnv(config: ScratchworkServerConfig, resolved: Resol
   if (config.allowedUsers != null) env.SCRATCHWORK_ALLOWED_USERS = config.allowedUsers;
   if (config.maxVisibility != null) env.SCRATCHWORK_MAX_VISIBILITY = config.maxVisibility;
   if (config.shareAllowedDomains != null) env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS = config.shareAllowedDomains;
-  if (config.projectPath != null) env.SCRATCHWORK_PROJECT_PATH = config.projectPath;
+  if (config.projectRoutingMode != null) env.SCRATCHWORK_PROJECT_ROUTING_MODE = config.projectRoutingMode;
   if (config.defaultWorkspace != null) env.SCRATCHWORK_DEFAULT_WORKSPACE = config.defaultWorkspace;
+  if (config.usersCanCreateWorkspaces != null) env.SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES = String(config.usersCanCreateWorkspaces);
   if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
   if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
   if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;

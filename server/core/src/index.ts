@@ -14,9 +14,9 @@ export {
   ServerConfig,
   ServerConfigError,
   type AuthConfig,
-  type DefaultWorkspaceStrategy,
+  type DefaultWorkspaceMode,
   type EnvVars,
-  type ProjectPathStrategy,
+  type ProjectRoutingMode,
   type ServerConfigShape,
 } from "./config";
 
@@ -74,4 +74,4 @@ export {
 
 // Persisted record shapes and route-path matching for published sites.
 export { projectKey, type RouteRecord, type SiteFileObject, type SiteRecord, type SiteRevisionRecord } from "./site-records";
-export { candidateRoutePaths, routeRest } from "./routes";
+export { routeDepth, routePathForRequest, routeRest } from "./routes";

@@ -86,30 +86,52 @@ describe("readServerConfig", () => {
     );
   });
 
-  test("reads the required default workspace strategy", async () => {
+  test("defaults routing and workspace settings deterministically", async () => {
     const config = await Effect.runPromise(
       readServerConfig({
         SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
         SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
         SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
-        SCRATCHWORK_DEFAULT_WORKSPACE: "required",
       }),
     );
 
-    expect(config.defaultWorkspace).toBe("required");
+    expect(config.projectRoutingMode).toBe("workspace/project");
+    expect(config.defaultWorkspace).toBe("username");
+    expect(config.usersCanCreateWorkspaces).toBe(true);
   });
 
-  test("rejects unknown default workspace strategies", async () => {
+  test("reads the configured routing and workspace settings", async () => {
+    const config = await Effect.runPromise(
+      readServerConfig({
+        SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+        SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+        SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+        SCRATCHWORK_PROJECT_ROUTING_MODE: "userDomain/workspace/project",
+        SCRATCHWORK_DEFAULT_WORKSPACE: "random",
+        SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES: "false",
+      }),
+    );
+
+    expect(config.projectRoutingMode).toBe("userDomain/workspace/project");
+    expect(config.defaultWorkspace).toBe("random");
+    expect(config.usersCanCreateWorkspaces).toBe(false);
+  });
+
+  test("rejects unknown routing and workspace values", async () => {
+    const base = {
+      SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+      SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+      SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+    };
     await expect(
-      Effect.runPromise(
-        readServerConfig({
-          SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
-          SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
-          SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
-          SCRATCHWORK_DEFAULT_WORKSPACE: "team",
-        }),
-      ),
-    ).rejects.toThrow("SCRATCHWORK_DEFAULT_WORKSPACE must be personal, random, or required");
+      Effect.runPromise(readServerConfig({ ...base, SCRATCHWORK_PROJECT_ROUTING_MODE: "random" })),
+    ).rejects.toThrow("SCRATCHWORK_PROJECT_ROUTING_MODE must be workspace/project or userDomain/workspace/project");
+    await expect(
+      Effect.runPromise(readServerConfig({ ...base, SCRATCHWORK_DEFAULT_WORKSPACE: "team" })),
+    ).rejects.toThrow("SCRATCHWORK_DEFAULT_WORKSPACE must be username or random");
+    await expect(
+      Effect.runPromise(readServerConfig({ ...base, SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES: "yes" })),
+    ).rejects.toThrow("SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES must be true or false");
   });
 });
 

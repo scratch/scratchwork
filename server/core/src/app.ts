@@ -19,7 +19,7 @@ import { ServerConfig, type ServerConfigShape } from "./config";
 import { projectAccessCookie, projectAccessCookieValues } from "./cookies";
 import { errorJson, HttpError, jsonResponse, securityHeaders } from "./http";
 import { readPublishRequest } from "./publish-request";
-import { candidateRoutePaths, routeRest } from "./routes";
+import { routePathForRequest, routeRest } from "./routes";
 import { projectKey, type SiteRecord } from "./site-records";
 import { canReadProject, SiteStore, SiteStoreError, type LoadedSite } from "./site-store";
 import { StorageError } from "./storage";
@@ -472,17 +472,18 @@ function serveSiteFiles(
   );
 }
 
-/** Finds the published site whose route path is the longest matching prefix of the path. */
+/** Loads the published site owning the request path. Routing is deterministic: the
+ * path's first routeDepth segments are the only route it can belong to, so resolution
+ * is a single route-index lookup. */
 function loadSiteForPath(
   pathname: string,
-): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError, SiteStore> {
+): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError, SiteStore | ServerConfig> {
   return Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    const routePath = routePathForRequest(pathname, config.projectRoutingMode);
+    if (routePath == null) return null;
     const siteStore = yield* SiteStore;
-    for (const routePath of candidateRoutePaths(pathname)) {
-      const site = yield* siteStore.loadByRoute(routePath);
-      if (site != null) return site;
-    }
-    return null;
+    return yield* siteStore.loadByRoute(routePath);
   });
 }
 

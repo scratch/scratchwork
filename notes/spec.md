@@ -81,19 +81,22 @@ export const server = {
   // domains. If it is not set, there are no restrictions on who users can share with.
   shareAllowedDomains: undefined,
 
-  // Must be one of the following:
-  //   1. "workspace/project" - users can create workspaces
-  //   2. "domain/username/project" - path is determined by the owner's email address
-  //   3. "username/project" - identical to (2), but without the domain. This should only be used
-  //      when allowedUsers restricts login to a single email domain.
-  //   4. "random" - projects are assigned a random slug when published
-  projectPath: "random",
+  // How projects map onto public route paths. Routing is deterministic: every route has
+  // a fixed segment depth, so a request path resolves to at most one route. Must be one of:
+  //   1. "workspace/project" - e.g. /pete/hello-world or /engineering/backlog
+  //   2. "userDomain/workspace/project" - e.g. /example.com/pete/hello-world, where
+  //      userDomain is the domain of the owner's email address
+  projectRoutingMode: "workspace/project",
 
-  // Must be one of:
-  //   "personal" - derive from the user's email username
-  //   "random" - generate a workspace when the CLI does not send one
-  //   "required" - reject publishes that omit workspace
-  defaultWorkspace: "personal",
+  // The workspace assigned to a published project when none is specified. Must be one of:
+  //   "username" - the user's email local part (pete@example.com publishes to "pete")
+  //   "random" - a random string of characters and numbers
+  defaultWorkspace: "username",
+
+  // Whether users can create new workspaces by publishing to them. When false, a publish
+  // may only name a workspace that already exists or the user's own username workspace;
+  // server-assigned default workspaces are always allowed.
+  usersCanCreateWorkspaces: true,
 
   // Server fallback when the CLI does not send visibility.
   defaultVisibility: "private",

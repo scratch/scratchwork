@@ -107,8 +107,9 @@ function serverSettingsEnv(server: ScratchworkServerConfig, processEnv: EnvVars)
   set("SCRATCHWORK_ALLOWED_USERS", server.allowedUsers);
   set("SCRATCHWORK_MAX_VISIBILITY", server.maxVisibility);
   set("SCRATCHWORK_SHARE_ALLOWED_DOMAINS", server.shareAllowedDomains);
-  set("SCRATCHWORK_PROJECT_PATH", server.projectPath);
+  set("SCRATCHWORK_PROJECT_ROUTING_MODE", server.projectRoutingMode);
   set("SCRATCHWORK_DEFAULT_WORKSPACE", server.defaultWorkspace);
+  set("SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES", server.usersCanCreateWorkspaces == null ? undefined : String(server.usersCanCreateWorkspaces));
   set("SCRATCHWORK_DEFAULT_VISIBILITY", server.defaultVisibility);
   return env;
 }

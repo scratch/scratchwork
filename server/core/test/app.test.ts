@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import { createSessionToken } from "../src/auth";
+import { MemoryPrimitiveDbLive } from "../src/db";
 import { appHandler, bundle, json, testAuth, type MemoryStoredObject } from "./helpers";
 
 const user = { id: "user-1", email: "founder@example.com" };
@@ -8,7 +9,7 @@ const user = { id: "user-1", email: "founder@example.com" };
 describe("server app", () => {
   test("publishes files into per-file storage and serves the site", async () => {
     const storage = new Map<string, MemoryStoredObject>();
-    const handler = await appHandler({ storage, auth: testAuth(user), config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ storage, auth: testAuth(user) });
 
     const publish = await handler(post("/api/publish", {
       bundle: bundle({
@@ -52,7 +53,7 @@ describe("server app", () => {
   });
 
   test("republishes by flipping the current revision", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ auth: testAuth(user) });
     const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "old", "old.css": "old" }),
       openPath: "/",
@@ -78,7 +79,7 @@ describe("server app", () => {
   });
 
   test("serves rendered markdown unsandboxed with public asset CORS", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ auth: testAuth(user) });
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.md": "# Hello", "evil.svg": "<svg><script>alert(1)</script></svg>" }),
       openPath: "/",
@@ -102,7 +103,7 @@ describe("server app", () => {
   });
 
   test("republishing without visibility preserves the project's visibility", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project", defaultVisibility: "private" } });
+    const handler = await appHandler({ auth: testAuth(user), config: { defaultVisibility: "private" } });
     const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "v1" }),
       openPath: "/",
@@ -127,7 +128,7 @@ describe("server app", () => {
   });
 
   test("rejects reserved slugs that would shadow server routes", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ auth: testAuth(user) });
     for (const workspace of ["api", "auth", "health"]) {
       const response = await handler(post("/api/publish", {
         bundle: bundle({ "index.html": "hello" }),
@@ -141,7 +142,6 @@ describe("server app", () => {
 
     const usernameHandler = await appHandler({
       auth: testAuth({ id: "user-2", email: "api@example.com" }),
-      config: { projectPath: "username/project" },
     });
     const shadowed = await usernameHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
@@ -160,7 +160,8 @@ describe("server app", () => {
       project: "site",
       visibility: "private",
     }))) as { workspace: string; routePath: string };
-    expect(published.routePath).not.toContain("/");
+    expect(published.workspace).toBe("founder");
+    expect(published.routePath).toBe("founder/site");
 
     const resolved = await handler(new Request(`https://scratch.test/api/resolve?path=${encodeURIComponent(`/${published.routePath}/index.html`)}`));
     expect(resolved.status).toBe(200);
@@ -176,24 +177,75 @@ describe("server app", () => {
     expect(denied.status).toBe(401);
   });
 
-  test("rejects publishes without a workspace when defaultWorkspace is required", async () => {
-    const handler = await appHandler({
-      auth: testAuth(user),
-      config: { defaultWorkspace: "required", projectPath: "workspace/project" },
-    });
-    const response = await handler(post("/api/publish", {
+  test("assigns a random workspace when none is sent and defaultWorkspace is random", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: { defaultWorkspace: "random" } });
+    const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
       visibility: "public",
-    }));
+    }))) as { workspace: string; routePath: string };
 
-    expect(response.status).toBe(400);
-    expect(await json(response)).toMatchObject({ error: "workspace is required" });
+    expect(published.workspace).toMatch(/^[a-z2-9]{10}$/);
+    expect(published.routePath).toBe(`${published.workspace}/site`);
+  });
+
+  test("routes projects under the owner's email domain in userDomain mode", async () => {
+    const handler = await appHandler({
+      auth: testAuth(user),
+      config: { projectRoutingMode: "userDomain/workspace/project" },
+    });
+    const published = await json(await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
+    }))) as { routePath: string; url: string };
+    expect(published.routePath).toBe("example.com/demo/site");
+    expect(published.url).toBe("https://scratch.test/example.com/demo/site/");
+
+    const html = await handler(new Request("https://scratch.test/example.com/demo/site/"));
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain("hello");
+
+    // Routing is deterministic: a two-segment path cannot reach a three-segment route.
+    const shallow = await handler(new Request("https://scratch.test/demo/site/"));
+    expect(shallow.status).toBe(404);
+  });
+
+  test("enforces usersCanCreateWorkspaces for explicitly named workspaces", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const publish = (workspace: string | undefined, project: string) => post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      ...(workspace == null ? {} : { workspace }),
+      project,
+      visibility: "public",
+    });
+    const handler = await appHandler({ db, auth: testAuth(user), config: { usersCanCreateWorkspaces: false } });
+
+    // A workspace that does not exist yet cannot be named explicitly.
+    const denied = await handler(publish("team", "site"));
+    expect(denied.status).toBe(403);
+
+    // The user's own username workspace and server-assigned defaults are always allowed.
+    expect((await handler(publish("founder", "site"))).status).toBe(200);
+    expect((await handler(publish(undefined, "site-2"))).status).toBe(200);
+
+    // Once another user's publish creates the workspace, naming it explicitly works.
+    const teamHandler = await appHandler({
+      db,
+      auth: testAuth({ id: "user-3", email: "team@example.com" }),
+      config: { usersCanCreateWorkspaces: false },
+    });
+    expect((await teamHandler(publish(undefined, "roadmap"))).status).toBe(200);
+    const allowed = await handler(publish("team", "site"));
+    expect(allowed.status).toBe(200);
   });
 
   test("lists projects beyond a single database page", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { projectPath: "workspace/project" } });
+    const handler = await appHandler({ auth: testAuth(user) });
     for (let index = 0; index < 120; index += 1) {
       const published = await handler(post("/api/publish", {
         bundle: bundle({ "index.html": "hello" }),
@@ -255,7 +307,6 @@ describe("server app", () => {
       config: {
         appUrl: "https://app.scratch.test",
         contentUrl: "https://pages.scratch.test",
-        projectPath: "workspace/project",
       },
     });
 
@@ -316,7 +367,6 @@ describe("server app", () => {
       config: {
         appUrl: "https://app.scratch.test",
         contentUrl: "https://pages.scratch.test",
-        projectPath: "workspace/project",
       },
     });
 
@@ -361,7 +411,6 @@ describe("server app", () => {
       config: {
         appUrl: "https://app.scratch.test",
         contentUrl: "https://pages.scratch.test",
-        projectPath: "workspace/project",
         auth: authConfig,
       },
     });
@@ -446,7 +495,6 @@ describe("server app", () => {
       config: {
         appUrl: "https://app.scratch.test",
         contentUrl: "https://pages.scratch.test",
-        projectPath: "workspace/project",
         auth: authConfig,
       },
     });

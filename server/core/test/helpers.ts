@@ -7,7 +7,7 @@ import { bytesToHex } from "../../../shared/src/encoding/hex";
 import { app } from "../src/app";
 import { Auth, AuthError, AuthLive, type AuthShape, type AuthUser } from "../src/auth";
 import { ServerConfig, type ServerConfigShape } from "../src/config";
-import { MemoryPrimitiveDbLive } from "../src/db";
+import { MemoryPrimitiveDbLive, PrimitiveDb } from "../src/db";
 import { SiteStoreLive } from "../src/site-store";
 import { ObjectStorage, StorageConflict, StorageError, safeObjectKey, type ObjectStorageShape, type StoredObject } from "../src/storage";
 
@@ -33,6 +33,7 @@ export function bundle(files: Record<string, string | Uint8Array>) {
 export async function appHandler(options: {
   readonly config?: Partial<ServerConfigShape>;
   readonly storage?: Map<string, MemoryStoredObject>;
+  readonly db?: Layer.Layer<PrimitiveDb>;
   readonly auth?: Layer.Layer<Auth>;
 } = {}) {
   const config: ServerConfigShape = {
@@ -41,8 +42,9 @@ export async function appHandler(options: {
     contentUrl: "https://scratch.test",
     maxVisibility: "public",
     shareAllowedDomains: new Set(),
-    projectPath: "random",
-    defaultWorkspace: "personal",
+    projectRoutingMode: "workspace/project",
+    defaultWorkspace: "username",
+    usersCanCreateWorkspaces: true,
     defaultVisibility: "public",
     auth: {
       clientId: "test-client-id",
@@ -56,7 +58,7 @@ export async function appHandler(options: {
   const base = Layer.mergeAll(
     Layer.succeed(ServerConfig, ServerConfig.of(config)),
     memoryStorageLayer(options.storage),
-    MemoryPrimitiveDbLive(),
+    options.db ?? MemoryPrimitiveDbLive(),
   );
   const services = Layer.provideMerge(
     Layer.mergeAll(options.auth ?? AuthLive, SiteStoreLive),

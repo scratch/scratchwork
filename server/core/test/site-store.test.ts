@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import type { ServerConfigShape } from "../src/config";
 import { PrimitiveDb, PrimitiveDbError, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../src/db";
 import type { PublishRequest } from "../src/publish-request";
-import { candidateRoutePaths, routeRest } from "../src/routes";
+import { routePathForRequest, routeRest } from "../src/routes";
 import type { SiteRecord } from "../src/site-records";
 import { SiteStore, SiteStoreLive, canReadProject } from "../src/site-store";
 import { bundle, memoryStorageLayer } from "./helpers";
@@ -36,8 +36,9 @@ function config(maxVisibility: string): ServerConfigShape {
     port: 3001,
     maxVisibility,
     shareAllowedDomains: new Set(),
-    projectPath: "workspace/project",
-    defaultWorkspace: "personal",
+    projectRoutingMode: "workspace/project",
+    defaultWorkspace: "username",
+    usersCanCreateWorkspaces: true,
     defaultVisibility: "private",
     auth: {
       clientId: "client-id",
@@ -107,18 +108,26 @@ describe("publish route allocation", () => {
   });
 });
 
-describe("candidateRoutePaths", () => {
-  test("returns longest-first prefixes of decoded segments", () => {
-    expect(candidateRoutePaths("/demo/site/app.js")).toEqual(["demo/site/app.js", "demo/site", "demo"]);
+describe("routePathForRequest", () => {
+  test("takes exactly routeDepth segments for the configured mode", () => {
+    expect(routePathForRequest("/demo/site/app.js", "workspace/project")).toBe("demo/site");
+    expect(routePathForRequest("/demo/site", "workspace/project")).toBe("demo/site");
+    expect(routePathForRequest("/example.com/demo/site/app.js", "userDomain/workspace/project")).toBe("example.com/demo/site");
+  });
+
+  test("returns null for paths shallower than the route depth", () => {
+    expect(routePathForRequest("/", "workspace/project")).toBeNull();
+    expect(routePathForRequest("/demo", "workspace/project")).toBeNull();
+    expect(routePathForRequest("/demo/site", "userDomain/workspace/project")).toBeNull();
   });
 
   test("rejects encoded slashes that would fabricate multi-segment routes", () => {
-    expect(candidateRoutePaths("/demo%2Fsite")).toEqual([]);
-    expect(candidateRoutePaths("/demo%2Fsite/extra")).toEqual([]);
+    expect(routePathForRequest("/demo%2Fsite/extra", "workspace/project")).toBeNull();
+    expect(routePathForRequest("/demo%2Fsite/a/b", "workspace/project")).toBeNull();
   });
 
   test("decodes benign percent-encoding within a segment", () => {
-    expect(candidateRoutePaths("/pete%2Dx/app.js")).toEqual(["pete-x/app.js", "pete-x"]);
+    expect(routePathForRequest("/pete%2Dx/site/app.js", "workspace/project")).toBe("pete-x/site");
   });
 });
 

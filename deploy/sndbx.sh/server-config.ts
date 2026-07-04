@@ -8,7 +8,7 @@ export const server = {
   authSessionSeconds: 2_592_000,
   allowedUsers: "public",
   maxVisibility: "public",
-  projectPath: "workspace/project",
-  defaultWorkspace: "personal",
+  projectRoutingMode: "workspace/project",
+  defaultWorkspace: "username",
   defaultVisibility: "private",
 } satisfies ScratchworkServerConfig;

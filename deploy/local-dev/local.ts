@@ -4,7 +4,7 @@ import { runLocalServer } from "@scratchwork/server-deploy-local";
 // cloud counterpart. Domain deploys live in sibling projects such as deploy/sndbx.sh.
 runLocalServer({
   server: {
-    projectPath: "workspace/project",
+    projectRoutingMode: "workspace/project",
     defaultVisibility: "public",
   },
 });

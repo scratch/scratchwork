@@ -20,24 +20,26 @@ export interface ServerConfigShape {
   readonly maxVisibility: AccessGroup;
   /** When non-empty, explicit share targets must fall inside these domains. */
   readonly shareAllowedDomains: ReadonlySet<string>;
-  /** How new projects get their public route path. */
-  readonly projectPath: ProjectPathStrategy;
-  /** How a publish without a workspace resolves one. */
-  readonly defaultWorkspace: DefaultWorkspaceStrategy;
+  /** How new projects map onto public route paths. */
+  readonly projectRoutingMode: ProjectRoutingMode;
+  /** Workspace assigned when a publish does not name one. */
+  readonly defaultWorkspace: DefaultWorkspaceMode;
+  /** Whether a publish may name a workspace that does not exist yet. The user's own
+   * username workspace and server-assigned default workspaces are always allowed. */
+  readonly usersCanCreateWorkspaces: boolean;
   /** Visibility applied when a publish does not specify one. */
   readonly defaultVisibility: AccessGroup;
   readonly auth: AuthConfig;
 }
 
-/** Route-path strategy for new projects. */
-export type ProjectPathStrategy =
-  | "workspace/project"
-  | "domain/username/project"
-  | "username/project"
-  | "random";
+/** How published projects map onto public route paths. Routing is deterministic: every
+ * route has exactly routeDepth(mode) segments, so a request path resolves to at most one
+ * route. userDomain is the domain of the owner's email address. */
+export type ProjectRoutingMode = "workspace/project" | "userDomain/workspace/project";
 
-/** Workspace fallback: the user's email local part, a random slug, or caller-required. */
-export type DefaultWorkspaceStrategy = "personal" | "random" | "required";
+/** Workspace assigned when a publish omits one: a random slug, or the user's email
+ * local part (pete@example.com publishes to workspace "pete"). */
+export type DefaultWorkspaceMode = "random" | "username";
 
 /** Google OAuth and session-signing settings. Auth cannot be disabled. */
 export interface AuthConfig {
@@ -92,8 +94,9 @@ export function readServerConfig(
       ),
       maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
       shareAllowedDomains: domainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS),
-      projectPath: yield* readProjectPath(env.SCRATCHWORK_PROJECT_PATH),
+      projectRoutingMode: yield* readProjectRoutingMode(env.SCRATCHWORK_PROJECT_ROUTING_MODE),
       defaultWorkspace: yield* readDefaultWorkspace(env.SCRATCHWORK_DEFAULT_WORKSPACE),
+      usersCanCreateWorkspaces: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES, true, "SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES"),
       defaultVisibility: yield* readAccessGroup(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
       auth: yield* readAuthConfig(env),
     };
@@ -170,33 +173,37 @@ function readAccessGroup(
   );
 }
 
-/** Parses the route-path strategy, defaulting to random slugs. */
-function readProjectPath(value: string | undefined): Effect.Effect<ProjectPathStrategy, ServerConfigError> {
-  const projectPath = value == null || value === "" ? "random" : value;
-  if (
-    projectPath === "workspace/project" ||
-    projectPath === "domain/username/project" ||
-    projectPath === "username/project" ||
-    projectPath === "random"
-  ) {
-    return Effect.succeed(projectPath);
+/** Parses the project routing mode, defaulting to workspace/project. */
+function readProjectRoutingMode(value: string | undefined): Effect.Effect<ProjectRoutingMode, ServerConfigError> {
+  const mode = value == null || value === "" ? "workspace/project" : value;
+  if (mode === "workspace/project" || mode === "userDomain/workspace/project") {
+    return Effect.succeed(mode);
   }
   return Effect.fail(
     new ServerConfigError({
-      message: "SCRATCHWORK_PROJECT_PATH must be workspace/project, domain/username/project, username/project, or random",
+      message: "SCRATCHWORK_PROJECT_ROUTING_MODE must be workspace/project or userDomain/workspace/project",
     }),
   );
 }
 
-/** Parses the default-workspace strategy, defaulting to the user's email local part. */
-function readDefaultWorkspace(value: string | undefined): Effect.Effect<DefaultWorkspaceStrategy, ServerConfigError> {
-  const strategy = value == null || value === "" ? "personal" : value;
-  if (strategy === "personal" || strategy === "random" || strategy === "required") {
-    return Effect.succeed(strategy);
+/** Parses the default-workspace mode, defaulting to the user's email local part. */
+function readDefaultWorkspace(value: string | undefined): Effect.Effect<DefaultWorkspaceMode, ServerConfigError> {
+  const mode = value == null || value === "" ? "username" : value;
+  if (mode === "username" || mode === "random") {
+    return Effect.succeed(mode);
   }
   return Effect.fail(
-    new ServerConfigError({ message: "SCRATCHWORK_DEFAULT_WORKSPACE must be personal, random, or required" }),
+    new ServerConfigError({ message: "SCRATCHWORK_DEFAULT_WORKSPACE must be username or random" }),
   );
+}
+
+/** Parses one boolean environment value with a fallback. */
+function readBoolean(value: string | undefined, fallback: boolean, name: string): Effect.Effect<boolean, ServerConfigError> {
+  if (value == null || value === "") return Effect.succeed(fallback);
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return Effect.succeed(true);
+  if (normalized === "false") return Effect.succeed(false);
+  return Effect.fail(new ServerConfigError({ message: `${name} must be true or false` }));
 }
 
 /** Expands a bare domain env value into an https origin. */

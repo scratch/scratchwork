@@ -56,9 +56,6 @@ import {
 import { ObjectStorage, sha256Hex, StorageConflict, StorageError, type ObjectStorageShape } from "./storage";
 import { randomRevisionId, randomSlug } from "./tokens";
 
-/** How many random route paths to try before giving up on a publish. */
-const MAX_ROUTE_ATTEMPTS = 20;
-
 /** A published site loaded for serving: pointer, current revision, and its file reader. */
 export interface LoadedSite {
   readonly record: SiteRecord;
@@ -152,9 +149,6 @@ function publishProject(
   return Effect.gen(function* () {
     const workspace = request.workspace ?? defaultWorkspace(config, user);
     const project = request.project;
-    if (workspace == null) {
-      return yield* Effect.fail(new SiteStoreError({ status: 400, message: "workspace is required" }));
-    }
     if (project == null) {
       return yield* Effect.fail(new SiteStoreError({ status: 400, message: "project is required" }));
     }
@@ -169,13 +163,14 @@ function publishProject(
     yield* validateVisibility(visibility, config);
 
     if (loaded == null) {
+      yield* requireUsableWorkspace(db, config, user, request.workspace, workspace);
       return yield* createProject(storage, db, request, user, config, workspace, project, visibility);
     }
     return yield* updateProject(storage, db, request, user, loaded, visibility);
   });
 }
 
-/** Creates a new project record and route index entry, retrying random routes on collision. */
+/** Creates a new project record and claims its deterministic route index entry. */
 function createProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
@@ -187,25 +182,15 @@ function createProject(
   visibility: AccessGroup,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
-      const routePath = routePathForProject(config, user, workspace, project);
-      const firstSegment = routePath.split("/")[0] ?? "";
-      if (isReservedSlug(firstSegment)) {
-        return yield* Effect.fail(new SiteStoreError({
-          status: 400,
-          message: `Project URL /${routePath} would shadow the reserved /${firstSegment} route`,
-        }));
-      }
-      const result = yield* writeNewProject(storage, db, request, user, workspace, project, routePath, visibility).pipe(
-        Effect.catchTag("SiteStoreError", (error) =>
-          error.status === 409 && config.projectPath === "random"
-            ? Effect.succeed(null)
-            : Effect.fail(error),
-        ),
-      );
-      if (result != null) return result;
+    const routePath = yield* routePathForProject(config, user, workspace, project);
+    const firstSegment = routePath.split("/")[0] ?? "";
+    if (isReservedSlug(firstSegment)) {
+      return yield* Effect.fail(new SiteStoreError({
+        status: 400,
+        message: `Project URL /${routePath} would shadow the reserved /${firstSegment} route`,
+      }));
     }
-    return yield* Effect.fail(new SiteStoreError({ status: 500, message: "Could not allocate project URL" }));
+    return yield* writeNewProject(storage, db, request, user, workspace, project, routePath, visibility);
   });
 }
 
@@ -518,28 +503,63 @@ function validateVisibility(visibility: AccessGroup, config: ServerConfigShape):
 }
 
 /** Resolves the workspace for a publish that omits one, per config.defaultWorkspace:
- * null (caller must supply one), a random slug, or the user's email local part. */
-function defaultWorkspace(config: ServerConfigShape, user: AuthUser): string | null {
-  if (config.defaultWorkspace === "required") return null;
-  if (config.defaultWorkspace === "random") return randomSlug();
-  return workspaceFromEmail(user.email);
+ * a random slug or the user's email local part. */
+function defaultWorkspace(config: ServerConfigShape, user: AuthUser): string {
+  return config.defaultWorkspace === "random" ? randomSlug() : workspaceFromEmail(user.email);
 }
 
-/** Maps config.projectPath to a new project's route: a random slug, workspace/project,
- * username/project, or domain/username/project (workspace/project when the email has no domain). */
+/** Enforces config.usersCanCreateWorkspaces for new projects: an explicitly requested
+ * workspace must already exist or be the user's own username workspace. Workspaces the
+ * server assigns itself (per config.defaultWorkspace) are always allowed. */
+function requireUsableWorkspace(
+  db: PrimitiveDbShape,
+  config: ServerConfigShape,
+  user: AuthUser,
+  requestedWorkspace: string | undefined,
+  workspace: string,
+): Effect.Effect<void, SiteStoreError> {
+  return Effect.gen(function* () {
+    if (config.usersCanCreateWorkspaces) return;
+    if (requestedWorkspace == null) return;
+    if (workspace === workspaceFromEmail(user.email)) return;
+    if (yield* workspaceExists(db, workspace)) return;
+    return yield* Effect.fail(new SiteStoreError({
+      status: 403,
+      message: `Workspace does not exist and this server does not allow users to create workspaces: ${workspace}`,
+    }));
+  });
+}
+
+/** Returns true when the workspace already exists, i.e. holds at least one project. */
+function workspaceExists(db: PrimitiveDbShape, workspace: string): Effect.Effect<boolean, SiteStoreError> {
+  return db.list<JsonValue>(PROJECTS_NAMESPACE, { prefix: `${workspace}/`, limit: 1 }).pipe(
+    Effect.mapError(dbError),
+    Effect.map((page) => page.records.length > 0),
+  );
+}
+
+/** Maps config.projectRoutingMode to a new project's deterministic route path:
+ * workspace/project, or the owner's email domain in front for userDomain routing. */
 function routePathForProject(
   config: ServerConfigShape,
   user: AuthUser,
   workspace: string,
   project: string,
-): string {
-  if (config.projectPath === "random") return randomSlug();
-  if (config.projectPath === "workspace/project") return `${workspace}/${project}`;
-  const email = user.email.toLowerCase();
-  const username = workspaceFromEmail(email);
-  if (config.projectPath === "username/project") return `${username}/${project}`;
-  const domain = email.split("@")[1];
-  return domain == null ? `${workspace}/${project}` : `${domain}/${username}/${project}`;
+): Effect.Effect<string, SiteStoreError> {
+  if (config.projectRoutingMode === "workspace/project") {
+    return Effect.succeed(`${workspace}/${project}`);
+  }
+  const domain = emailDomain(user.email);
+  if (domain == null) {
+    return Effect.fail(new SiteStoreError({ status: 400, message: `Cannot derive a route domain from email: ${user.email}` }));
+  }
+  return Effect.succeed(`${domain}/${workspace}/${project}`);
+}
+
+/** Extracts the lowercased email domain when it is usable as a route segment. */
+function emailDomain(email: string): string | null {
+  const domain = email.toLowerCase().split("@")[1];
+  return domain != null && isSafeProjectIdentifier(domain) ? domain : null;
 }
 
 /** A decoded DB record plus the version/updatedAt metadata needed for conditional writes. */

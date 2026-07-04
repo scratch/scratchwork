@@ -221,8 +221,9 @@ async function writeConfig(
   copyEnv(vars, env, "SCRATCHWORK_AUTH_SESSION_SECONDS");
   copyEnv(vars, env, "SCRATCHWORK_MAX_VISIBILITY");
   copyEnv(vars, env, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_PROJECT_PATH");
+  copyEnv(vars, env, "SCRATCHWORK_PROJECT_ROUTING_MODE");
   copyEnv(vars, env, "SCRATCHWORK_DEFAULT_WORKSPACE");
+  copyEnv(vars, env, "SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES");
   copyEnv(vars, env, "SCRATCHWORK_DEFAULT_VISIBILITY");
   if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;
   if (server.contentUrl != null && server.contentUrl !== "") vars.SCRATCHWORK_CONTENT_URL = server.contentUrl;
