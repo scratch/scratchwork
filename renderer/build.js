@@ -115,39 +115,39 @@ export async function assemble() {
   This file fetches a .md/.mdx alongside it and renders it in the browser.
   It is organized into three regions, each opened by a unique marker comment.
 
-  ┌─ NOTE TO CODING AGENTS (Claude, Codex, etc.) ──────────────────────────┐
-  │ This is one big file, but the parts you'll want to edit are small and   │
-  │ near the top. The bottom region is a minified bundle that will flood    │
-  │ your context if you read it. DO NOT read the whole file, and DO NOT     │
-  │ page/scroll past the "DO NOT EDIT — BUNDLED ENGINE" marker.             │
-  │                                                                         │
-  │ Navigate by GREPPING for these stable markers (line numbers drift, so   │
-  │ never rely on them):                                                    │
-  │                                                                         │
-  │   "EDITABLE — THEME"                                                    │
-  │       Opens the <style id="scratchwork-theme"> block. Colors, fonts,        │
-  │       spacing, prose typography, code highlighting. Edit freely. To     │
-  │       edit CSS: grep for this marker to get its line N, then read from  │
-  │       N up to the "EDITABLE — PAGE SHELL & COMPONENTS" marker only.     │
-  │                                                                         │
-  │   "EDITABLE — PAGE SHELL & COMPONENTS"                                  │
-  │       Opens a <script type="module"> with the chrome wrapped around     │
-  │       your markdown, plus any components referenced as <Tag/>. Authored │
-  │       as JSX via html\`...\`. Edit freely. Read from this marker up to   │
-  │       the "DO NOT EDIT — BUNDLED ENGINE" marker only.                   │
-  │       To add a component referenced as <Tag/> from markdown, define it  │
-  │       on window.SCRATCHWORK.components here (e.g.                        │
-  │       window.SCRATCHWORK.components.Foo = (props) => html\`...\`). Prefer │
-  │       this over a ./components/Foo.js sibling file — it keeps everything │
-  │       in this one file, which is the whole point.                       │
-  │                                                                         │
-  │   "DO NOT EDIT — BUNDLED ENGINE"                                        │
-  │       Everything from this marker to end-of-file is a minified bundle   │
-  │       (React + ReactDOM + Prism + htm + the markdown parser/renderer)   │
-  │       on a few enormous single lines. DO NOT READ IT — a single line    │
-  │       can exceed your read budget. DO NOT EDIT IT by hand. To change    │
-  │       the engine, edit ../renderer/src and run \`bun run build\`.        │
-  └─────────────────────────────────────────────────────────────────────────┘
+  NOTE TO CODING AGENTS (Claude, Codex, etc.)
+
+  This is one big file, but the parts you'll want to edit are small and near
+  the top. The bottom region is a minified bundle that will flood your
+  context if you read it. DO NOT read the whole file, and DO NOT page/scroll
+  past the "DO NOT EDIT — BUNDLED ENGINE" marker.
+
+  Navigate by GREPPING for these stable markers (line numbers drift, so
+  never rely on them):
+
+    "EDITABLE — THEME"
+        Opens the <style id="scratchwork-theme"> block. Colors, fonts,
+        spacing, prose typography, code highlighting. Edit freely. To edit
+        CSS: grep for this marker to get its line N, then read from N up to
+        the "EDITABLE — PAGE SHELL & COMPONENTS" marker only.
+
+    "EDITABLE — PAGE SHELL & COMPONENTS"
+        Opens a <script type="module"> with the chrome wrapped around your
+        markdown, plus any components referenced as <Tag/>. Authored as JSX
+        via html\`...\`. Edit freely. Read from this marker up to the
+        "DO NOT EDIT — BUNDLED ENGINE" marker only.
+        To add a component referenced as <Tag/> from markdown, define it on
+        window.SCRATCHWORK.components here (e.g.
+        window.SCRATCHWORK.components.Foo = (props) => html\`...\`). Prefer
+        this over a ./components/Foo.js sibling file — it keeps everything
+        in this one file, which is the whole point.
+
+    "DO NOT EDIT — BUNDLED ENGINE"
+        Everything from this marker to end-of-file is a minified bundle
+        (React + ReactDOM + Prism + htm + the markdown parser/renderer) on a
+        few enormous single lines. DO NOT READ IT — a single line can exceed
+        your read budget. DO NOT EDIT IT by hand. To change the engine, edit
+        ../renderer/src and run \`bun run build\`.
 -->
 <html lang="en">
   <head>
