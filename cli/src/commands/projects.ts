@@ -12,8 +12,8 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { base64ToBytes } from "../../../shared/src/encoding/base64";
-import { safeProjectIdentifier } from "../../../shared/src/site/identifiers";
-import { isSafeSitePath } from "../../../shared/src/site/paths";
+import { decodePublishBundle } from "../../../shared/src/publish/bundle";
+import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
 import { isRecord } from "../../../shared/src/util/json";
 import { apiJson, projectApiUrl } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
@@ -30,16 +30,6 @@ interface ApiProject {
   readonly visibility: string;
   readonly url?: string;
   readonly updatedAt: string;
-}
-
-/** Shape of the /bundle download response. */
-interface BundleResponse {
-  readonly bundle: {
-    readonly files: ReadonlyArray<{
-      readonly path: string;
-      readonly contentBase64: string;
-    }>;
-  };
 }
 
 /** Services shared by the project management commands. */
@@ -120,13 +110,13 @@ export function runClone(
     const ref = yield* resolveProjectRef({ command: "clone", pathOrUrl: config.pathOrUrl });
     // The project name may come from the server or a local config file; refuse
     // anything that could escape the destination directory.
-    if (!safeProjectIdentifier(ref.project)) {
+    if (!isSafeProjectIdentifier(ref.project)) {
       return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork clone: unsafe project name ${ref.project}` }));
     }
     const token = yield* readAuthToken(ref.server);
     const body = yield* apiJson("scratchwork clone", projectApiUrl(ref, "/bundle"), { token });
-    const decoded = decodeBundleResponse(body);
-    if (decoded == null) {
+    const bundle = isRecord(body) ? decodePublishBundle(body.bundle) : null;
+    if (bundle == null) {
       return yield* Effect.fail(new CliError({ code: 1, message: "scratchwork clone: invalid server response" }));
     }
 
@@ -134,7 +124,7 @@ export function runClone(
     const paths = yield* Path.Path;
     const destination = paths.resolve(process.cwd(), ref.project);
     yield* fs.makeDirectory(destination, { recursive: true });
-    for (const file of decoded.bundle.files) {
+    for (const file of bundle.files) {
       const bytes = base64ToBytes(file.contentBase64);
       if (bytes == null) {
         return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork clone: invalid file content ${file.path}` }));
@@ -182,12 +172,3 @@ function shouldRepublish(paths: Path.Path, pathname: string): boolean {
   return paths.basename(pathname) !== PROJECT_CONFIG_FILE;
 }
 
-/** Validates and narrows the /bundle response, rejecting unsafe file paths. */
-function decodeBundleResponse(value: unknown): BundleResponse | null {
-  if (!isRecord(value) || !isRecord(value.bundle) || !Array.isArray(value.bundle.files)) return null;
-  for (const file of value.bundle.files) {
-    if (!isRecord(file) || typeof file.path !== "string" || typeof file.contentBase64 !== "string") return null;
-    if (!isSafeSitePath(file.path)) return null;
-  }
-  return value as unknown as BundleResponse;
-}

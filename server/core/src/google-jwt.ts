@@ -12,7 +12,8 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { base64UrlToBytes } from "../../../shared/src/encoding/base64";
 import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
-import { errorMessage, isRecord, parseJson } from "../../../shared/src/util/json";
+import { errorMessage } from "../../../shared/src/util/errors";
+import { isRecord, parseJson } from "../../../shared/src/util/json";
 
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const CLOCK_SKEW_SECONDS = 300;

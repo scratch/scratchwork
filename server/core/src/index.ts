@@ -30,7 +30,7 @@ export {
   accessGroupMatches,
   accessGroupUsesOnlyDomains,
   normalizeAccessGroup,
-  safeProjectIdentifier,
+  isSafeProjectIdentifier,
   workspaceFromEmail,
   type AccessGroup,
   type AccessPrincipal,

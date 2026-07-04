@@ -2,11 +2,11 @@
  * Pure route-path matching for published sites: splitting request paths into a
  * project route prefix plus a site-file remainder. No storage or service dependencies.
  */
-import { safeProjectIdentifier } from "./access";
+import { isSafeProjectIdentifier } from "./access";
 
 /** Returns true for a route path of 1+ safe identifier segments, at most 512 chars. */
 export function safeRoutePath(routePath: string): boolean {
-  return routePath.length > 0 && routePath.length <= 512 && routePath.split("/").every(safeProjectIdentifier);
+  return routePath.length > 0 && routePath.length <= 512 && routePath.split("/").every(isSafeProjectIdentifier);
 }
 
 /** Splits a content path into the longest route prefix and remaining site path. Each decoded
@@ -17,7 +17,7 @@ export function candidateRoutePaths(pathname: string): ReadonlyArray<string> {
   const candidates: Array<string> = [];
   for (let length = segments.length; length >= 1; length -= 1) {
     const decoded = segments.slice(0, length).map(decodePathSegment);
-    if (!decoded.every(safeProjectIdentifier)) continue;
+    if (!decoded.every(isSafeProjectIdentifier)) continue;
     const candidate = decoded.join("/");
     if (safeRoutePath(candidate)) candidates.push(candidate);
   }

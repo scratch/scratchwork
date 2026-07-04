@@ -10,6 +10,8 @@ import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import { homedir } from "node:os";
+import { nonEmpty } from "../../shared/src/util/strings";
+import { isLoopbackHost } from "../../shared/src/util/url";
 import { isRecord, parseJson } from "../../shared/src/util/json";
 import { CliError, errorMessage } from "./errors";
 
@@ -96,11 +98,6 @@ export function normalizeServerUrl(value: string): string {
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/+$/, "");
-}
-
-/** Collapses empty strings to undefined so config values can use `??` chains. */
-export function nonEmpty(value: string | undefined): string | undefined {
-  return value == null || value === "" ? undefined : value;
 }
 
 /**
@@ -214,8 +211,7 @@ function hasScheme(value: string): boolean {
 
 /** Picks http for local development hosts and https for everything else. */
 function defaultScheme(value: string): "http" | "https" {
-  const host = hostFromServer(value).toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host.endsWith(".localhost") ? "http" : "https";
+  return isLoopbackHost(hostFromServer(value)) ? "http" : "https";
 }
 
 /** Matches bare two-label public hosts that should gain the app subdomain. */

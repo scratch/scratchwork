@@ -12,8 +12,9 @@ import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import { isRecord, parseJson } from "../../shared/src/util/json";
+import { nonEmpty } from "../../shared/src/util/strings";
 import { resolveProjectByPath, type ResolvedProjectRef } from "./api";
-import { nonEmpty, normalizeServerUrl } from "./auth";
+import { normalizeServerUrl } from "./auth";
 import { CliError } from "./errors";
 
 export const PROJECT_CONFIG_FILE = ".scratchwork.json";

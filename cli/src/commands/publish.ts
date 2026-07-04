@@ -10,12 +10,14 @@ import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import { bytesToBase64, PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
-import { safeProjectIdentifier, slugifyIdentifier } from "../../../shared/src/site/identifiers";
+import { bytesToBase64, decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
+import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
+import { isSafeProjectIdentifier, slugifyIdentifier } from "../../../shared/src/site/identifiers";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
 import { isRecord } from "../../../shared/src/util/json";
+import { nonEmpty } from "../../../shared/src/util/strings";
 import { apiErrorText, apiRequest } from "../api";
-import { nonEmpty, readAuthToken, serverApiUrl } from "../auth";
+import { readAuthToken, serverApiUrl } from "../auth";
 import { openBrowser } from "../browser";
 import { resolveDevTarget } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
@@ -243,7 +245,7 @@ function printResult(
   bundle: PublishBundle,
   saved: boolean,
 ): Effect.Effect<void> {
-  const bytes = bundle.files.reduce((sum, file) => sum + Math.floor((file.contentBase64.length * 3) / 4), 0);
+  const bytes = bundle.files.reduce((sum, file) => sum + (decodedBase64ByteLength(file.contentBase64) ?? 0), 0);
   return Console.log(
     [
       "\n  scratchwork publish",
@@ -298,7 +300,7 @@ function resolveProjectName(
   return Effect.gen(function* () {
     const explicit = nonEmpty(config.project) ?? nonEmpty(projectConfig?.project);
     if (explicit != null) {
-      if (!safeProjectIdentifier(explicit)) {
+      if (!isSafeProjectIdentifier(explicit)) {
         return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork publish: invalid project ${explicit}` }));
       }
       return explicit;

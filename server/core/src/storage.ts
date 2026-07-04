@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
 import { bytesToHex } from "../../../shared/src/encoding/hex";
+import { isWithinRoot } from "../../../shared/src/util/fs";
 
 /** Raised when a storage backend cannot complete a read or write. */
 export class StorageError extends Data.TaggedError("StorageError")<{
@@ -77,7 +78,7 @@ export function LocalObjectStorageLive(
         Effect.gen(function* () {
           yield* requireSafeObjectKey(key);
           const absolute = paths.resolve(root, key);
-          if (absolute !== root && !absolute.startsWith(root + paths.sep)) {
+          if (!isWithinRoot(absolute, root, paths.sep)) {
             return yield* Effect.fail(
               new StorageError({ message: `Object key escapes storage root: ${key}` }),
             );

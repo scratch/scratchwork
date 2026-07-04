@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { bytesToBase64 } from "../../../shared/src/publish/bundle";
+import { bytesToBase64 } from "../../../shared/src/encoding/base64";
 import { decodePublishRequest, MAX_PUBLISH_FILE_BYTES, MAX_PUBLISH_FILES, MAX_PUBLISH_TOTAL_BYTES } from "../src/publish-request";
 import { bundle } from "./helpers";
 

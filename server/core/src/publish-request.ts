@@ -7,7 +7,7 @@ import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
 import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath } from "../../../shared/src/site/paths";
 import { parseJson } from "../../../shared/src/util/json";
-import { normalizeAccessGroup, safeProjectIdentifier, type AccessGroup } from "./access";
+import { normalizeAccessGroup, isSafeProjectIdentifier, type AccessGroup } from "./access";
 import { HttpError } from "./http";
 
 /** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
@@ -47,8 +47,8 @@ const PublishBundleSchema = Schema.Struct({
 const RawPublishRequestSchema = Schema.Struct({
   bundle: PublishBundleSchema,
   openPath: Schema.optional(Schema.String),
-  workspace: Schema.optional(Schema.String.pipe(Schema.filter((workspace) => safeProjectIdentifier(workspace) || "Invalid workspace"))),
-  project: Schema.optional(Schema.String.pipe(Schema.filter((project) => safeProjectIdentifier(project) || "Invalid project"))),
+  workspace: Schema.optional(Schema.String.pipe(Schema.filter((workspace) => isSafeProjectIdentifier(workspace) || "Invalid workspace"))),
+  project: Schema.optional(Schema.String.pipe(Schema.filter((project) => isSafeProjectIdentifier(project) || "Invalid project"))),
   visibility: Schema.optional(Schema.String),
 });
 

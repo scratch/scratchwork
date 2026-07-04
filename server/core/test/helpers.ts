@@ -2,7 +2,7 @@ import * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { bytesToBase64 } from "../../../shared/src/publish/bundle";
+import { bytesToBase64 } from "../../../shared/src/encoding/base64";
 import { bytesToHex } from "../../../shared/src/encoding/hex";
 import { app } from "../src/app";
 import { Auth, AuthError, AuthLive, type AuthShape, type AuthUser } from "../src/auth";

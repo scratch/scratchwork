@@ -9,7 +9,7 @@
 import * as Schema from "effect/Schema";
 import { isHex } from "../../../shared/src/encoding/hex";
 import { isSafeSitePath } from "../../../shared/src/site/paths";
-import { safeProjectIdentifier } from "./access";
+import { isSafeProjectIdentifier } from "./access";
 import { safeRoutePath } from "./routes";
 
 /** DB namespace of mutable project pointers, keyed `workspace/project`. */
@@ -37,8 +37,8 @@ const SiteFileObjectSchema = Schema.Struct({
 /** Validates a stored project pointer. */
 const SiteRecordSchema = Schema.Struct({
   version: Schema.Literal(3),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
+  workspace: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid workspace")),
+  project: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid project")),
   routePath: Schema.String.pipe(Schema.filter((value) => safeRoutePath(value) || "Invalid route path")),
   visibility: Schema.String,
   owner: SiteOwnerSchema,
@@ -54,22 +54,22 @@ const SiteRecordSchema = Schema.Struct({
 const RouteRecordSchema = Schema.Struct({
   version: Schema.Literal(1),
   routePath: Schema.String.pipe(Schema.filter((value) => safeRoutePath(value) || "Invalid route path")),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
+  workspace: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid workspace")),
+  project: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid project")),
 });
 
 /** Validates a stored owner-index entry. */
 const OwnerProjectRecordSchema = Schema.Struct({
   version: Schema.Literal(1),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
+  workspace: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid workspace")),
+  project: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid project")),
 });
 
 /** Validates a stored immutable revision document. */
 const SiteRevisionRecordSchema = Schema.Struct({
   version: Schema.Literal(2),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
+  workspace: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid workspace")),
+  project: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid project")),
   revisionId: Schema.String,
   createdAt: Schema.String,
   openPath: Schema.String,

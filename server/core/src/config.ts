@@ -2,6 +2,8 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { nonEmpty } from "../../../shared/src/util/strings";
+import { isLoopbackHost } from "../../../shared/src/util/url";
 import { normalizeAccessGroup, type AccessGroup } from "./access";
 
 /** An environment-variable map from any platform (process.env, Worker vars, Lambda env). */
@@ -106,10 +108,9 @@ function readPublicUrl(value: string | undefined, name: string): Effect.Effect<s
     if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
       return Effect.fail(new ServerConfigError({ message: `${name} must be an origin, such as https://example.com` }));
     }
-    // *.localhost is loopback per RFC 6761 and resolves locally on modern systems,
-    // giving local runs real hostname-per-role URLs (e.g. http://pages.localhost:43118).
-    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname.endsWith(".localhost");
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    // Loopback (including *.localhost, which resolves locally on modern systems)
+    // may use http so local runs get real hostname-per-role URLs.
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
       return Effect.fail(new ServerConfigError({ message: `${name} must use https, except loopback http for local development` }));
     }
     return Effect.succeed(url.origin);
@@ -196,11 +197,6 @@ function readDefaultWorkspace(value: string | undefined): Effect.Effect<DefaultW
   return Effect.fail(
     new ServerConfigError({ message: "SCRATCHWORK_DEFAULT_WORKSPACE must be personal, random, or required" }),
   );
-}
-
-/** Normalizes empty env values to undefined so fallback chains skip them. */
-function nonEmpty(value: string | undefined): string | undefined {
-  return value == null || value === "" ? undefined : value;
 }
 
 /** Expands a bare domain env value into an https origin. */

@@ -1,3 +1,10 @@
+/*
+ * Dependency-free base64 codecs (standard padded and unpadded URL-safe).
+ * Hand-rolled so the same code runs in Bun, Lambda, and Cloudflare Workers
+ * without Buffer or other platform APIs. Decoders return null on invalid
+ * input rather than throwing.
+ */
+
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const BASE64_URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 

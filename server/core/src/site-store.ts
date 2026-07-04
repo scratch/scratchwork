@@ -17,7 +17,7 @@ import {
   accessGroupMatches,
   accessGroupUsesOnlyDomains,
   isReservedSlug,
-  safeProjectIdentifier,
+  isSafeProjectIdentifier,
   workspaceFromEmail,
   type AccessGroup,
 } from "./access";
@@ -651,7 +651,7 @@ function loadRevisionRecord(
 
 /** Fails with 400 when a workspace or project name is not a safe identifier. */
 function requireProjectIdentifier(label: string, value: string): Effect.Effect<void, SiteStoreError> {
-  return safeProjectIdentifier(value)
+  return isSafeProjectIdentifier(value)
     ? Effect.void
     : Effect.fail(new SiteStoreError({ status: 400, message: `Invalid ${label}: ${value}` }));
 }

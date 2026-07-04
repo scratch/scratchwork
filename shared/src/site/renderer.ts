@@ -1,8 +1,14 @@
+/*
+ * Resolution of the renderer shell for a Markdown page: the nearest marked
+ * index.html up the directory tree wins, otherwise the consumer-provided
+ * fallback shell (the one embedded in the CLI/server) is used.
+ */
 import * as Effect from "effect/Effect";
 import { SiteFileError, SiteFiles } from "./files";
 import { isMarkedMarkdownRenderer } from "./marker";
 import { dirnameSitePath, joinSitePath, type SitePath } from "./paths";
 
+/** The renderer shell to serve for a Markdown route, and where it came from. */
 export type MarkdownRenderer =
   | {
       readonly _tag: "Project";
@@ -14,6 +20,11 @@ export type MarkdownRenderer =
       readonly html: string;
     };
 
+/**
+ * Finds the renderer shell for a Markdown file: walks from startDir to the
+ * site root looking for a marked index.html, then falls back to the provided
+ * shell. Returns null when neither exists.
+ */
 export function resolveMarkdownRenderer<E, R>(
   startDir: SitePath,
   fallback: Effect.Effect<string | null, E, R>,

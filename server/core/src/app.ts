@@ -11,6 +11,7 @@ import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
 import { SiteFiles } from "../../../shared/src/site/files";
 import { servePath } from "../../../shared/src/site/serve";
+import { isLoopbackHost } from "../../../shared/src/util/url";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
 import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth";
@@ -444,7 +445,7 @@ function serveProjectContent(
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError, ServerConfig> {
   const rest = routeRest(url.pathname, site.record.routePath);
   if (rest == null) {
-    return Effect.succeed(HttpServerResponse.redirect(`/${site.record.routePath}/`, { status: 308 }));
+    return Effect.succeed(HttpServerResponse.redirect(`/${site.record.routePath}/${url.search}`, { status: 308 }));
   }
   return serveSiteFiles(site, rest, url.search, `/${site.record.routePath}`, isPublic);
 }
@@ -625,8 +626,7 @@ function requestBaseUrl(
  * loopback hosts get http, everything else https. */
 function defaultProtoForHost(requestUrl: URL, host: string): "http" | "https" {
   if (requestUrl.hostname !== "scratchwork.local") return requestUrl.protocol === "http:" ? "http" : "https";
-  const hostname = host.replace(/:\d+$/, "").toLowerCase();
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "[::1]" || hostname.endsWith(".localhost") ? "http" : "https";
+  return isLoopbackHost(host.replace(/:\d+$/, "")) ? "http" : "https";
 }
 
 /** Returns true when two URL strings share an origin; false for unparsable input. */

@@ -27,6 +27,8 @@ export async function loadComponent(name, base) {
 // Blank out `inline code` spans so the component scan below never matches
 // tags shown as code examples. A span closes only on a backtick run of
 // exactly the opening length (the CommonMark rule, matching splitTableRow).
+// Keep in sync with shared/src/site/components.ts, which the CLI dev
+// diagnostics use to predict what this loader will do.
 function stripInlineCodeSpans(line) {
   let out = "";
   let i = 0;

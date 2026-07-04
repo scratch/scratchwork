@@ -44,7 +44,7 @@ export function accessGroupIsSubset(candidate: AccessGroup, ceiling: AccessGroup
   return candidateTerms.every((term) => termIsSubset(term, ceilingTerms));
 }
 
-export { safeProjectIdentifier, workspaceFromEmail } from "../../../shared/src/site/identifiers";
+export { isSafeProjectIdentifier, workspaceFromEmail } from "../../../shared/src/site/identifiers";
 
 /** Slugs that collide with server-owned routes and cannot start a project URL. */
 const RESERVED_ROUTE_SLUGS: ReadonlySet<string> = new Set(["api", "auth", "health", "favicon.ico", "favicon.svg"]);

@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
 import type { SitePath } from "../../../shared/src/site/paths";
+import { isWithinRoot } from "../../../shared/src/util/fs";
 
 /** Builds a SiteFiles service that reads from the given site root directory. */
 export function layer(
@@ -47,10 +48,7 @@ export function layer(
           }
 
           const absolutePath = paths.resolve(resolvedRoot, sitePath);
-          if (
-            absolutePath !== resolvedRoot &&
-            !absolutePath.startsWith(resolvedRoot + paths.sep)
-          ) {
+          if (!isWithinRoot(absolutePath, resolvedRoot, paths.sep)) {
             return yield* Effect.fail(
               new SiteFileError({
                 path: sitePath,

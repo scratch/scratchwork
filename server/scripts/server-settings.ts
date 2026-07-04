@@ -3,6 +3,7 @@
  * project declares, its resolution to app/content URLs, and its mapping onto the
  * SCRATCHWORK_* environment variables the server core reads at runtime.
  */
+import { nonEmpty } from "../../shared/src/util/strings";
 import type { DeployEnv } from "./env";
 
 /** The `server` section of a deploy project's config, mapped onto SCRATCHWORK_* env vars. */
