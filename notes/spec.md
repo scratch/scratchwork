@@ -20,6 +20,8 @@ A **group** is the access expression used everywhere access is configured:
 
 A project has a **visibility** group. This controls who can read the published project.
 
+A server may designate one project as its **homepage** — the project served on the server's home domains, typically the naked domain and `www`. The homepage is an ordinary project: it is published, updated, and access-controlled exactly like any other project. Only the way requests reach it differs. See "Server homepage" below.
+
 ## Project Config
 
 Projects are configured via, in precedence order:
@@ -64,6 +66,14 @@ export const server = {
   // These do not assign provider infrastructure to the hostnames.
   appDomain: "app.example.com",
   contentDomain: "pages.example.com",
+
+  // Optional server homepage: hostnames served from the homepage project, and
+  // the workspace/project name of that project. Set both or neither. The first
+  // home domain is canonical; the others 308-redirect to it. Home domains must
+  // be distinct from appDomain and contentDomain, and like those hostnames they
+  // do not create DNS records or provider routing. See "Server homepage" below.
+  homeDomains: ["example.com", "www.example.com"],
+  homeProject: "infra/home",
 
   // Authentication method. "oauth" is the only supported option; auth cannot be disabled.
   // Every server requires OAuth credentials, and every project has an owner.
@@ -209,6 +219,54 @@ The project owner can always access and update their project. Other users can vi
 `allowedUsers` gates app/API login. `maxVisibility` caps project visibility, so a project cannot be more public than the server allows. For example, if `maxVisibility` is `"@example.com"`, a project cannot be published as `public`.
 
 Write/admin access is owner-only in this model. A user who can log into the server can create and publish their own projects; they do not get write/admin rights on other users' projects through `visibility`.
+
+## Server homepage
+
+A server can serve a homepage project on its home domains — typically the naked domain and `www` — so a deployed server presents instructions, documentation, or a landing page at `https://example.com/`. The homepage is not a special kind of content: it is a normal project, published through the normal publish flow, stored and served through the same records, blobs, and rendering pipeline as every other project. The server config only designates which project it is and which hostnames serve it.
+
+### Configuration
+
+Two server config fields, set together (setting one without the other is a config error):
+
+- `homeDomains` — the hostnames served from the homepage project. The first entry is the canonical home origin; requests to the other entries receive a 308 redirect to it. Home domains must be distinct from `appDomain` and `contentDomain`.
+- `homeProject` — the `workspace/project` name of the homepage project.
+
+As with `appDomain` and `contentDomain`, these are canonical names consumed by the running server; they do not create DNS records or attach provider infrastructure. The provider deploy config must bind the home hostnames to the server — for Cloudflare, route patterns such as `example.com/*` and `www.example.com/*`; for AWS, external CloudFront/DNS configuration, the same as the other hostnames.
+
+### Serving
+
+The hostname determines which routing model applies:
+
+- On the app domain, the server exposes auth and the API.
+- On the content domain, paths resolve to projects via `projectRoutingMode`: every route has a fixed segment depth, and a site's files are served under `/<routePath>/`.
+- On a home domain, path-based project routing is disabled and the entire path space belongs to the homepage project: the full request path resolves as a file path inside `homeProject`, through the same serve pipeline (markdown rendering, extensionless HTML, index handling, default favicon).
+
+This keeps routing deterministic — on any given host, a request path still resolves to at most one route. The reserved path prefixes keep their server-level behavior on every host, including home domains: `/auth/*` redirects to the app origin, and `/api/*` and `/health` are never served from project files. Homepage files under those prefixes are unreachable; everything else, including `/favicon.ico`, resolves within the project.
+
+The homepage project also remains addressable at its normal content route (`pages.example.com/<routePath>/`). When the published project is the configured `homeProject`, the publish response and the saved project config report the canonical home origin as the project `url`.
+
+Access control is unchanged: the homepage project has an owner and a `visibility` group, checked on every request under the server's `maxVisibility` ceiling. A non-public homepage runs the standard project-access handoff, with the access cookie scoped to `/` on the home origin. Because the home origin is separate from the content origin, homepage JavaScript does not share an origin with projects on the content domain, so the same-origin exposures described under Security do not extend across the two hosts. Most servers will want the homepage published as `public`.
+
+### Publishing the homepage
+
+There is no deploy-time publishing step. Deploys provision infrastructure only; the homepage arrives afterward through the ordinary publish flow, authenticated as a real user who then owns the project:
+
+```sh
+cd homepage/
+scratchwork publish --server https://app.example.com \
+  --workspace infra --project home --visibility public
+```
+
+Two affordances make this easy to get right:
+
+- When `homeProject` is configured, the deploy output prints the exact publish command above, derived from the server config.
+- Until the homepage project exists, requests to a home domain return a plain setup page carrying the same instructions, instead of the generic server banner. A freshly deployed server tells its own deployer how to finish setting it up.
+
+Updating the homepage is a re-publish (or `scratchwork stream` while iterating); it never requires a redeploy. Changing which project is the homepage, or which hostnames serve it, is a config change and a redeploy, like any other server setting.
+
+### Claiming the homepage name
+
+The server does not reserve the `homeProject` name. On a server with open `allowedUsers` and `usersCanCreateWorkspaces: true`, the first user to publish a `workspace/project` name owns it — including the configured homepage name. Deployers of open servers should publish the homepage promptly after the first deploy, or point `homeProject` at a workspace they already own. If a stronger guarantee is needed later, a config-level owner restriction on the home project is a natural extension.
 
 ## Scratchwork CLI interface
 
