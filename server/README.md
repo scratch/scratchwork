@@ -63,6 +63,15 @@ SCRATCHWORK_AUTH_ALLOWED_DOMAINS=example.com,yc.com
 SCRATCHWORK_AUTH_SESSION_SECONDS=2592000
 ```
 
+Project naming:
+
+```sh
+# true (default): publishers choose globally-unique project names (first-writer-wins).
+# false: the server assigns a random slug on first publish; the CLI saves the returned
+# name in .scratchwork.json and uses it for updates.
+SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES=true
+```
+
 CLI users authenticate once per server:
 
 ```sh

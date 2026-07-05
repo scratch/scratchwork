@@ -23,7 +23,7 @@ Useful environment variables:
 ```sh
 PORT=43118
 SCRATCHWORK_STORAGE_DIR=/tmp/scratchwork-local-storage
-SCRATCHWORK_PROJECT_ROUTING_MODE=workspace/project
+SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES=true  # false: server assigns random names
 SCRATCHWORK_DEFAULT_VISIBILITY=public
 SCRATCHWORK_APP_URL=http://localhost:43118
 SCRATCHWORK_CONTENT_URL=http://localhost:43118
