@@ -260,7 +260,7 @@ function cacheControlFor<E, R>(
   return config.cacheControl ? config.cacheControl(path) : defaultCacheControl(path);
 }
 
-/** Prepends the configured path prefix (e.g. "/w/name/project") to a redirect target. */
+/** Prepends the configured path prefix (e.g. "/myproject") to a redirect target. */
 function prefixedLocation(location: string, pathPrefix: string | undefined): string {
   if (pathPrefix == null || pathPrefix === "" || pathPrefix === "/") return location;
   const prefix = `/${pathPrefix.replace(/^\/+|\/+$/g, "")}`;

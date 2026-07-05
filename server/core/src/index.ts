@@ -14,9 +14,7 @@ export {
   ServerConfig,
   ServerConfigError,
   type AuthConfig,
-  type DefaultWorkspaceMode,
   type EnvVars,
-  type ProjectRoutingMode,
   type ServerConfigShape,
 } from "./config";
 
@@ -31,7 +29,6 @@ export {
   accessGroupUsesOnlyDomains,
   normalizeAccessGroup,
   isSafeProjectIdentifier,
-  workspaceFromEmail,
   type AccessGroup,
   type AccessPrincipal,
 } from "./access";
@@ -72,6 +69,6 @@ export {
   type SiteStoreShape,
 } from "./site-store";
 
-// Persisted record shapes and route-path matching for published sites.
-export { projectKey, type RouteRecord, type SiteFileObject, type SiteRecord, type SiteRevisionRecord } from "./site-records";
-export { routeDepth, routePathForRequest, routeRest } from "./routes";
+// Persisted record shapes and route matching for published sites.
+export { type SiteFileObject, type SiteRecord, type SiteRevisionRecord } from "./site-records";
+export { projectForRequest, routeRest } from "./routes";

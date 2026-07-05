@@ -29,8 +29,12 @@ import { timingSafeEqual } from "./tokens";
 
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-/** Bumping this invalidates every outstanding session, state, and project-access token. */
+/** Bumping this invalidates every outstanding session and state token. */
 const SESSION_VERSION = 1;
+/** Versioned separately from sessions: bumping this deliberately invalidates every
+ * outstanding project-access token (handoff and cookie) without logging anyone out or
+ * breaking CLI bearer tokens. */
+const PROJECT_ACCESS_VERSION = 1;
 /** Handoff tokens ride redirect query strings (which land in proxy logs), so they live seconds. */
 const HANDOFF_TTL_SECONDS = 60;
 const REDIRECT_MAX_LENGTH = 2048;
@@ -78,13 +82,15 @@ type OAuthState = typeof OAuthStateSchema.Type;
  */
 export type ProjectAccessUse = "handoff" | "cookie";
 
-/** Payload of a project-access token, bound to one project and route path. */
+/** Payload of a project-access token. `project` is the identity; `scope` is the URL path
+ * the redeemed cookie is scoped to, kept as a separate claim (today always `/<project>`)
+ * so a future homepage alias can scope a token to `/` without a format change. */
 const ProjectAccessPayloadSchema = Schema.Struct({
-  version: Schema.Literal(SESSION_VERSION),
+  version: Schema.Literal(PROJECT_ACCESS_VERSION),
   kind: Schema.Literal("project-access"),
   use: Schema.Literal("handoff", "cookie"),
-  projectKey: Schema.String,
-  routePath: Schema.String,
+  project: Schema.String,
+  scope: Schema.String,
   email: Schema.String,
   expiresAt: Schema.Number,
 });
@@ -128,18 +134,16 @@ export interface AuthShape {
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError>;
   /** Clears the session cookie and redirects home. */
   readonly logout: (baseUrl: string) => HttpServerResponse.HttpServerResponse;
-  /** Signs a token granting one user read access to one project route. */
+  /** Signs a token granting one user read access to one project. */
   readonly issueProjectAccessToken: (
-    projectKey: string,
-    routePath: string,
+    project: string,
     user: AuthUser,
     use: ProjectAccessUse,
   ) => Effect.Effect<string, AuthError>;
-  /** Verifies a project-access token against the expected project, route, and use. */
+  /** Verifies a project-access token against the expected project and use. */
   readonly verifyProjectAccessToken: (
     token: string,
-    projectKey: string,
-    routePath: string,
+    project: string,
     use: ProjectAccessUse,
   ) => Effect.Effect<AuthUser | null, AuthError>;
 }
@@ -255,28 +259,28 @@ export function makeAuth(config: AuthConfig): AuthShape {
         },
       }),
 
-    issueProjectAccessToken: (projectKey, routePath, user, use) =>
+    issueProjectAccessToken: (project, user, use) =>
       signValue(
         {
-          version: SESSION_VERSION,
+          version: PROJECT_ACCESS_VERSION,
           kind: "project-access",
           use,
-          projectKey,
-          routePath,
+          project,
+          scope: `/${project}`,
           email: user.email,
           expiresAt: epochSeconds() + (use === "handoff" ? HANDOFF_TTL_SECONDS : config.sessionTtlSeconds),
         } satisfies ProjectAccessPayload,
         config.sessionSecret,
       ),
 
-    verifyProjectAccessToken: (token, projectKey, routePath, use) =>
+    verifyProjectAccessToken: (token, project, use) =>
       Effect.gen(function* () {
         const payload = yield* verifySignedValue(token, config.sessionSecret, ProjectAccessPayloadSchema);
         if (
           payload.use !== use ||
           payload.expiresAt < epochSeconds() ||
-          payload.projectKey !== projectKey ||
-          payload.routePath !== routePath
+          payload.project !== project ||
+          payload.scope !== `/${project}`
         ) {
           return null;
         }

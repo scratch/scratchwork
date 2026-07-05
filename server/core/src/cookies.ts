@@ -62,11 +62,11 @@ export function clearSessionCookie(baseUrl: string): string {
 
 /** Builds the Set-Cookie header for a redeemed project-access token, scoped to the project
  * path on the content host. */
-export function projectAccessCookie(token: string, routePath: string, baseUrl: string, ttlSeconds: number): string {
+export function projectAccessCookie(token: string, project: string, baseUrl: string, ttlSeconds: number): string {
   const secure = baseUrl.startsWith("https://");
   return [
-    `${projectAccessCookieName(routePath, secure)}=${encodeURIComponent(token)}`,
-    `Path=/${routePath}`,
+    `${projectAccessCookieName(project, secure)}=${encodeURIComponent(token)}`,
+    `Path=/${project}`,
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${ttlSeconds}`,
@@ -74,18 +74,17 @@ export function projectAccessCookie(token: string, routePath: string, baseUrl: s
   ].filter(Boolean).join("; ");
 }
 
-/** Reads every candidate project-access cookie value for a route path. */
-export function projectAccessCookieValues(request: HttpServerRequest.HttpServerRequest, routePath: string): ReadonlyArray<string> {
-  return cookieValues(request, [projectAccessCookieName(routePath, true), projectAccessCookieName(routePath, false)]);
+/** Reads every candidate project-access cookie value for a project. */
+export function projectAccessCookieValues(request: HttpServerRequest.HttpServerRequest, project: string): ReadonlyArray<string> {
+  return cookieValues(request, [projectAccessCookieName(project, true), projectAccessCookieName(project, false)]);
 }
 
-/** Names the per-project content-access cookie. Route paths are `[A-Za-z0-9._-]` segments,
- * so flattening `/` to `_` yields a valid cookie name; the flattened form can collide across
- * projects (`a/b` vs `a_b`), but their `Path` attributes differ and the signed value is bound
- * to the exact route path, so a colliding cookie merely fails verification. */
-function projectAccessCookieName(routePath: string, secure: boolean): string {
+/** Names the per-project content-access cookie. Project names are lowercase
+ * `[a-z0-9._-]` identifiers — entirely cookie-name-token legal — and globally unique,
+ * so appending the name verbatim is collision-free by construction. */
+function projectAccessCookieName(project: string, secure: boolean): string {
   const prefix = secure ? SECURE_PROJECT_ACCESS_COOKIE_PREFIX : PROJECT_ACCESS_COOKIE_PREFIX;
-  return `${prefix}${routePath.replace(/\//g, "_")}`;
+  return `${prefix}${project}`;
 }
 
 /** Finds and decodes the first matching cookie value from the request. */

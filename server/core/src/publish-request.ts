@@ -19,11 +19,12 @@ export const MAX_PUBLISH_FILE_BYTES = 10 * 1024 * 1024;
 /** Maximum decoded size of the whole bundle. */
 export const MAX_PUBLISH_TOTAL_BYTES = 25 * 1024 * 1024;
 
-/** A validated publish request: the bundle plus normalized publish options. */
+/** A validated publish request: the bundle plus normalized publish options. `project`
+ * stays optional at the protocol level — the server mints a name when the naming mode is
+ * random, and requires one in the store when publishers choose names. */
 export interface PublishRequest {
   readonly bundle: PublishBundle;
   readonly openPath: string;
-  readonly workspace?: string;
   readonly project?: string;
   readonly visibility?: AccessGroup;
   readonly totalBytes: number;
@@ -47,7 +48,6 @@ const PublishBundleSchema = Schema.Struct({
 const RawPublishRequestSchema = Schema.Struct({
   bundle: PublishBundleSchema,
   openPath: Schema.optional(Schema.String),
-  workspace: Schema.optional(Schema.String.pipe(Schema.filter((workspace) => isSafeProjectIdentifier(workspace) || "Invalid workspace"))),
   project: Schema.optional(Schema.String.pipe(Schema.filter((project) => isSafeProjectIdentifier(project) || "Invalid project"))),
   visibility: Schema.optional(Schema.String),
 });
@@ -134,7 +134,6 @@ function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishR
     return {
       bundle: raw.bundle,
       openPath,
-      workspace: raw.workspace,
       project: raw.project,
       visibility,
       totalBytes,

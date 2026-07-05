@@ -5,7 +5,7 @@ const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 const SLUG_LENGTH = 10;
 const REVISION_BYTES = 16;
 
-/** Generates a human-safe random publish slug. */
+/** Generates a random project name for servers that assign names on first publish. */
 export function randomSlug(): string {
   return randomAlphabetString(SLUG_LENGTH, SLUG_ALPHABET);
 }

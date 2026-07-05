@@ -14,13 +14,14 @@ import { servePath } from "../../../shared/src/site/serve";
 import { isLoopbackHost } from "../../../shared/src/util/url";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
+import { isSafeProjectIdentifier } from "./access";
 import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth";
 import { ServerConfig, type ServerConfigShape } from "./config";
 import { projectAccessCookie, projectAccessCookieValues } from "./cookies";
 import { errorJson, HttpError, jsonResponse, securityHeaders } from "./http";
 import { readPublishRequest } from "./publish-request";
-import { routePathForRequest, routeRest } from "./routes";
-import { projectKey, type SiteRecord } from "./site-records";
+import { projectForRequest, routeRest } from "./routes";
+import { type SiteRecord } from "./site-records";
 import { canReadProject, SiteStore, SiteStoreError, type LoadedSite } from "./site-store";
 import { StorageError } from "./storage";
 
@@ -111,10 +112,10 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
 
     const projectApi = projectApiPath(url.pathname);
     if (projectApi != null) {
-      if (request.method === "GET" && projectApi.action == null) return yield* projectInfo(request, projectApi.workspace, projectApi.project);
-      if (request.method === "GET" && projectApi.action === "bundle") return yield* projectBundle(request, projectApi.workspace, projectApi.project);
-      if (request.method === "POST" && projectApi.action === "unpublish") return yield* unpublishProject(request, projectApi.workspace, projectApi.project);
-      if (request.method === "DELETE" && projectApi.action == null) return yield* deleteProject(request, projectApi.workspace, projectApi.project);
+      if (request.method === "GET" && projectApi.action == null) return yield* projectInfo(request, projectApi.project);
+      if (request.method === "GET" && projectApi.action === "bundle") return yield* projectBundle(request, projectApi.project);
+      if (request.method === "POST" && projectApi.action === "unpublish") return yield* unpublishProject(request, projectApi.project);
+      if (request.method === "DELETE" && projectApi.action == null) return yield* deleteProject(request, projectApi.project);
       return yield* Effect.fail(new HttpError({ status: 405, message: "Method not allowed" }));
     }
 
@@ -130,18 +131,18 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
   });
 }
 
-/** Parses /api/projects/:workspace/:project(/:action) paths; null when it is not one. */
-function projectApiPath(pathname: string): { readonly workspace: string; readonly project: string; readonly action?: "unpublish" | "bundle" } | null {
-  const match = /^\/api\/projects\/([^/]+)\/([^/]+)(?:\/([^/]+))?$/.exec(pathname);
+/** Parses /api/projects/:project(/:action) paths; null when it is not one. The decoded
+ * project segment is validated here so malformed names become a 404 instead of reaching
+ * the store as backend keys. */
+function projectApiPath(pathname: string): { readonly project: string; readonly action?: "unpublish" | "bundle" } | null {
+  const match = /^\/api\/projects\/([^/]+)(?:\/([^/]+))?$/.exec(pathname);
   if (match == null) return null;
-  const action = match[3];
+  const action = match[2];
   if (action != null && action !== "unpublish" && action !== "bundle") return null;
   try {
-    return {
-      workspace: decodeURIComponent(match[1]),
-      project: decodeURIComponent(match[2]),
-      action: action as "unpublish" | "bundle" | undefined,
-    };
+    const project = decodeURIComponent(match[1]);
+    if (!isSafeProjectIdentifier(project)) return null;
+    return { project, action: action as "unpublish" | "bundle" | undefined };
   } catch {
     return null;
   }
@@ -161,7 +162,7 @@ function publish(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const publishRequest = yield* readPublishRequest(request);
     const siteStore = yield* SiteStore;
     const result = yield* siteStore.publish(publishRequest, user, config);
-    const url = publishedUrl(contentBaseUrl(request, config), result.routePath, result.openPath);
+    const url = publishedUrl(contentBaseUrl(request, config), result.project, result.openPath);
     return jsonResponse({ ...result, url }, 200);
   });
 }
@@ -175,11 +176,14 @@ function listProjects(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const user = yield* auth.requireApiUser(request);
     const siteStore = yield* SiteStore;
     const projects = yield* siteStore.listProjects(user);
-    return jsonResponse({ projects: projects.map((project) => projectSummary(project)) }, 200);
+    const contentBase = contentBaseUrl(request, config);
+    return jsonResponse({ projects: projects.map((project) => projectSummary(project, contentBase)) }, 200);
   });
 }
 
-/** Resolves a published content path (under any route strategy) to its project. */
+/** Resolves a published content path to its project. Kept as an endpoint (rather than a
+ * client-side parse) so validation, authorization, and URL-to-project resolution stay
+ * centralized on the server. */
 function resolveProjectPath(request: HttpServerRequest.HttpServerRequest, url: URL): AppEffect {
   return Effect.gen(function* () {
     const path = url.searchParams.get("path");
@@ -195,53 +199,53 @@ function resolveProjectPath(request: HttpServerRequest.HttpServerRequest, url: U
 }
 
 /** Returns metadata for one project. */
-function projectInfo(request: HttpServerRequest.HttpServerRequest, workspace: string, project: string): AppEffect {
+function projectInfo(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     const auth = yield* Auth;
     const user = yield* auth.requireApiUser(request);
     const siteStore = yield* SiteStore;
-    const site = yield* requireReadableSite(yield* siteStore.loadProject(workspace, project), user, config);
+    const site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
     return jsonResponse({ project: projectSummary(site.record, contentBaseUrl(request, config)) }, 200);
   });
 }
 
 /** Returns the current project bundle for clone/read workflows. */
-function projectBundle(request: HttpServerRequest.HttpServerRequest, workspace: string, project: string): AppEffect {
+function projectBundle(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     const auth = yield* Auth;
     const user = yield* auth.requireApiUser(request);
     const siteStore = yield* SiteStore;
-    yield* requireReadableSite(yield* siteStore.loadProject(workspace, project), user, config);
-    const bundle = yield* siteStore.bundle(workspace, project);
+    yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
+    const bundle = yield* siteStore.bundle(project);
     if (bundle == null) return yield* Effect.fail(new HttpError({ status: 404, message: "Project not found" }));
     return jsonResponse({ bundle }, 200);
   });
 }
 
 /** Makes a project owner-only by setting visibility to private. */
-function unpublishProject(request: HttpServerRequest.HttpServerRequest, workspace: string, project: string): AppEffect {
+function unpublishProject(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     yield* rejectCrossOriginApiRequest(request, appBaseUrl(request, config));
     const auth = yield* Auth;
     const user = yield* auth.requireApiUser(request);
     const siteStore = yield* SiteStore;
-    const record = yield* siteStore.unpublish(workspace, project, user);
+    const record = yield* siteStore.unpublish(project, user);
     return jsonResponse({ project: projectSummary(record, contentBaseUrl(request, config)) }, 200);
   });
 }
 
-/** Deletes a project pointer and route index. */
-function deleteProject(request: HttpServerRequest.HttpServerRequest, workspace: string, project: string): AppEffect {
+/** Deletes a project pointer and owner index, releasing the name. */
+function deleteProject(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     yield* rejectCrossOriginApiRequest(request, appBaseUrl(request, config));
     const auth = yield* Auth;
     const user = yield* auth.requireApiUser(request);
     const siteStore = yield* SiteStore;
-    yield* siteStore.deleteProject(workspace, project, user);
+    yield* siteStore.deleteProject(project, user);
     return jsonResponse({ ok: true }, 200);
   });
 }
@@ -277,13 +281,11 @@ function rejectCrossOriginApiRequest(
 }
 
 /** Shapes one project record for API responses. */
-function projectSummary(record: SiteRecord, contentBase?: string): Record<string, unknown> {
+function projectSummary(record: SiteRecord, contentBase: string): Record<string, unknown> {
   return {
-    workspace: record.workspace,
     project: record.project,
-    routePath: record.routePath,
     visibility: record.visibility,
-    url: contentBase == null ? undefined : `${contentBase}/${record.routePath}/`,
+    url: `${contentBase}/${encodeURIComponent(record.project)}/`,
     owner: record.owner,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -300,12 +302,17 @@ function projectSummary(record: SiteRecord, contentBase?: string): Record<string
 /** Authenticates on the app host and sends a one-time handoff token to the content host. */
 function issueProjectAccess(request: HttpServerRequest.HttpServerRequest, url: URL): AppEffect {
   return Effect.gen(function* () {
-    const routePath = url.searchParams.get("route");
-    if (routePath == null) return yield* Effect.fail(new HttpError({ status: 400, message: "Missing route" }));
+    const project = url.searchParams.get("route");
+    if (project == null) return yield* Effect.fail(new HttpError({ status: 400, message: "Missing route" }));
+    // Reject malformed names here so they never become backend keys (an empty or ".."
+    // value would otherwise 500 in the DB key guard).
+    if (!isSafeProjectIdentifier(project)) {
+      return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid route" }));
+    }
     const config = yield* ServerConfig;
     const contentBase = contentBaseUrl(request, config);
-    const returnTo = safeContentReturnTo(url.searchParams.get("returnTo"), contentBase, routePath)
-      ?? `${contentBase}/${routePath}/`;
+    const returnTo = safeContentReturnTo(url.searchParams.get("returnTo"), contentBase, project)
+      ?? `${contentBase}/${project}/`;
     const auth = yield* Auth;
     const user = yield* auth.currentUser(request);
     if (user == null) {
@@ -315,9 +322,9 @@ function issueProjectAccess(request: HttpServerRequest.HttpServerRequest, url: U
     }
 
     const siteStore = yield* SiteStore;
-    const site = yield* requireReadableSite(yield* siteStore.loadByRoute(routePath), user, config);
+    const site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
 
-    const token = yield* auth.issueProjectAccessToken(projectKey(site.record.workspace, site.record.project), site.record.routePath, user, "handoff");
+    const token = yield* auth.issueProjectAccessToken(site.record.project, user, "handoff");
     const target = new URL(returnTo);
     target.searchParams.set(HANDOFF_PARAM, token);
     return HttpServerResponse.redirect(target.toString(), { status: 302 });
@@ -355,21 +362,20 @@ function servePrivateContent(
 ): AppEffect {
   return Effect.gen(function* () {
     const auth = yield* Auth;
-    const routePath = site.record.routePath;
-    const key = projectKey(site.record.workspace, site.record.project);
+    const project = site.record.project;
 
     const handoffToken = url.searchParams.get(HANDOFF_PARAM);
     if (handoffToken != null) {
       return yield* redeemHandoffToken(request, url, site, config, auth, handoffToken);
     }
 
-    const cookieUser = yield* projectAccessUser(request, auth, key, site, config);
+    const cookieUser = yield* projectAccessUser(request, auth, site, config);
     if (cookieUser != null) {
       // Everything on the content host is same-origin, so another project's JS could
       // fetch/iframe this project with the viewer's cookie attached. Subresource requests
       // must therefore prove (via Referer, unforgeable from scripts) that the requesting
       // page lives inside this project. Top-level navigations stay unrestricted.
-      if (blockedCrossProjectSubresource(request, routePath)) {
+      if (blockedCrossProjectSubresource(request, project)) {
         return yield* Effect.fail(new HttpError({ status: 403, message: "Cross-project request rejected" }));
       }
       return yield* serveProjectContent(site, url, false);
@@ -395,21 +401,21 @@ function redeemHandoffToken(
   token: string,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, AuthError> {
   return Effect.gen(function* () {
-    const routePath = site.record.routePath;
-    // Rebuild the redirect target from the canonical route path so the cookie's Path
+    const project = site.record.project;
+    // Rebuild the redirect target from the canonical project name so the cookie's Path
     // attribute always matches it, even when the request path was percent-encoded.
-    const cleanTarget = canonicalContentPath(url, routePath);
+    const cleanTarget = canonicalContentPath(url, project);
     const user = yield* auth
-      .verifyProjectAccessToken(token, projectKey(site.record.workspace, site.record.project), routePath, "handoff")
+      .verifyProjectAccessToken(token, project, "handoff")
       .pipe(Effect.orElseSucceed(() => null));
     if (user == null || !canReadProject(site.record, user, config)) {
       return HttpServerResponse.redirect(cleanTarget, { status: 302 });
     }
-    const cookieToken = yield* auth.issueProjectAccessToken(projectKey(site.record.workspace, site.record.project), routePath, user, "cookie");
+    const cookieToken = yield* auth.issueProjectAccessToken(project, user, "cookie");
     return HttpServerResponse.redirect(cleanTarget, {
       status: 302,
       headers: {
-        "set-cookie": projectAccessCookie(cookieToken, routePath, contentBaseUrl(request, config), config.auth.sessionTtlSeconds),
+        "set-cookie": projectAccessCookie(cookieToken, project, contentBaseUrl(request, config), config.auth.sessionTtlSeconds),
       },
     });
   });
@@ -419,14 +425,13 @@ function redeemHandoffToken(
 function projectAccessUser(
   request: HttpServerRequest.HttpServerRequest,
   auth: AuthShape,
-  key: string,
   site: LoadedSite,
   config: ServerConfigShape,
 ): Effect.Effect<AuthUser | null> {
   return Effect.gen(function* () {
-    for (const value of projectAccessCookieValues(request, site.record.routePath)) {
+    for (const value of projectAccessCookieValues(request, site.record.project)) {
       const user = yield* auth
-        .verifyProjectAccessToken(value, key, site.record.routePath, "cookie")
+        .verifyProjectAccessToken(value, site.record.project, "cookie")
         .pipe(Effect.orElseSucceed(() => null));
       // Re-check visibility on every request so revocation applies immediately even
       // though the cookie itself is long-lived.
@@ -443,11 +448,11 @@ function serveProjectContent(
   url: URL,
   isPublic: boolean,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError, ServerConfig> {
-  const rest = routeRest(url.pathname, site.record.routePath);
+  const rest = routeRest(url.pathname, site.record.project);
   if (rest == null) {
-    return Effect.succeed(HttpServerResponse.redirect(`/${site.record.routePath}/${url.search}`, { status: 308 }));
+    return Effect.succeed(HttpServerResponse.redirect(`/${site.record.project}/${url.search}`, { status: 308 }));
   }
-  return serveSiteFiles(site, rest, url.search, `/${site.record.routePath}`, isPublic);
+  return serveSiteFiles(site, rest, url.search, `/${site.record.project}`, isPublic);
 }
 
 /** Serves one file from a loaded site under the given canonical path prefix. */
@@ -473,28 +478,27 @@ function serveSiteFiles(
 }
 
 /** Loads the published site owning the request path. Routing is deterministic: the
- * path's first routeDepth segments are the only route it can belong to, so resolution
- * is a single route-index lookup. */
+ * path's first segment is the only project it can belong to, so resolution is a single
+ * pointer lookup. */
 function loadSiteForPath(
   pathname: string,
-): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError, SiteStore | ServerConfig> {
+): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError, SiteStore> {
   return Effect.gen(function* () {
-    const config = yield* ServerConfig;
-    const routePath = routePathForRequest(pathname, config.projectRoutingMode);
-    if (routePath == null) return null;
+    const project = projectForRequest(pathname);
+    if (project == null) return null;
     const siteStore = yield* SiteStore;
-    return yield* siteStore.loadByRoute(routePath);
+    return yield* siteStore.loadProject(project);
   });
 }
 
-/** Rebuilds the request's clean canonical URL (path + query) on the stored route path,
- * dropping the handoff parameter. */
-function canonicalContentPath(url: URL, routePath: string): string {
-  const rest = routeRest(url.pathname, routePath) ?? "/";
+/** Rebuilds the request's clean canonical URL (path + query) on the project's route
+ * prefix, dropping the handoff parameter. */
+function canonicalContentPath(url: URL, project: string): string {
+  const rest = routeRest(url.pathname, project) ?? "/";
   const params = new URLSearchParams(url.search);
   params.delete(HANDOFF_PARAM);
   const search = params.toString();
-  return `/${routePath}${rest}${search === "" ? "" : `?${search}`}`;
+  return `/${project}${rest}${search === "" ? "" : `?${search}`}`;
 }
 
 /** Detects browser subresource loads (fetch/img/script/frame/...) via Sec-Fetch-Dest.
@@ -511,13 +515,13 @@ function isSubresourceRequest(request: HttpServerRequest.HttpServerRequest): boo
  * refused. Top-level navigations are never blocked. */
 function blockedCrossProjectSubresource(
   request: HttpServerRequest.HttpServerRequest,
-  routePath: string,
+  project: string,
 ): boolean {
   if (!isSubresourceRequest(request)) return false;
   const referer = request.headers.referer;
   if (referer == null) return true;
   try {
-    return routeRest(new URL(referer).pathname, routePath) == null;
+    return routeRest(new URL(referer).pathname, project) == null;
   } catch {
     return true;
   }
@@ -531,20 +535,20 @@ function projectAccessRedirect(
   config: { readonly appUrl?: string; readonly contentUrl?: string },
 ): HttpServerResponse.HttpServerResponse {
   const redirect = new URL("/auth/project", appBaseUrl(request, config));
-  redirect.searchParams.set("route", site.record.routePath);
+  redirect.searchParams.set("route", site.record.project);
   redirect.searchParams.set("returnTo", contentRequestUrl(url, contentBaseUrl(request, config)));
   return HttpServerResponse.redirect(redirect, { status: 302 });
 }
 
 /** Accepts a returnTo only when it is a clean same-origin URL inside the project route. */
-function safeContentReturnTo(value: string | null, contentBase: string, routePath: string): string | null {
+function safeContentReturnTo(value: string | null, contentBase: string, project: string): string | null {
   if (value == null || value.length > 4096) return null;
   try {
     const url = new URL(value);
     const base = new URL(contentBase);
     if (url.origin !== base.origin) return null;
     if (url.username !== "" || url.password !== "") return null;
-    if (url.pathname !== `/${routePath}` && !url.pathname.startsWith(`/${routePath}/`)) return null;
+    if (url.pathname !== `/${project}` && !url.pathname.startsWith(`/${project}/`)) return null;
     return url.toString();
   } catch {
     return null;
@@ -640,8 +644,8 @@ function sameOrigin(left: string, right: string): boolean {
 }
 
 /** Builds the user-facing URL returned by publish. */
-function publishedUrl(baseUrl: string, routePath: string, openPath: string): string {
-  return `${baseUrl}/${routePath}${encodeOpenPath(openPath)}`;
+function publishedUrl(baseUrl: string, project: string, openPath: string): string {
+  return `${baseUrl}/${encodeURIComponent(project)}${encodeOpenPath(openPath)}`;
 }
 
 /** URL-encodes each path segment without encoding slashes. */

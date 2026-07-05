@@ -20,26 +20,13 @@ export interface ServerConfigShape {
   readonly maxVisibility: AccessGroup;
   /** When non-empty, explicit share targets must fall inside these domains. */
   readonly shareAllowedDomains: ReadonlySet<string>;
-  /** How new projects map onto public route paths. */
-  readonly projectRoutingMode: ProjectRoutingMode;
-  /** Workspace assigned when a publish does not name one. */
-  readonly defaultWorkspace: DefaultWorkspaceMode;
-  /** Whether a publish may name a workspace that does not exist yet. The user's own
-   * username workspace and server-assigned default workspaces are always allowed. */
-  readonly usersCanCreateWorkspaces: boolean;
+  /** true: publishers choose globally-unique project names (first-writer-wins).
+   * false: the server assigns a random slug on first publish. */
+  readonly usersCanSetProjectNames: boolean;
   /** Visibility applied when a publish does not specify one. */
   readonly defaultVisibility: AccessGroup;
   readonly auth: AuthConfig;
 }
-
-/** How published projects map onto public route paths. Routing is deterministic: every
- * route has exactly routeDepth(mode) segments, so a request path resolves to at most one
- * route. userDomain is the domain of the owner's email address. */
-export type ProjectRoutingMode = "workspace/project" | "userDomain/workspace/project";
-
-/** Workspace assigned when a publish omits one: a random slug, or the user's email
- * local part (pete@example.com publishes to workspace "pete"). */
-export type DefaultWorkspaceMode = "random" | "username";
 
 /** Google OAuth and session-signing settings. Auth cannot be disabled. */
 export interface AuthConfig {
@@ -94,9 +81,7 @@ export function readServerConfig(
       ),
       maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
       shareAllowedDomains: domainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS),
-      projectRoutingMode: yield* readProjectRoutingMode(env.SCRATCHWORK_PROJECT_ROUTING_MODE),
-      defaultWorkspace: yield* readDefaultWorkspace(env.SCRATCHWORK_DEFAULT_WORKSPACE),
-      usersCanCreateWorkspaces: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES, true, "SCRATCHWORK_USERS_CAN_CREATE_WORKSPACES"),
+      usersCanSetProjectNames: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES, true, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES"),
       defaultVisibility: yield* readAccessGroup(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
       auth: yield* readAuthConfig(env),
     };
@@ -170,30 +155,6 @@ function readAccessGroup(
 ): Effect.Effect<AccessGroup, ServerConfigError> {
   return normalizeAccessGroup(value == null || value === "" ? fallback : value).pipe(
     Effect.mapError((cause) => new ServerConfigError({ message: `${name}: ${cause.message}` })),
-  );
-}
-
-/** Parses the project routing mode, defaulting to workspace/project. */
-function readProjectRoutingMode(value: string | undefined): Effect.Effect<ProjectRoutingMode, ServerConfigError> {
-  const mode = value == null || value === "" ? "workspace/project" : value;
-  if (mode === "workspace/project" || mode === "userDomain/workspace/project") {
-    return Effect.succeed(mode);
-  }
-  return Effect.fail(
-    new ServerConfigError({
-      message: "SCRATCHWORK_PROJECT_ROUTING_MODE must be workspace/project or userDomain/workspace/project",
-    }),
-  );
-}
-
-/** Parses the default-workspace mode, defaulting to the user's email local part. */
-function readDefaultWorkspace(value: string | undefined): Effect.Effect<DefaultWorkspaceMode, ServerConfigError> {
-  const mode = value == null || value === "" ? "username" : value;
-  if (mode === "username" || mode === "random") {
-    return Effect.succeed(mode);
-  }
-  return Effect.fail(
-    new ServerConfigError({ message: "SCRATCHWORK_DEFAULT_WORKSPACE must be username or random" }),
   );
 }
 

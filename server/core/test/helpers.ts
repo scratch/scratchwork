@@ -42,9 +42,7 @@ export async function appHandler(options: {
     contentUrl: "https://scratch.test",
     maxVisibility: "public",
     shareAllowedDomains: new Set(),
-    projectRoutingMode: "workspace/project",
-    defaultWorkspace: "username",
-    usersCanCreateWorkspaces: true,
+    usersCanSetProjectNames: true,
     defaultVisibility: "public",
     auth: {
       clientId: "test-client-id",

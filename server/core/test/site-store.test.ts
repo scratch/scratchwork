@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { ServerConfigShape } from "../src/config";
-import { PrimitiveDb, PrimitiveDbError, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../src/db";
+import { PrimitiveDb, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../src/db";
 import type { PublishRequest } from "../src/publish-request";
-import { routePathForRequest, routeRest } from "../src/routes";
+import { projectForRequest, routeRest } from "../src/routes";
 import type { SiteRecord } from "../src/site-records";
-import { SiteStore, SiteStoreLive, canReadProject } from "../src/site-store";
+import { SiteStore, SiteStoreLive, SiteStoreError, canReadProject } from "../src/site-store";
 import { bundle, memoryStorageLayer } from "./helpers";
 
 const owner = { id: "user-1", email: "founder@example.com" };
@@ -15,10 +15,8 @@ const reader = { id: "user-2", email: "reader@example.com" };
 /** Builds a SiteRecord fixture with the given visibility. */
 function record(visibility: string): SiteRecord {
   return {
-    version: 3,
-    workspace: "demo",
+    version: 4,
     project: "site",
-    routePath: "demo/site",
     visibility,
     owner,
     createdAt: "2026-06-29T00:00:00.000Z",
@@ -36,9 +34,7 @@ function config(maxVisibility: string): ServerConfigShape {
     port: 3001,
     maxVisibility,
     shareAllowedDomains: new Set(),
-    projectRoutingMode: "workspace/project",
-    defaultWorkspace: "username",
-    usersCanCreateWorkspaces: true,
+    usersCanSetProjectNames: true,
     defaultVisibility: "private",
     auth: {
       clientId: "client-id",
@@ -48,6 +44,34 @@ function config(maxVisibility: string): ServerConfigShape {
       sessionTtlSeconds: 60,
     },
   };
+}
+
+/** Builds a publish request fixture for one project name. */
+function request(project: string | undefined): PublishRequest {
+  return {
+    bundle: bundle({ "index.html": "hello" }),
+    openPath: "/",
+    project,
+    visibility: "public",
+    totalBytes: 5,
+  } as PublishRequest;
+}
+
+/** Runs one effect against a fresh site store over the given DB shape. */
+function run<A, E>(
+  db: PrimitiveDbShape,
+  body: (store: typeof SiteStore.Service) => Effect.Effect<A, E, SiteStore>,
+): Promise<A> {
+  const layers = Layer.provideMerge(
+    SiteStoreLive,
+    Layer.mergeAll(memoryStorageLayer(), Layer.succeed(PrimitiveDb, PrimitiveDb.of(db))),
+  );
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const store = yield* SiteStore;
+      return yield* body(store);
+    }).pipe(Effect.provide(layers)),
+  );
 }
 
 describe("canReadProject", () => {
@@ -67,85 +91,125 @@ describe("canReadProject", () => {
   });
 });
 
-describe("publish route allocation", () => {
-  test("releases the route when the project record write fails", async () => {
+describe("project name claims", () => {
+  test("maps a lost create race onto the canonical taken message", async () => {
+    // Simulate a race: the name is free at load time, but another create lands first —
+    // the memory DB below reports the record as missing on first read, then delegates.
     const memory = makeMemoryPrimitiveDb();
-    let failProjectWrite = true;
+    let hideOnce = true;
     const db: PrimitiveDbShape = {
       ...memory,
-      put: (namespace, key, value, options) => {
-        if (namespace === "projects" && failProjectWrite) {
-          failProjectWrite = false;
-          return Effect.fail(new PrimitiveDbError({ message: "injected write failure" }));
+      get: (namespace, key) => {
+        if (namespace === "projects" && key === "site" && hideOnce) {
+          hideOnce = false;
+          return Effect.succeed(null);
         }
-        return memory.put(namespace, key, value, options);
+        return memory.get(namespace, key);
       },
     };
-    const layers = Layer.provideMerge(
-      SiteStoreLive,
-      Layer.mergeAll(memoryStorageLayer(), Layer.succeed(PrimitiveDb, PrimitiveDb.of(db))),
-    );
-    const request = {
-      bundle: bundle({ "index.html": "hello" }),
-      openPath: "/",
-      workspace: "demo",
-      project: "site",
-      visibility: "public",
-      totalBytes: 5,
-    } as PublishRequest;
 
-    const { failed, retried } = await Effect.runPromise(
-      Effect.gen(function* () {
-        const store = yield* SiteStore;
-        const failed = yield* store.publish(request, owner, config("public")).pipe(Effect.flip);
-        const retried = yield* store.publish(request, owner, config("public"));
-        return { failed, retried };
-      }).pipe(Effect.provide(layers)),
-    );
+    await run(db, (store) => store.publish(request("site"), owner, config("public")));
+    const failed = await run(db, (store) =>
+      store.publish(request("site"), reader, config("public")).pipe(Effect.flip),
+    ) as SiteStoreError;
 
-    expect(failed.message).toContain("injected write failure");
-    expect(retried.routePath).toBe("demo/site");
+    expect(failed.status).toBe(409);
+    expect(failed.message).toBe(
+      'Project name "site" is already taken on this server. Choose another with --project.',
+    );
+  });
+
+  test("owner updates in place; another owner gets the canonical 409", async () => {
+    const db = makeMemoryPrimitiveDb();
+
+    const created = await run(db, (store) => store.publish(request("site"), owner, config("public")));
+    expect(created.project).toBe("site");
+
+    const updated = await run(db, (store) => store.publish(request("site"), owner, config("public")));
+    expect(updated.project).toBe("site");
+
+    const denied = await run(db, (store) =>
+      store.publish(request("site"), reader, config("public")).pipe(Effect.flip),
+    ) as SiteStoreError;
+    expect(denied.status).toBe(409);
+    expect(denied.message).toContain("already taken");
+  });
+
+  test("random naming mints a slug, republishes by slug, and retries collisions", async () => {
+    const db = makeMemoryPrimitiveDb();
+    const randomConfig = { ...config("public"), usersCanSetProjectNames: false };
+
+    const created = await run(db, (store) => store.publish(request(undefined), owner, randomConfig));
+    expect(created.project).toMatch(/^[a-z2-9]{10}$/);
+
+    // Resending the returned slug updates the same project.
+    const updated = await run(db, (store) => store.publish(request(created.project), owner, randomConfig));
+    expect(updated.project).toBe(created.project);
+
+    // A nonexistent sent name is discarded and a fresh slug minted.
+    const fresh = await run(db, (store) => store.publish(request("my-notes"), owner, randomConfig));
+    expect(fresh.project).toMatch(/^[a-z2-9]{10}$/);
+    expect(fresh.project).not.toBe("my-notes");
+
+    // Someone else's existing slug is a 409, not a silent fork.
+    const denied = await run(db, (store) =>
+      store.publish(request(created.project), reader, randomConfig).pipe(Effect.flip),
+    ) as SiteStoreError;
+    expect(denied.status).toBe(409);
+  });
+
+  test("garbage project names load as missing, not as backend keys", async () => {
+    const db = makeMemoryPrimitiveDb();
+    for (const project of ["", "..", ".", "a/b", "_x"]) {
+      const loaded = await run(db, (store) => store.loadProject(project));
+      expect(loaded).toBeNull();
+    }
   });
 });
 
-describe("routePathForRequest", () => {
-  test("takes exactly routeDepth segments for the configured mode", () => {
-    expect(routePathForRequest("/demo/site/app.js", "workspace/project")).toBe("demo/site");
-    expect(routePathForRequest("/demo/site", "workspace/project")).toBe("demo/site");
-    expect(routePathForRequest("/example.com/demo/site/app.js", "userDomain/workspace/project")).toBe("example.com/demo/site");
+describe("projectForRequest", () => {
+  test("takes exactly the first path segment", () => {
+    expect(projectForRequest("/site/app.js")).toBe("site");
+    expect(projectForRequest("/site")).toBe("site");
+    expect(projectForRequest("/site/a/b/c")).toBe("site");
   });
 
-  test("returns null for paths shallower than the route depth", () => {
-    expect(routePathForRequest("/", "workspace/project")).toBeNull();
-    expect(routePathForRequest("/demo", "workspace/project")).toBeNull();
-    expect(routePathForRequest("/demo/site", "userDomain/workspace/project")).toBeNull();
+  test("returns null for the root path", () => {
+    expect(projectForRequest("/")).toBeNull();
   });
 
-  test("rejects encoded slashes that would fabricate multi-segment routes", () => {
-    expect(routePathForRequest("/demo%2Fsite/extra", "workspace/project")).toBeNull();
-    expect(routePathForRequest("/demo%2Fsite/a/b", "workspace/project")).toBeNull();
+  test("rejects encoded slashes that would fabricate paths inside a project", () => {
+    expect(projectForRequest("/si%2Fte")).toBeNull();
+    expect(projectForRequest("/si%2Fte/a/b")).toBeNull();
   });
 
-  test("decodes benign percent-encoding within a segment", () => {
-    expect(routePathForRequest("/pete%2Dx/site/app.js", "workspace/project")).toBe("pete-x/site");
+  test("decodes benign percent-encoding within the segment", () => {
+    expect(projectForRequest("/pete%2Dx/app.js")).toBe("pete-x");
+  });
+
+  test("rejects segments that are not safe project identifiers", () => {
+    expect(projectForRequest("/..")).toBeNull();
+    expect(projectForRequest("/%2E%2E")).toBeNull();
+    expect(projectForRequest("/Docs/index.html")).toBeNull();
+    expect(projectForRequest("/%zz")).toBeNull();
   });
 });
 
 describe("routeRest", () => {
   test("computes the remainder for plain paths", () => {
-    expect(routeRest("/demo/site", "demo/site")).toBeNull();
-    expect(routeRest("/demo/site/", "demo/site")).toBe("/");
-    expect(routeRest("/demo/site/a/b.js", "demo/site")).toBe("/a/b.js");
-    expect(routeRest("/demo/site/a/", "demo/site")).toBe("/a/");
+    expect(routeRest("/site", "site")).toBeNull();
+    expect(routeRest("/site/", "site")).toBe("/");
+    expect(routeRest("/site/a/b.js", "site")).toBe("/a/b.js");
+    expect(routeRest("/site/a/", "site")).toBe("/a/");
   });
 
   test("matches encoded route segments in decoded space", () => {
     expect(routeRest("/pete%2Dx/app.js", "pete-x")).toBe("/app.js");
-    expect(routeRest("/de%6Do/site/style.css", "demo/site")).toBe("/style.css");
+    expect(routeRest("/si%74e/style.css", "site")).toBe("/style.css");
   });
 
-  test("never serves a remainder for paths the route does not prefix", () => {
-    expect(routeRest("/demo%2Fsite", "demo/site")).toBeNull();
-    expect(routeRest("/other/site/a.js", "demo/site")).toBeNull();
+  test("never serves a remainder for paths the project does not prefix", () => {
+    expect(routeRest("/si%2Fte", "site")).toBeNull();
+    expect(routeRest("/other/a.js", "site")).toBeNull();
   });
 });

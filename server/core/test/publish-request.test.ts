@@ -9,13 +9,11 @@ describe("decodePublishRequest", () => {
     const request = await Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
       openPath: "//docs///",
-      workspace: "demo.space",
       project: "site_docs",
       visibility: "Founder@Example.com,@YC.com",
     }));
 
     expect(request.openPath).toBe("/docs/");
-    expect(request.workspace).toBe("demo.space");
     expect(request.project).toBe("site_docs");
     expect(request.visibility).toBe("founder@example.com,@yc.com");
     expect(request.totalBytes).toBe(5);
@@ -56,19 +54,31 @@ describe("decodePublishRequest", () => {
     }))).rejects.toThrow("Invalid openPath");
   });
 
-  test("validates workspace, project, and visibility", async () => {
+  test("validates project and visibility", async () => {
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
-      workspace: "../bad",
-      project: "site",
-    }))).rejects.toThrow("Invalid workspace");
+      project: "../bad",
+    }))).rejects.toThrow("Invalid project");
 
+    // Uppercase names fail the lowercase-only grammar.
+    await expect(Effect.runPromise(decodePublishRequest({
+      bundle: bundle({ "index.html": "hello" }),
+      project: "Docs",
+    }))).rejects.toThrow("Invalid project");
+
+    await expect(Effect.runPromise(decodePublishRequest({
+      bundle: bundle({ "index.html": "hello" }),
+      project: "site",
+      visibility: "public,@example.com",
+    }))).rejects.toThrow("Invalid access group");
+  });
+
+  test("rejects the retired workspace field as an excess property", async () => {
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
       workspace: "demo",
       project: "site",
-      visibility: "public,@example.com",
-    }))).rejects.toThrow("Invalid access group");
+    }))).rejects.toThrow("workspace");
   });
 
   test("enforces file count and byte limits", async () => {

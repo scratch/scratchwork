@@ -1,7 +1,7 @@
 /**
  * The SiteStore service: publishing (content-addressed blobs + an immutable revision +
  * pointer records written with optimistic-concurrency preconditions), loading published
- * sites by route or project key, listing, unpublishing, deleting, and bundle export.
+ * sites by project name, listing, unpublishing, deleting, and bundle export.
  * See site-records.ts for the persisted data model.
  */
 import * as Context from "effect/Context";
@@ -18,7 +18,6 @@ import {
   accessGroupUsesOnlyDomains,
   isReservedSlug,
   isSafeProjectIdentifier,
-  workspaceFromEmail,
   type AccessGroup,
 } from "./access";
 import type { AuthUser } from "./auth";
@@ -33,7 +32,6 @@ import {
 } from "./db";
 import { makeObjectSiteFiles } from "./object-site-files";
 import type { PublishRequest } from "./publish-request";
-import { safeRoutePath } from "./routes";
 import {
   blobObjectKey,
   OWNER_INDEX_NAMESPACE,
@@ -41,20 +39,19 @@ import {
   ownerIndexKey,
   ownerIndexPrefix,
   PROJECTS_NAMESPACE,
-  projectKey,
-  ROUTES_NAMESPACE,
   revisionRecordKey,
-  RouteRecordSchema,
   SiteRecordSchema,
   SiteRevisionRecordSchema,
-  type RouteRecord,
   type SiteFileObject,
   type SiteOwner,
   type SiteRecord,
   type SiteRevisionRecord,
 } from "./site-records";
-import { ObjectStorage, sha256Hex, StorageConflict, StorageError, type ObjectStorageShape } from "./storage";
+import { ObjectStorage, sha256Hex, StorageError, type ObjectStorageShape } from "./storage";
 import { randomRevisionId, randomSlug } from "./tokens";
+
+/** How many random-name candidates a create attempts before giving up. */
+const RANDOM_NAME_ATTEMPTS = 3;
 
 /** A published site loaded for serving: pointer, current revision, and its file reader. */
 export interface LoadedSite {
@@ -63,11 +60,10 @@ export interface LoadedSite {
   readonly siteFiles: ReturnType<typeof makeObjectSiteFiles>;
 }
 
-/** What publish returns to the CLI. */
+/** What publish returns to the CLI. `project` is authoritative: on a random-name server
+ * it is how the CLI learns the assigned name. */
 export interface PublishResult {
-  readonly workspace: string;
   readonly project: string;
-  readonly routePath: string;
   readonly visibility: AccessGroup;
   readonly openPath: string;
 }
@@ -87,27 +83,22 @@ export interface SiteStoreShape {
     user: AuthUser,
     config: ServerConfigShape,
   ) => Effect.Effect<PublishResult, SiteStoreError | StorageError>;
-  /** Loads a published site through the route-path index. */
-  readonly loadByRoute: (routePath: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
-  /** Loads a published site by workspace and project name. */
-  readonly loadProject: (workspace: string, project: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
+  /** Loads a published site by project name. */
+  readonly loadProject: (project: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
   /** Lists the projects the user owns. */
   readonly listProjects: (user: AuthUser) => Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError | StorageError>;
   /** Sets a project's visibility to private, keeping all content. */
   readonly unpublish: (
-    workspace: string,
     project: string,
     user: AuthUser,
   ) => Effect.Effect<SiteRecord, SiteStoreError | StorageError>;
-  /** Deletes the project pointer and indexes; immutable blobs are retained. */
+  /** Deletes the project pointer and owner index; immutable blobs are retained. */
   readonly deleteProject: (
-    workspace: string,
     project: string,
     user: AuthUser,
   ) => Effect.Effect<void, SiteStoreError | StorageError>;
   /** Reads the current revision back into a publish bundle for clone workflows. */
   readonly bundle: (
-    workspace: string,
     project: string,
   ) => Effect.Effect<PublishRequest["bundle"] | null, SiteStoreError | StorageError>;
 }
@@ -129,16 +120,23 @@ export const SiteStoreLive: Layer.Layer<SiteStore, never, ObjectStorage | Primit
 function makeSiteStore(storage: ObjectStorageShape, db: PrimitiveDbShape): SiteStoreShape {
   return SiteStore.of({
     publish: (request, user, config) => publishProject(storage, db, request, user, config),
-    loadByRoute: (routePath) => loadPublishedSiteByRoute(storage, db, routePath),
-    loadProject: (workspace, project) => loadPublishedSite(storage, db, workspace, project),
+    loadProject: (project) => loadPublishedSite(storage, db, project),
     listProjects: (user) => listProjects(db, user),
-    unpublish: (workspace, project, user) => unpublishProject(db, workspace, project, user),
-    deleteProject: (workspace, project, user) => deleteProject(db, workspace, project, user),
-    bundle: (workspace, project) => projectBundle(storage, db, workspace, project),
+    unpublish: (project, user) => unpublishProject(db, project, user),
+    deleteProject: (project, user) => deleteProject(db, project, user),
+    bundle: (project) => projectBundle(storage, db, project),
   });
 }
 
-/** Publishes a new project or creates a new revision for an existing project. */
+/** Publishes a new project or creates a new revision for an existing project.
+ *
+ * Publishing is a name-based upsert. A requested name that exists and is owned by the
+ * caller is updated in both naming modes — this is how republish works, including on
+ * random-name servers where the CLI echoes the saved slug. A requested name owned by
+ * someone else is a 409 in both modes: a stale or copied local config surfaces as an
+ * explicit error, never a silent fork. Creation is where the modes differ: user-set
+ * names are required and claimed first-writer-wins; random mode discards the request's
+ * name and mints a slug. */
 function publishProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
@@ -147,90 +145,92 @@ function publishProject(
   config: ServerConfigShape,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const workspace = request.workspace ?? defaultWorkspace(config, user);
-    const project = request.project;
-    if (project == null) {
-      return yield* Effect.fail(new SiteStoreError({ status: 400, message: "project is required" }));
-    }
-    yield* requireProjectIdentifier("workspace", workspace);
-    yield* requireProjectIdentifier("project", project);
-    if (isReservedSlug(workspace)) {
-      return yield* Effect.fail(new SiteStoreError({ status: 400, message: `Workspace name is reserved: ${workspace}` }));
-    }
+    const requested = request.project;
+    if (requested != null) yield* requireProjectIdentifier(requested);
 
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = requested == null ? null : yield* loadSiteRecord(db, requested);
     const visibility = request.visibility ?? loaded?.value.visibility ?? config.defaultVisibility;
     yield* validateVisibility(visibility, config);
 
-    if (loaded == null) {
-      yield* requireUsableWorkspace(db, config, user, request.workspace, workspace);
-      return yield* createProject(storage, db, request, user, config, workspace, project, visibility);
+    if (loaded != null && requested != null) {
+      if (!canWriteProject(loaded.value, user)) {
+        return yield* Effect.fail(projectNameTaken(requested));
+      }
+      return yield* updateProject(storage, db, request, user, loaded, visibility);
     }
-    return yield* updateProject(storage, db, request, user, loaded, visibility);
+
+    if (config.usersCanSetProjectNames) {
+      if (requested == null) {
+        return yield* Effect.fail(new SiteStoreError({ status: 400, message: "project name is required (pass --project)" }));
+      }
+      if (isReservedSlug(requested)) {
+        return yield* Effect.fail(new SiteStoreError({ status: 400, message: `Project name is reserved: ${requested}` }));
+      }
+      return yield* writeNewProject(storage, db, request, user, requested, visibility).pipe(
+        Effect.catchTag("PrimitiveDbConflict", () => Effect.fail(projectNameTaken(requested))),
+      );
+    }
+
+    return yield* createRandomProject(storage, db, request, user, visibility);
   });
 }
 
-/** Creates a new project record and claims its deterministic route index entry. */
-function createProject(
+/** Creates a project under a server-minted random name, retrying only name collisions
+ * (each retry rebuilds the complete create attempt for a fresh candidate). */
+function createRandomProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
   user: AuthUser,
-  config: ServerConfigShape,
-  workspace: string,
-  project: string,
   visibility: AccessGroup,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const routePath = yield* routePathForProject(config, user, workspace, project);
-    const firstSegment = routePath.split("/")[0] ?? "";
-    if (isReservedSlug(firstSegment)) {
-      return yield* Effect.fail(new SiteStoreError({
-        status: 400,
-        message: `Project URL /${routePath} would shadow the reserved /${firstSegment} route`,
-      }));
+    for (let attempt = 0; attempt < RANDOM_NAME_ATTEMPTS; attempt += 1) {
+      const slug = randomSlug();
+      // Defense in depth: today's slug alphabet cannot produce a reserved name.
+      if (isReservedSlug(slug)) continue;
+      if ((yield* loadSiteRecord(db, slug)) != null) continue;
+      const result = yield* writeNewProject(storage, db, request, user, slug, visibility).pipe(
+        Effect.catchTag("PrimitiveDbConflict", () => Effect.succeed(null)),
+      );
+      if (result != null) return result;
     }
-    return yield* writeNewProject(storage, db, request, user, workspace, project, routePath, visibility);
+    return yield* Effect.fail(new SiteStoreError({ status: 500, message: "Could not allocate a project name" }));
   });
 }
 
-/** Writes blobs, an immutable revision, a route index entry, and the project record. */
+/** Writes blobs, an immutable revision, and the project record. The `ifNoneMatch: "*"`
+ * put of the record is the single server-wide uniqueness claim on the name; a lost race
+ * surfaces as PrimitiveDbConflict for the caller to map. The revision JSON is written
+ * before the claim so readers never see a record pointing at a missing revision — a lost
+ * race can therefore orphan one revision document under the winner's prefix, which is
+ * accepted (revision ids are 16 random bytes and the document is unreferenced). */
 function writeNewProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
   user: AuthUser,
-  workspace: string,
   project: string,
-  routePath: string,
   visibility: AccessGroup,
-): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
+): Effect.Effect<PublishResult, SiteStoreError | StorageError | PrimitiveDbConflict> {
   return Effect.gen(function* () {
     const now = new Date().toISOString();
-    const revision = yield* buildRevision(storage, workspace, project, request, now);
+    const revision = yield* buildRevision(storage, project, request, now);
     const record = siteRecord({
-      workspace,
       project,
-      routePath,
       visibility,
       user,
       createdAt: now,
       updatedAt: now,
       revision,
     });
-    const route = yield* putRouteRecord(db, routePath, workspace, project, { ifNoneMatch: "*" });
-    // The route is claimed before the project record exists; release it on failure so a
-    // partial write cannot permanently squat the route path.
-    const written = yield* putProjectRecord(db, record, { ifNoneMatch: "*" }).pipe(
-      Effect.tapError(() =>
-        db.delete(ROUTES_NAMESPACE, routePath, { ifMatch: route.version }).pipe(Effect.ignore),
-      ),
+    const written = yield* db.put(PROJECTS_NAMESPACE, project, record, { ifNoneMatch: "*" }).pipe(
+      Effect.mapError((error) => error instanceof PrimitiveDbConflict ? error : dbError(error)),
+      Effect.flatMap((result) => decodeDbRecord(result, SiteRecordSchema)),
     );
-    yield* putOwnerIndex(db, record).pipe(Effect.ignore);
+    yield* putOwnerIndex(db, written.value).pipe(Effect.ignore);
     return {
-      workspace: written.value.workspace,
       project: written.value.project,
-      routePath: written.value.routePath,
       visibility: written.value.visibility,
       openPath: request.openPath,
     };
@@ -252,11 +252,9 @@ function updateProject(
     }
 
     const now = new Date().toISOString();
-    const revision = yield* buildRevision(storage, loaded.value.workspace, loaded.value.project, request, now);
+    const revision = yield* buildRevision(storage, loaded.value.project, request, now);
     const record = siteRecord({
-      workspace: loaded.value.workspace,
       project: loaded.value.project,
-      routePath: loaded.value.routePath,
       visibility,
       user: loaded.value.owner,
       createdAt: loaded.value.createdAt,
@@ -264,11 +262,9 @@ function updateProject(
       revision,
     });
     const written = yield* putProjectRecord(db, record, { ifMatch: loaded.version });
-    yield* putOwnerIndex(db, record).pipe(Effect.ignore);
+    yield* putOwnerIndex(db, written.value).pipe(Effect.ignore);
     return {
-      workspace: written.value.workspace,
       project: written.value.project,
-      routePath: written.value.routePath,
       visibility: written.value.visibility,
       openPath: request.openPath,
     };
@@ -279,16 +275,15 @@ function updateProject(
 function loadPublishedSite(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
 ): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return null;
-    const revision = yield* loadRevisionRecord(storage, loaded.value.workspace, loaded.value.project, loaded.value.currentRevisionId);
+    const revision = yield* loadRevisionRecord(storage, loaded.value.project, loaded.value.currentRevisionId);
     if (revision == null) {
       return yield* Effect.fail(
-        new SiteStoreError({ status: 500, message: `Missing project revision: ${projectKey(workspace, project)}` }),
+        new SiteStoreError({ status: 500, message: `Missing project revision: ${project}` }),
       );
     }
     return {
@@ -296,20 +291,6 @@ function loadPublishedSite(
       revision,
       siteFiles: makeObjectSiteFiles(storage, revision),
     };
-  });
-}
-
-/** Loads a project through the route-path index. */
-function loadPublishedSiteByRoute(
-  storage: ObjectStorageShape,
-  db: PrimitiveDbShape,
-  routePath: string,
-): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError> {
-  return Effect.gen(function* () {
-    if (!safeRoutePath(routePath)) return null;
-    const route = yield* loadRouteRecord(db, routePath);
-    if (route == null) return null;
-    return yield* loadPublishedSite(storage, db, route.value.workspace, route.value.project);
   });
 }
 
@@ -329,7 +310,7 @@ function listProjects(
     } while (startAfter != null);
     const loaded = yield* Effect.forEach(index, (record) =>
       decodeDbRecord(record, OwnerProjectRecordSchema).pipe(
-        Effect.flatMap((ownerRecord) => loadSiteRecord(db, ownerRecord.value.workspace, ownerRecord.value.project)),
+        Effect.flatMap((ownerRecord) => loadSiteRecord(db, ownerRecord.value.project)),
       ),
     );
     return loaded.flatMap((record) => record == null ? [] : [record.value]);
@@ -339,12 +320,11 @@ function listProjects(
 /** Sets project visibility to private, preserving all content and owner metadata. */
 function unpublishProject(
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
   user: AuthUser,
 ): Effect.Effect<SiteRecord, SiteStoreError> {
   return Effect.gen(function* () {
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return yield* Effect.fail(new SiteStoreError({ status: 404, message: "Project not found" }));
     if (!canWriteProject(loaded.value, user)) {
       return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can unpublish this project" }));
@@ -354,22 +334,21 @@ function unpublishProject(
   });
 }
 
-/** Deletes the mutable project and route records. Immutable blobs are retained. */
+/** Deletes the mutable project record and owner index, releasing the name. Immutable
+ * blobs are retained. */
 function deleteProject(
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
   user: AuthUser,
 ): Effect.Effect<void, SiteStoreError> {
   return Effect.gen(function* () {
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return;
     if (!canWriteProject(loaded.value, user)) {
       return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can delete this project" }));
     }
-    yield* db.delete(PROJECTS_NAMESPACE, projectKey(workspace, project), { ifMatch: loaded.version }).pipe(Effect.mapError(dbError));
-    yield* db.delete(ROUTES_NAMESPACE, loaded.value.routePath).pipe(Effect.ignore);
-    yield* db.delete(OWNER_INDEX_NAMESPACE, ownerIndexKey(loaded.value.owner, workspace, project)).pipe(Effect.ignore);
+    yield* db.delete(PROJECTS_NAMESPACE, project, { ifMatch: loaded.version }).pipe(Effect.mapError(dbError));
+    yield* db.delete(OWNER_INDEX_NAMESPACE, ownerIndexKey(loaded.value.owner, project)).pipe(Effect.ignore);
   });
 }
 
@@ -377,11 +356,10 @@ function deleteProject(
 function projectBundle(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
 ): Effect.Effect<PublishRequest["bundle"] | null, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const site = yield* loadPublishedSite(storage, db, workspace, project);
+    const site = yield* loadPublishedSite(storage, db, project);
     if (site == null) return null;
     const files = yield* Effect.forEach(site.revision.files, (file) =>
       storage.getObject(file.objectKey).pipe(
@@ -399,7 +377,6 @@ function projectBundle(
 /** Stores bundle files as content-addressed blobs and returns revision metadata. */
 function buildRevision(
   storage: ObjectStorageShape,
-  workspace: string,
   project: string,
   request: PublishRequest,
   createdAt: string,
@@ -430,15 +407,14 @@ function buildRevision(
     }
 
     const revision: SiteRevisionRecord = {
-      version: 2,
-      workspace,
+      version: 3,
       project,
       revisionId: randomRevisionId(),
       createdAt,
       openPath: request.openPath,
       files,
     };
-    yield* storage.putText(revisionRecordKey(workspace, project, revision.revisionId), serialize(revision), {
+    yield* storage.putText(revisionRecordKey(project, revision.revisionId), serialize(revision), {
       contentType: "application/json; charset=utf-8",
       ifNoneMatch: "*",
     }).pipe(
@@ -464,11 +440,18 @@ export function canWriteProject(record: SiteRecord, user: AuthUser): boolean {
   return record.owner.id === user.id || record.owner.email.toLowerCase() === user.email.toLowerCase();
 }
 
+/** The canonical name-collision failure, for load-time checks, not-owner publishes, and
+ * lost create races alike. Never surface the raw DB conflict message. */
+function projectNameTaken(project: string): SiteStoreError {
+  return new SiteStoreError({
+    status: 409,
+    message: `Project name "${project}" is already taken on this server. Choose another with --project.`,
+  });
+}
+
 /** Builds the metadata-only project pointer for a current revision. */
 function siteRecord(input: {
-  readonly workspace: string;
   readonly project: string;
-  readonly routePath: string;
   readonly visibility: AccessGroup;
   readonly user: AuthUser | SiteOwner;
   readonly createdAt: string;
@@ -476,10 +459,8 @@ function siteRecord(input: {
   readonly revision: SiteRevisionRecord;
 }): SiteRecord {
   return {
-    version: 3,
-    workspace: input.workspace,
+    version: 4,
     project: input.project,
-    routePath: input.routePath,
     visibility: input.visibility,
     owner: ownerFromUser(input.user),
     createdAt: input.createdAt,
@@ -502,66 +483,6 @@ function validateVisibility(visibility: AccessGroup, config: ServerConfigShape):
   return Effect.void;
 }
 
-/** Resolves the workspace for a publish that omits one, per config.defaultWorkspace:
- * a random slug or the user's email local part. */
-function defaultWorkspace(config: ServerConfigShape, user: AuthUser): string {
-  return config.defaultWorkspace === "random" ? randomSlug() : workspaceFromEmail(user.email);
-}
-
-/** Enforces config.usersCanCreateWorkspaces for new projects: an explicitly requested
- * workspace must already exist or be the user's own username workspace. Workspaces the
- * server assigns itself (per config.defaultWorkspace) are always allowed. */
-function requireUsableWorkspace(
-  db: PrimitiveDbShape,
-  config: ServerConfigShape,
-  user: AuthUser,
-  requestedWorkspace: string | undefined,
-  workspace: string,
-): Effect.Effect<void, SiteStoreError> {
-  return Effect.gen(function* () {
-    if (config.usersCanCreateWorkspaces) return;
-    if (requestedWorkspace == null) return;
-    if (workspace === workspaceFromEmail(user.email)) return;
-    if (yield* workspaceExists(db, workspace)) return;
-    return yield* Effect.fail(new SiteStoreError({
-      status: 403,
-      message: `Workspace does not exist and this server does not allow users to create workspaces: ${workspace}`,
-    }));
-  });
-}
-
-/** Returns true when the workspace already exists, i.e. holds at least one project. */
-function workspaceExists(db: PrimitiveDbShape, workspace: string): Effect.Effect<boolean, SiteStoreError> {
-  return db.list<JsonValue>(PROJECTS_NAMESPACE, { prefix: `${workspace}/`, limit: 1 }).pipe(
-    Effect.mapError(dbError),
-    Effect.map((page) => page.records.length > 0),
-  );
-}
-
-/** Maps config.projectRoutingMode to a new project's deterministic route path:
- * workspace/project, or the owner's email domain in front for userDomain routing. */
-function routePathForProject(
-  config: ServerConfigShape,
-  user: AuthUser,
-  workspace: string,
-  project: string,
-): Effect.Effect<string, SiteStoreError> {
-  if (config.projectRoutingMode === "workspace/project") {
-    return Effect.succeed(`${workspace}/${project}`);
-  }
-  const domain = emailDomain(user.email);
-  if (domain == null) {
-    return Effect.fail(new SiteStoreError({ status: 400, message: `Cannot derive a route domain from email: ${user.email}` }));
-  }
-  return Effect.succeed(`${domain}/${workspace}/${project}`);
-}
-
-/** Extracts the lowercased email domain when it is usable as a route segment. */
-function emailDomain(email: string): string | null {
-  const domain = email.toLowerCase().split("@")[1];
-  return domain != null && isSafeProjectIdentifier(domain) ? domain : null;
-}
-
 /** A decoded DB record plus the version/updatedAt metadata needed for conditional writes. */
 interface LoadedDbRecord<A> {
   readonly value: A;
@@ -569,26 +490,17 @@ interface LoadedDbRecord<A> {
   readonly updatedAt: string;
 }
 
-/** Loads and decodes the project pointer, or null when the project does not exist. */
+/** Loads and decodes the project pointer, or null when the project does not exist.
+ * Rejecting unsafe identifiers here (instead of letting them reach safeDbKey and 500)
+ * turns garbage route/API input into a 404 for every caller. */
 function loadSiteRecord(
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
 ): Effect.Effect<LoadedDbRecord<SiteRecord> | null, SiteStoreError> {
-  return db.get<JsonValue>(PROJECTS_NAMESPACE, projectKey(workspace, project)).pipe(
+  if (!isSafeProjectIdentifier(project)) return Effect.succeed(null);
+  return db.get<JsonValue>(PROJECTS_NAMESPACE, project).pipe(
     Effect.mapError(dbError),
     Effect.flatMap((record) => record == null ? Effect.succeed(null) : decodeDbRecord(record, SiteRecordSchema)),
-  );
-}
-
-/** Loads and decodes a route-index entry, or null when the route is unclaimed. */
-function loadRouteRecord(
-  db: PrimitiveDbShape,
-  routePath: string,
-): Effect.Effect<LoadedDbRecord<RouteRecord> | null, SiteStoreError> {
-  return db.get<JsonValue>(ROUTES_NAMESPACE, routePath).pipe(
-    Effect.mapError(dbError),
-    Effect.flatMap((record) => record == null ? Effect.succeed(null) : decodeDbRecord(record, RouteRecordSchema)),
   );
 }
 
@@ -598,31 +510,16 @@ function putProjectRecord(
   record: SiteRecord,
   options: { readonly ifNoneMatch?: "*"; readonly ifMatch?: number },
 ): Effect.Effect<LoadedDbRecord<SiteRecord>, SiteStoreError> {
-  return db.put(PROJECTS_NAMESPACE, projectKey(record.workspace, record.project), record, options).pipe(
+  return db.put(PROJECTS_NAMESPACE, record.project, record, options).pipe(
     Effect.mapError(dbError),
     Effect.flatMap((written) => decodeDbRecord(written, SiteRecordSchema)),
   );
 }
 
-/** Claims or updates a route-index entry under the given precondition. */
-function putRouteRecord(
-  db: PrimitiveDbShape,
-  routePath: string,
-  workspace: string,
-  project: string,
-  options: { readonly ifNoneMatch?: "*" },
-): Effect.Effect<LoadedDbRecord<RouteRecord>, SiteStoreError> {
-  const record: RouteRecord = { version: 1, routePath, workspace, project };
-  return db.put(ROUTES_NAMESPACE, routePath, record, options).pipe(
-    Effect.mapError(dbError),
-    Effect.flatMap((written) => decodeDbRecord(written, RouteRecordSchema)),
-  );
-}
-
 /** Upserts the owner-index entry that makes the project appear in listings. */
 function putOwnerIndex(db: PrimitiveDbShape, record: SiteRecord): Effect.Effect<void, SiteStoreError> {
-  const value = { version: 1, workspace: record.workspace, project: record.project };
-  return db.put(OWNER_INDEX_NAMESPACE, ownerIndexKey(record.owner, record.workspace, record.project), value).pipe(
+  const value = { version: 2, project: record.project };
+  return db.put(OWNER_INDEX_NAMESPACE, ownerIndexKey(record.owner, record.project), value).pipe(
     Effect.asVoid,
     Effect.mapError(dbError),
   );
@@ -650,12 +547,11 @@ const SiteRevisionJsonSchema = Schema.parseJson(SiteRevisionRecordSchema);
 /** Loads and decodes one immutable revision document, or null when it does not exist. */
 function loadRevisionRecord(
   storage: ObjectStorageShape,
-  workspace: string,
   project: string,
   revisionId: string,
 ): Effect.Effect<SiteRevisionRecord | null, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const key = revisionRecordKey(workspace, project, revisionId);
+    const key = revisionRecordKey(project, revisionId);
     const object = yield* storage.getObject(key);
     if (object == null) return null;
     return yield* Schema.decodeUnknown(SiteRevisionJsonSchema)(new TextDecoder().decode(object.body), { errors: "all" }).pipe(
@@ -669,11 +565,11 @@ function loadRevisionRecord(
   });
 }
 
-/** Fails with 400 when a workspace or project name is not a safe identifier. */
-function requireProjectIdentifier(label: string, value: string): Effect.Effect<void, SiteStoreError> {
+/** Fails with 400 when a project name is not a safe identifier. */
+function requireProjectIdentifier(value: string): Effect.Effect<void, SiteStoreError> {
   return isSafeProjectIdentifier(value)
     ? Effect.void
-    : Effect.fail(new SiteStoreError({ status: 400, message: `Invalid ${label}: ${value}` }));
+    : Effect.fail(new SiteStoreError({ status: 400, message: `Invalid project: ${value}` }));
 }
 
 /** Maps primitive-DB failures onto site-store errors (409 for conflicts, 500 otherwise). */

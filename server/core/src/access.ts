@@ -44,12 +44,30 @@ export function accessGroupIsSubset(candidate: AccessGroup, ceiling: AccessGroup
   return candidateTerms.every((term) => termIsSubset(term, ceilingTerms));
 }
 
-export { isSafeProjectIdentifier, workspaceFromEmail } from "../../../shared/src/site/identifiers";
+export { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
 
-/** Slugs that collide with server-owned routes and cannot start a project URL. */
-const RESERVED_ROUTE_SLUGS: ReadonlySet<string> = new Set(["api", "auth", "health", "favicon.ico", "favicon.svg"]);
+/** Names that cannot be claimed as projects. Projects live at single top-level path
+ * segments, so a project name is also a root path on the content host: server-owned
+ * routes, host-wide root files (a project named "robots.txt" would control crawl policy
+ * for the whole host), and prefixes held back for possible future namespace features
+ * (gh/g and the auth-provider names) are all off limits. Names are permanent once
+ * claimed, so reserve before shipping, not after. This is route policy, not identifier
+ * grammar — the CLI must not hardcode it. Separately, the identifier grammar requires an
+ * alphanumeric first character, so every "_"- and "."-prefixed name (including
+ * ".well-known") is unclaimable without an entry here. */
+const RESERVED_ROUTE_SLUGS: ReadonlySet<string> = new Set([
+  // Server-owned routes.
+  "api", "auth", "health", "favicon.ico", "favicon.svg",
+  // Host-wide root files.
+  "robots.txt", "sitemap.xml", "ads.txt", "app-ads.txt", "security.txt",
+  // Future namespace prefixes.
+  "gh", "g",
+  // Auth/identity providers, same future-namespace rationale.
+  "github", "gitlab", "gl", "bitbucket", "bb", "google", "microsoft", "ms", "apple",
+  "okta", "auth0", "x", "twitter", "facebook", "fb", "linkedin", "li", "slack", "discord",
+]);
 
-/** Returns true when a slug would shadow a server-reserved route prefix (/api, /auth, ...). */
+/** Returns true when a name is reserved and cannot be claimed as a project. */
 export function isReservedSlug(value: string): boolean {
   return RESERVED_ROUTE_SLUGS.has(value.toLowerCase());
 }

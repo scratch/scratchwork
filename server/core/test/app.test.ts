@@ -6,6 +6,9 @@ import { appHandler, bundle, json, testAuth, type MemoryStoredObject } from "./h
 
 const user = { id: "user-1", email: "founder@example.com" };
 
+const TAKEN = (name: string) =>
+  `Project name "${name}" is already taken on this server. Choose another with --project.`;
+
 describe("server app", () => {
   test("publishes files into per-file storage and serves the site", async () => {
     const storage = new Map<string, MemoryStoredObject>();
@@ -17,37 +20,36 @@ describe("server app", () => {
         "style.css": "body { color: red; }",
       }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
       visibility: "public",
     }));
 
     expect(publish.status).toBe(200);
-    const body = await json(publish) as { workspace: string; project: string; routePath: string; url: string };
-    expect(body.workspace).toBe("demo");
+    const body = await json(publish) as { project: string; url: string };
     expect(body.project).toBe("site");
-    expect(body.routePath).toBe("demo/site");
-    expect(body.url).toBe("https://scratch.test/demo/site/");
+    expect(body.url).toBe("https://scratch.test/site/");
     expect([...storage.keys()].some((key) => key.startsWith("blobs/sha256/"))).toBe(true);
-    const revisionKey = [...storage.keys()].find((key) => key.startsWith("projects/demo/site/revisions/"));
+    const revisionKey = [...storage.keys()].find((key) => key.startsWith("projects/site/revisions/"));
     expect(typeof revisionKey).toBe("string");
     expect(new TextDecoder().decode(storage.get(revisionKey ?? "")?.body)).not.toContain("contentBase64");
 
-    const html = await handler(new Request("https://scratch.test/demo/site/"));
+    const html = await handler(new Request("https://scratch.test/site/"));
     expect(html.status).toBe(200);
     expect(html.headers.get("content-security-policy")).toBeNull();
     expect(html.headers.get("referrer-policy")).toBe("same-origin");
     expect(await html.text()).toContain("Hello");
 
-    const css = await handler(new Request("https://scratch.test/demo/site/style.css"));
+    const css = await handler(new Request("https://scratch.test/site/style.css"));
     expect(css.status).toBe(200);
     expect(css.headers.get("content-type")).toContain("text/css");
     expect(await css.text()).toBe("body { color: red; }");
 
-    const encodedSlash = await handler(new Request("https://scratch.test/demo%2Fsite", { redirect: "manual" }));
+    // An encoded slash cannot fabricate a path inside a project.
+    const encodedSlash = await handler(new Request("https://scratch.test/si%2Fte", { redirect: "manual" }));
     expect(encodedSlash.status).toBe(404);
 
-    const encodedSegment = await handler(new Request("https://scratch.test/de%6Do/site/style.css"));
+    // A percent-encoded project segment decodes to the same project.
+    const encodedSegment = await handler(new Request("https://scratch.test/si%74e/style.css"));
     expect(encodedSegment.status).toBe(200);
     expect(encodedSegment.headers.get("content-type")).toContain("text/css");
   });
@@ -57,7 +59,6 @@ describe("server app", () => {
     const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "old", "old.css": "old" }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
       visibility: "public",
     }));
@@ -66,15 +67,14 @@ describe("server app", () => {
     const second = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "new" }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
       visibility: "public",
     }));
     expect(second.status).toBe(200);
 
-    const html = await handler(new Request("https://scratch.test/demo/site/"));
+    const html = await handler(new Request("https://scratch.test/site/"));
     expect(await html.text()).toContain("new");
-    const removed = await handler(new Request("https://scratch.test/demo/site/old.css"));
+    const removed = await handler(new Request("https://scratch.test/site/old.css"));
     expect(removed.status).toBe(404);
   });
 
@@ -83,21 +83,20 @@ describe("server app", () => {
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.md": "# Hello", "evil.svg": "<svg><script>alert(1)</script></svg>" }),
       openPath: "/",
-      workspace: "demo",
       project: "docs",
       visibility: "public",
-    }))) as { routePath: string };
+    }))) as { project: string };
 
-    const html = await handler(new Request(`https://scratch.test/${published.routePath}/`));
+    const html = await handler(new Request(`https://scratch.test/${published.project}/`));
     expect(html.status).toBe(200);
     expect(html.headers.get("content-security-policy")).toBeNull();
     expect(html.headers.get("access-control-allow-origin")).toBe("*");
 
-    const markdown = await handler(new Request(`https://scratch.test/${published.routePath}/index.md`));
+    const markdown = await handler(new Request(`https://scratch.test/${published.project}/index.md`));
     expect(markdown.status).toBe(200);
     expect(markdown.headers.get("access-control-allow-origin")).toBe("*");
 
-    const svg = await handler(new Request(`https://scratch.test/${published.routePath}/evil.svg`));
+    const svg = await handler(new Request(`https://scratch.test/${published.project}/evil.svg`));
     expect(svg.status).toBe(200);
     expect(svg.headers.get("content-security-policy")).toBeNull();
   });
@@ -107,7 +106,6 @@ describe("server app", () => {
     const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "v1" }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
       visibility: "public",
     }));
@@ -116,40 +114,101 @@ describe("server app", () => {
     const second = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "v2" }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
     }));
     expect(second.status).toBe(200);
     expect(((await json(second)) as { visibility: string }).visibility).toBe("public");
 
-    const html = await handler(new Request("https://scratch.test/demo/site/"));
+    const html = await handler(new Request("https://scratch.test/site/"));
     expect(html.status).toBe(200);
     expect(await html.text()).toContain("v2");
   });
 
-  test("rejects reserved slugs that would shadow server routes", async () => {
+  test("rejects reserved project names", async () => {
     const handler = await appHandler({ auth: testAuth(user) });
-    for (const workspace of ["api", "auth", "health"]) {
+    for (const project of ["api", "auth", "health", "gh", "google", "robots.txt"]) {
       const response = await handler(post("/api/publish", {
         bundle: bundle({ "index.html": "hello" }),
         openPath: "/",
-        workspace,
-        project: "docs",
+        project,
         visibility: "public",
       }));
       expect(response.status).toBe(400);
+      expect(await response.text()).toContain(`Project name is reserved: ${project}`);
     }
+  });
 
-    const usernameHandler = await appHandler({
-      auth: testAuth({ id: "user-2", email: "api@example.com" }),
-    });
-    const shadowed = await usernameHandler(post("/api/publish", {
+  test("requires a project name when users set project names", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      project: "docs",
       visibility: "public",
     }));
-    expect(shadowed.status).toBe(400);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("project name is required (pass --project)");
+  });
+
+  test("rejects uppercase project names", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    const response = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "Docs",
+      visibility: "public",
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("Invalid project");
+  });
+
+  test("rejects old clients that still send a workspace field", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    const response = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      workspace: "demo",
+      project: "site",
+      visibility: "public",
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("workspace");
+  });
+
+  test("returns 409 when another user's project name is taken", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const ownerHandler = await appHandler({ db, storage, auth: testAuth(user) });
+    const otherHandler = await appHandler({
+      db,
+      storage,
+      auth: testAuth({ id: "user-2", email: "other@example.com" }),
+    });
+
+    const first = await ownerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "mine" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    expect(first.status).toBe(200);
+
+    const taken = await otherHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "theirs" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    expect(taken.status).toBe(409);
+    expect((await json(taken) as { error: string }).error).toBe(TAKEN("site"));
+
+    // The owner can still republish.
+    const republish = await ownerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "mine v2" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    expect(republish.status).toBe(200);
   });
 
   test("resolves published content paths to their project", async () => {
@@ -159,98 +218,105 @@ describe("server app", () => {
       openPath: "/",
       project: "site",
       visibility: "private",
-    }))) as { workspace: string; routePath: string };
-    expect(published.workspace).toBe("founder");
-    expect(published.routePath).toBe("founder/site");
+    }))) as { project: string };
+    expect(published.project).toBe("site");
 
-    const resolved = await handler(new Request(`https://scratch.test/api/resolve?path=${encodeURIComponent(`/${published.routePath}/index.html`)}`));
+    const resolved = await handler(new Request(`https://scratch.test/api/resolve?path=${encodeURIComponent("/site/index.html")}`));
     expect(resolved.status).toBe(200);
-    const body = await json(resolved) as { project: { workspace: string; project: string } };
-    expect(body.project.workspace).toBe(published.workspace);
+    const body = await json(resolved) as { project: { project: string; url: string } };
     expect(body.project.project).toBe("site");
+    expect(body.project.url).toBe("https://scratch.test/site/");
 
-    const missing = await handler(new Request("https://scratch.test/api/resolve?path=/no-such-route/"));
+    const missing = await handler(new Request("https://scratch.test/api/resolve?path=/no-such-project/"));
     expect(missing.status).toBe(404);
 
     const unauthenticated = await appHandler({ auth: testAuth(user, null), storage: undefined });
-    const denied = await unauthenticated(new Request(`https://scratch.test/api/resolve?path=/${published.routePath}/`));
+    const denied = await unauthenticated(new Request("https://scratch.test/api/resolve?path=/site/"));
     expect(denied.status).toBe(401);
   });
 
-  test("assigns a random workspace when none is sent and defaultWorkspace is random", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { defaultWorkspace: "random" } });
+  test("assigns a random project name when users cannot set project names", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: { usersCanSetProjectNames: false } });
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      project: "site",
       visibility: "public",
-    }))) as { workspace: string; routePath: string };
+    }))) as { project: string; url: string };
 
-    expect(published.workspace).toMatch(/^[a-z2-9]{10}$/);
-    expect(published.routePath).toBe(`${published.workspace}/site`);
+    expect(published.project).toMatch(/^[a-z2-9]{10}$/);
+    expect(published.url).toBe(`https://scratch.test/${published.project}/`);
   });
 
-  test("routes projects under the owner's email domain in userDomain mode", async () => {
-    const handler = await appHandler({
-      auth: testAuth(user),
-      config: { projectRoutingMode: "userDomain/workspace/project" },
-    });
-    const published = await json(await handler(post("/api/publish", {
-      bundle: bundle({ "index.html": "hello" }),
-      openPath: "/",
-      workspace: "demo",
-      project: "site",
-      visibility: "public",
-    }))) as { routePath: string; url: string };
-    expect(published.routePath).toBe("example.com/demo/site");
-    expect(published.url).toBe("https://scratch.test/example.com/demo/site/");
-
-    const html = await handler(new Request("https://scratch.test/example.com/demo/site/"));
-    expect(html.status).toBe(200);
-    expect(await html.text()).toContain("hello");
-
-    // Routing is deterministic: a two-segment path cannot reach a three-segment route.
-    const shallow = await handler(new Request("https://scratch.test/demo/site/"));
-    expect(shallow.status).toBe(404);
-  });
-
-  test("enforces usersCanCreateWorkspaces for explicitly named workspaces", async () => {
+  test("random-name republish by returned slug updates the same project", async () => {
     const db = MemoryPrimitiveDbLive();
-    const publish = (workspace: string | undefined, project: string) => post("/api/publish", {
-      bundle: bundle({ "index.html": "hello" }),
+    const storage = new Map<string, MemoryStoredObject>();
+    const handler = await appHandler({ db, storage, auth: testAuth(user), config: { usersCanSetProjectNames: false } });
+
+    const first = await json(await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v1" }),
       openPath: "/",
-      ...(workspace == null ? {} : { workspace }),
-      project,
       visibility: "public",
-    });
-    const handler = await appHandler({ db, auth: testAuth(user), config: { usersCanCreateWorkspaces: false } });
+    }))) as { project: string };
 
-    // A workspace that does not exist yet cannot be named explicitly.
-    const denied = await handler(publish("team", "site"));
-    expect(denied.status).toBe(403);
+    const second = await json(await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v2" }),
+      openPath: "/",
+      project: first.project,
+      visibility: "public",
+    }))) as { project: string };
+    expect(second.project).toBe(first.project);
 
-    // The user's own username workspace and server-assigned defaults are always allowed.
-    expect((await handler(publish("founder", "site"))).status).toBe(200);
-    expect((await handler(publish(undefined, "site-2"))).status).toBe(200);
-
-    // Once another user's publish creates the workspace, naming it explicitly works.
-    const teamHandler = await appHandler({
-      db,
-      auth: testAuth({ id: "user-3", email: "team@example.com" }),
-      config: { usersCanCreateWorkspaces: false },
-    });
-    expect((await teamHandler(publish(undefined, "roadmap"))).status).toBe(200);
-    const allowed = await handler(publish("team", "site"));
-    expect(allowed.status).toBe(200);
+    const html = await handler(new Request(`https://scratch.test/${first.project}/`));
+    expect(await html.text()).toContain("v2");
   });
 
-  test("lists projects beyond a single database page", async () => {
+  test("random mode mints a fresh slug for an unknown sent name", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: { usersCanSetProjectNames: false } });
+    const published = await json(await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "my-notes",
+      visibility: "public",
+    }))) as { project: string };
+
+    expect(published.project).toMatch(/^[a-z2-9]{10}$/);
+    expect(published.project).not.toBe("my-notes");
+  });
+
+  test("random mode returns 409 for a sent name owned by someone else", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const config = { usersCanSetProjectNames: false } as const;
+    const ownerHandler = await appHandler({ db, storage, auth: testAuth(user), config });
+    const otherHandler = await appHandler({
+      db,
+      storage,
+      auth: testAuth({ id: "user-2", email: "other@example.com" }),
+      config,
+    });
+
+    const first = await json(await ownerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "mine" }),
+      openPath: "/",
+      visibility: "public",
+    }))) as { project: string };
+
+    const taken = await otherHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "theirs" }),
+      openPath: "/",
+      project: first.project,
+      visibility: "public",
+    }));
+    expect(taken.status).toBe(409);
+    expect((await json(taken) as { error: string }).error).toBe(TAKEN(first.project));
+  });
+
+  test("lists projects beyond a single database page with content URLs", async () => {
     const handler = await appHandler({ auth: testAuth(user) });
     for (let index = 0; index < 120; index += 1) {
       const published = await handler(post("/api/publish", {
         bundle: bundle({ "index.html": "hello" }),
         openPath: "/",
-        workspace: "demo",
         project: `site-${String(index).padStart(3, "0")}`,
         visibility: "public",
       }));
@@ -259,8 +325,9 @@ describe("server app", () => {
 
     const response = await handler(new Request("https://scratch.test/api/projects"));
     expect(response.status).toBe(200);
-    const body = await json(response) as { projects: ReadonlyArray<{ project: string }> };
+    const body = await json(response) as { projects: ReadonlyArray<{ project: string; url: string }> };
     expect(body.projects).toHaveLength(120);
+    expect(body.projects[0]?.url).toBe(`https://scratch.test/${body.projects[0]?.project}/`);
   });
 
   test("requires bearer auth for publish when auth is enabled", async () => {
@@ -268,7 +335,6 @@ describe("server app", () => {
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
     }));
 
@@ -280,7 +346,6 @@ describe("server app", () => {
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
       visibility: "public",
     }));
@@ -293,12 +358,24 @@ describe("server app", () => {
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      workspace: "demo",
       project: "site",
       visibility: "public",
     }));
 
     expect(response.status).toBe(403);
+  });
+
+  test("rejects garbage project identifiers with client errors, never 500", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+
+    for (const route of ["", "..", "%2E%2E", ".hidden", "_internal"]) {
+      const response = await handler(new Request(`https://scratch.test/auth/project?route=${route}`, { redirect: "manual" }));
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(response.status).toBeLessThan(500);
+    }
+
+    const apiDelete = await handler(new Request("https://scratch.test/api/projects/%2E%2E", { method: "DELETE" }));
+    expect(apiDelete.status).toBe(404);
   });
 
   test("redirects private content readers through app-domain project auth", async () => {
@@ -313,18 +390,17 @@ describe("server app", () => {
     const publish = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "private" }),
       openPath: "/",
-      workspace: "demo",
       project: "secret",
       visibility: "private",
     }));
     expect(publish.status).toBe(200);
 
-    const response = await handler(new Request("https://pages.scratch.test/demo/secret/", { redirect: "manual" }));
+    const response = await handler(new Request("https://pages.scratch.test/secret/", { redirect: "manual" }));
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "https://invalid");
     expect(location.origin).toBe("https://app.scratch.test");
     expect(location.pathname).toBe("/auth/project");
-    expect(location.searchParams.get("route")).toBe("demo/secret");
+    expect(location.searchParams.get("route")).toBe("secret");
   });
 
   test("redirects auth routes to the configured app origin before setting cookies", async () => {
@@ -376,13 +452,12 @@ describe("server app", () => {
         "hello-world.svg": "<svg></svg>",
       }),
       openPath: "/",
-      workspace: "demo",
       project: "secret",
       visibility: "private",
     }));
     expect(publish.status).toBe(200);
 
-    const response = await handler(new Request("http://scratchwork.local/demo/secret/hello-world.svg", {
+    const response = await handler(new Request("http://scratchwork.local/secret/hello-world.svg", {
       headers: {
         host: "pages.scratch.test",
         "x-forwarded-host": "pages.scratch.test",
@@ -394,8 +469,8 @@ describe("server app", () => {
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "https://invalid");
     expect(location.origin).toBe("https://app.scratch.test");
-    expect(location.searchParams.get("route")).toBe("demo/secret");
-    expect(location.searchParams.get("returnTo")).toBe("https://pages.scratch.test/demo/secret/hello-world.svg");
+    expect(location.searchParams.get("route")).toBe("secret");
+    expect(location.searchParams.get("returnTo")).toBe("https://pages.scratch.test/secret/hello-world.svg");
   });
 
   test("authenticates private content through a handoff token and path-scoped cookie", async () => {
@@ -418,7 +493,6 @@ describe("server app", () => {
     const publish = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "private page body", "data.json": "{\"secret\":true}" }),
       openPath: "/",
-      workspace: "demo",
       project: "secret",
       visibility: "private",
     }, token));
@@ -427,13 +501,13 @@ describe("server app", () => {
     // The app host authenticates the viewer and redirects back with a one-time handoff
     // token in the query string; the app response itself sets no content cookie.
     const appRedirect = await handler(new Request(
-      "https://app.scratch.test/auth/project?route=demo/secret&returnTo=https%3A%2F%2Fpages.scratch.test%2Fdemo%2Fsecret%2F",
+      "https://app.scratch.test/auth/project?route=secret&returnTo=https%3A%2F%2Fpages.scratch.test%2Fsecret%2F",
       { headers: { authorization: `Bearer ${token}` }, redirect: "manual" },
     ));
     expect(appRedirect.status).toBe(302);
     const handoffUrl = new URL(appRedirect.headers.get("location") ?? "https://invalid");
     expect(handoffUrl.origin).toBe("https://pages.scratch.test");
-    expect(handoffUrl.pathname).toBe("/demo/secret/");
+    expect(handoffUrl.pathname).toBe("/secret/");
     expect(handoffUrl.searchParams.get("_scratchwork_handoff")).not.toBeNull();
     expect(appRedirect.headers.get("set-cookie")).toBeNull();
 
@@ -441,17 +515,17 @@ describe("server app", () => {
     // to the clean URL, keeping the token out of the address bar and shareable links.
     const redeem = await handler(new Request(handoffUrl.toString(), { redirect: "manual" }));
     expect(redeem.status).toBe(302);
-    expect(redeem.headers.get("location")).toBe("/demo/secret/");
+    expect(redeem.headers.get("location")).toBe("/secret/");
     const setCookie = redeem.headers.get("set-cookie") ?? "";
-    expect(setCookie).toContain("__Secure-scratchwork_access_demo_secret=");
-    expect(setCookie).toContain("Path=/demo/secret");
+    expect(setCookie).toContain("__Secure-scratchwork_access_secret=");
+    expect(setCookie).toContain("Path=/secret");
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=Lax");
     expect(setCookie).toContain("Secure");
     const cookie = setCookie.split(";")[0];
 
     // The clean URL now serves the document with the cookie, without a sandbox CSP.
-    const doc = await handler(new Request("https://pages.scratch.test/demo/secret/", {
+    const doc = await handler(new Request("https://pages.scratch.test/secret/", {
       headers: { cookie, "sec-fetch-dest": "document" },
     }));
     expect(doc.status).toBe(200);
@@ -461,25 +535,25 @@ describe("server app", () => {
     expect(doc.headers.get("access-control-allow-origin")).toBeNull();
 
     // Renderer subresource fetches carry the cookie plus a same-project referer.
-    const asset = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
-      headers: { cookie, "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/demo/secret/" },
+    const asset = await handler(new Request("https://pages.scratch.test/secret/data.json", {
+      headers: { cookie, "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/secret/" },
     }));
     expect(asset.status).toBe(200);
     expect(await asset.text()).toContain("secret");
 
     // Clients without Sec-Fetch headers (old browsers, curl with the cookie) still work.
-    const legacy = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+    const legacy = await handler(new Request("https://pages.scratch.test/secret/data.json", {
       headers: { cookie },
     }));
     expect(legacy.status).toBe(200);
 
     // A missing trailing slash canonicalizes onto the cookie's path scope.
-    const noSlash = await handler(new Request("https://pages.scratch.test/demo/secret", {
+    const noSlash = await handler(new Request("https://pages.scratch.test/secret", {
       headers: { cookie },
       redirect: "manual",
     }));
     expect(noSlash.status).toBe(308);
-    expect(noSlash.headers.get("location")).toBe("/demo/secret/");
+    expect(noSlash.headers.get("location")).toBe("/secret/");
   });
 
   test("rejects cross-project and unauthenticated access to private content", async () => {
@@ -503,7 +577,6 @@ describe("server app", () => {
       const publish = await handler(post("/api/publish", {
         bundle: bundle({ "index.html": `${project} body`, "data.json": "{}" }),
         openPath: "/",
-        workspace: "demo",
         project,
         visibility: "private",
       }, token));
@@ -511,7 +584,7 @@ describe("server app", () => {
     }
 
     const appRedirect = await handler(new Request(
-      "https://app.scratch.test/auth/project?route=demo/secret&returnTo=https%3A%2F%2Fpages.scratch.test%2Fdemo%2Fsecret%2F",
+      "https://app.scratch.test/auth/project?route=secret&returnTo=https%3A%2F%2Fpages.scratch.test%2Fsecret%2F",
       { headers: { authorization: `Bearer ${token}` }, redirect: "manual" },
     ));
     const handoffUrl = new URL(appRedirect.headers.get("location") ?? "https://invalid");
@@ -520,23 +593,23 @@ describe("server app", () => {
 
     // Another project's page cannot fetch private content even with the cookie attached:
     // its referer is outside the project.
-    const crossFetch = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+    const crossFetch = await handler(new Request("https://pages.scratch.test/secret/data.json", {
       headers: { cookie, "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/evil/" },
     }));
     expect(crossFetch.status).toBe(403);
 
     // Neither can it iframe the project, or strip the referrer to hide where it came from.
-    const crossFrame = await handler(new Request("https://pages.scratch.test/demo/secret/", {
+    const crossFrame = await handler(new Request("https://pages.scratch.test/secret/", {
       headers: { cookie, "sec-fetch-dest": "iframe", referer: "https://pages.scratch.test/evil/" },
     }));
     expect(crossFrame.status).toBe(403);
-    const strippedReferer = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
+    const strippedReferer = await handler(new Request("https://pages.scratch.test/secret/data.json", {
       headers: { cookie, "sec-fetch-dest": "empty" },
     }));
     expect(strippedReferer.status).toBe(403);
 
-    // A cookie minted for demo/secret does not open a different project.
-    const crossProject = await handler(new Request("https://pages.scratch.test/demo/other/", {
+    // A cookie minted for one project does not open a different project.
+    const crossProject = await handler(new Request("https://pages.scratch.test/other/", {
       headers: { cookie },
       redirect: "manual",
     }));
@@ -544,18 +617,18 @@ describe("server app", () => {
     expect(new URL(crossProject.headers.get("location") ?? "https://invalid").pathname).toBe("/auth/project");
 
     // An unauthenticated subresource request fails fast instead of redirecting into OAuth.
-    const anonFetch = await handler(new Request("https://pages.scratch.test/demo/secret/data.json", {
-      headers: { "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/demo/secret/" },
+    const anonFetch = await handler(new Request("https://pages.scratch.test/secret/data.json", {
+      headers: { "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/secret/" },
     }));
     expect(anonFetch.status).toBe(401);
 
     // A bogus handoff token bounces to the clean URL (re-running the handoff) with no cookie.
     const garbage = await handler(new Request(
-      "https://pages.scratch.test/demo/secret/?_scratchwork_handoff=not-a-real-token",
+      "https://pages.scratch.test/secret/?_scratchwork_handoff=not-a-real-token",
       { redirect: "manual" },
     ));
     expect(garbage.status).toBe(302);
-    expect(garbage.headers.get("location")).toBe("/demo/secret/");
+    expect(garbage.headers.get("location")).toBe("/secret/");
     expect(garbage.headers.get("set-cookie")).toBeNull();
   });
 
