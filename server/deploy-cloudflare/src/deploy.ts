@@ -11,6 +11,7 @@ import { copyEnv, definedEnv, loadDeployEnv, type DeployEnv } from "../../script
 import { createRunner } from "../../scripts/proc";
 import {
   deployArgv,
+  homepagePublishHint,
   optional,
   resolveServerConfig,
   serverConfigEnv,
@@ -136,6 +137,9 @@ export async function deployServer(
   await putSecret(commandEnv, env, "SCRATCHWORK_GOOGLE_CLIENT_SECRET");
   await putSecret(commandEnv, env, "SCRATCHWORK_SESSION_SECRET");
 
+  const homepageHint = homepagePublishHint(serverConfig, resolvedServer);
+  if (homepageHint != null) console.log(homepageHint);
+
   return {
     workerName: resolvedDeploy.workerName,
     bucketName: resolvedDeploy.bucketName,
@@ -223,6 +227,8 @@ async function writeConfig(
   copyEnv(vars, env, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES");
   copyEnv(vars, env, "SCRATCHWORK_DEFAULT_VISIBILITY");
+  copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_DOMAINS");
+  copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_PROJECT");
   if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;
   if (server.contentUrl != null && server.contentUrl !== "") vars.SCRATCHWORK_CONTENT_URL = server.contentUrl;
   await writeFile(

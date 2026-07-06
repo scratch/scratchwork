@@ -44,11 +44,16 @@ export function runLocalServer(options: RunLocalServerOptions = {}): void {
   const localPort = processEnv.PORT ?? processEnv.SCRATCHWORK_PORT ?? "43118";
   const splitHosts = server.appDomain != null && server.contentDomain != null && server.appDomain !== server.contentDomain;
   const appUrl = processEnv.SCRATCHWORK_APP_URL ?? `http://localhost:${localPort}`;
+  // A configured homepage gets its own loopback origin, mirroring the cloud host split,
+  // so home-domain routing and the "/"-scoped access cookie work the same way locally.
+  const homepageUrl = processEnv.SCRATCHWORK_HOMEPAGE_DOMAINS
+    ?? (server.homepageProject == null ? undefined : `http://home.localhost:${localPort}`);
   const env: EnvVars = {
     ...processEnv,
     ...serverSettingsEnv(server, processEnv),
     SCRATCHWORK_APP_URL: appUrl,
     SCRATCHWORK_CONTENT_URL: processEnv.SCRATCHWORK_CONTENT_URL ?? (splitHosts ? `http://pages.localhost:${localPort}` : appUrl),
+    ...(homepageUrl == null ? {} : { SCRATCHWORK_HOMEPAGE_DOMAINS: homepageUrl }),
     PORT: localPort,
   };
 
@@ -82,6 +87,7 @@ export function runLocalServer(options: RunLocalServerOptions = {}): void {
           "scratchwork local deploy",
           `app      ${resolvedAppUrl}`,
           `content  ${resolvedContentUrl}`,
+          ...(config.homepageUrls.length === 0 ? [] : [`home     ${config.homepageUrls[0]} (project "${config.homepageProject}")`]),
           `storage  local:${storageDirectory}`,
         ].join("\n"),
       );
@@ -109,5 +115,6 @@ function serverSettingsEnv(server: ScratchworkServerConfig, processEnv: EnvVars)
   set("SCRATCHWORK_SHARE_ALLOWED_DOMAINS", server.shareAllowedDomains);
   set("SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES", server.usersCanSetProjectNames == null ? undefined : String(server.usersCanSetProjectNames));
   set("SCRATCHWORK_DEFAULT_VISIBILITY", server.defaultVisibility);
+  set("SCRATCHWORK_HOMEPAGE_PROJECT", server.homepageProject);
   return env;
 }

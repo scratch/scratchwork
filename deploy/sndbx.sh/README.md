@@ -20,9 +20,21 @@ The server settings (domains, auth policy, visibility rules) live in
 `deploy.ts` adds the Cloudflare-specific bindings. Secrets are read from `.env`
 in this directory and the shell environment.
 It binds the Worker with routes for `app.sndbx.sh/*` (app/API/auth),
-`pages.sndbx.sh/*` (published content), and the legacy `www.sndbx.sh/*` and
-`sndbx.sh/*` routes. The Worker name is `scratchwork`, matching the existing
+`pages.sndbx.sh/*` (published content), and the home domains `sndbx.sh/*` and
+`www.sndbx.sh/*`, which serve the homepage project `www` (`homepageDomains` /
+`homepageProject` in `server-config.ts`; `www.sndbx.sh` 308-redirects to
+`sndbx.sh`). The Worker name is `scratchwork`, matching the existing
 Cloudflare route assignment for those hostnames.
+
+The homepage is an ordinary project: after a fresh deploy, publish it with
+
+```sh
+scratchwork publish --server https://app.sndbx.sh --project www --visibility public
+```
+
+(the deploy output prints this command). Until then, `sndbx.sh` serves a
+setup page with the same instructions. Re-publishing updates the homepage;
+no redeploy needed.
 
 Configure the Google OAuth redirect URI as:
 
@@ -40,9 +52,10 @@ bun run local:sndbx.sh   # from the repo root, or `bun run local` here
 ```
 
 Because the config declares separate app and content domains, the local run
-mirrors that split on one port: the app/API on `http://localhost:43118` and
-published content on `http://pages.localhost:43118` (`*.localhost` names are
-loopback per RFC 6761; browsers and macOS resolve them without setup). The app
+mirrors that split on one port: the app/API on `http://localhost:43118`,
+published content on `http://pages.localhost:43118`, and the homepage project
+on `http://home.localhost:43118` (`*.localhost` names are loopback per RFC
+6761; browsers and macOS resolve them without setup). The app
 stays on plain `localhost` because Google OAuth accepts it as an http redirect
 URI. Set `PORT` to change the port, and `SCRATCHWORK_STORAGE_DIR` to relocate
 storage (default `.scratchwork-local-data` in this directory). Any

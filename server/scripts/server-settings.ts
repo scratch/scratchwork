@@ -21,6 +21,12 @@ export interface ScratchworkServerConfig {
   readonly shareAllowedDomains?: string;
   readonly appDomain?: string;
   readonly contentDomain?: string;
+  /** Hostnames served from the homepage project; the first is canonical, the rest 308 to
+   * it. Set together with homepageProject, and keep them distinct from appDomain and
+   * contentDomain. Like those, they do not create DNS records or provider routing. */
+  readonly homepageDomains?: ReadonlyArray<string>;
+  /** Globally unique name of the project served on the homepage domains. */
+  readonly homepageProject?: string;
   readonly usersCanSetProjectNames?: boolean;
   readonly defaultVisibility?: string;
 }
@@ -69,9 +75,26 @@ export function serverConfigEnv(config: ScratchworkServerConfig, resolved: Resol
   if (config.shareAllowedDomains != null) env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS = config.shareAllowedDomains;
   if (config.usersCanSetProjectNames != null) env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES = String(config.usersCanSetProjectNames);
   if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
+  if (config.homepageDomains != null && config.homepageDomains.length > 0) {
+    env.SCRATCHWORK_HOMEPAGE_DOMAINS = config.homepageDomains.join(",");
+  }
+  if (config.homepageProject != null) env.SCRATCHWORK_HOMEPAGE_PROJECT = config.homepageProject;
   if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
   if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;
   return env;
+}
+
+/** The exact publish command that creates the configured homepage project, or null when
+ * the deploy has no homepage. Deploys print this so a fresh server can be finished from
+ * the terminal; until the project is published, home-domain requests serve the same
+ * instructions. */
+export function homepagePublishHint(
+  config: ScratchworkServerConfig,
+  resolved: ResolvedScratchworkServerConfig,
+): string | null {
+  if (config.homepageProject == null) return null;
+  const server = resolved.appUrl ?? "<app url>";
+  return `publish the homepage with: scratchwork publish --server ${server} --project ${config.homepageProject} --visibility public`;
 }
 
 /** Validates required OAuth secrets before a deploy. Auth cannot be disabled. */

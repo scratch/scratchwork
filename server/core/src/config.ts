@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { nonEmpty } from "../../../shared/src/util/strings";
 import { isLoopbackHost } from "../../../shared/src/util/url";
-import { normalizeAccessGroup, safeDomain, type AccessGroup } from "./access";
+import { isReservedSlug, isSafeProjectIdentifier, normalizeAccessGroup, safeDomain, type AccessGroup } from "./access";
 
 /** An environment-variable map from any platform (process.env, Worker vars, Lambda env). */
 export type EnvVars = Readonly<Record<string, string | undefined>>;
@@ -16,6 +16,11 @@ export interface ServerConfigShape {
   readonly appUrl?: string;
   /** Public origin of the content host (published sites), when configured. */
   readonly contentUrl?: string;
+  /** Origins served from the homepage project (first is canonical, the rest 308 to it).
+   * Empty when the server has no homepage. */
+  readonly homepageUrls: ReadonlyArray<string>;
+  /** Name of the project served on the homepage origins; set iff homepageUrls is non-empty. */
+  readonly homepageProject?: string;
   /** Server-wide ceiling on how visible any project may be. */
   readonly maxVisibility: AccessGroup;
   /** When non-empty, explicit share targets must fall inside these domains. */
@@ -71,16 +76,20 @@ export function readServerConfig(
       return yield* Effect.fail(invalidValue("PORT", portValue, 'an integer between 1 and 65535, like "3001"'));
     }
 
+    const appUrl = yield* readPublicUrl(
+      nonEmpty(env.SCRATCHWORK_APP_URL) ?? urlFromDomain(env.SCRATCHWORK_APP_DOMAIN),
+      "SCRATCHWORK_APP_URL",
+    );
+    const contentUrl = yield* readPublicUrl(
+      nonEmpty(env.SCRATCHWORK_CONTENT_URL) ?? urlFromDomain(env.SCRATCHWORK_CONTENT_DOMAIN),
+      "SCRATCHWORK_CONTENT_URL",
+    );
+
     return {
       port,
-      appUrl: yield* readPublicUrl(
-        nonEmpty(env.SCRATCHWORK_APP_URL) ?? urlFromDomain(env.SCRATCHWORK_APP_DOMAIN),
-        "SCRATCHWORK_APP_URL",
-      ),
-      contentUrl: yield* readPublicUrl(
-        nonEmpty(env.SCRATCHWORK_CONTENT_URL) ?? urlFromDomain(env.SCRATCHWORK_CONTENT_DOMAIN),
-        "SCRATCHWORK_CONTENT_URL",
-      ),
+      appUrl,
+      contentUrl,
+      ...(yield* readHomepage(env, appUrl, contentUrl)),
       maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
       shareAllowedDomains: yield* readDomainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS"),
       usersCanSetProjectNames: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES, true, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES"),
@@ -107,6 +116,50 @@ function readPublicUrl(value: string | undefined, name: string): Effect.Effect<s
   } catch {
     return Effect.fail(invalidValue(name, value, 'a URL, like "https://example.com"'));
   }
+}
+
+/** Parses the optional server-homepage settings: the origins served from the homepage
+ * project (bare domains or full origins, comma-separated; the first is canonical) and
+ * the project's name. Set both or neither. The homepage origins must be distinct from
+ * the app and content origins, since the hostname decides the routing model. */
+function readHomepage(
+  env: EnvVars,
+  appUrl: string | undefined,
+  contentUrl: string | undefined,
+): Effect.Effect<Pick<ServerConfigShape, "homepageUrls" | "homepageProject">, ServerConfigError> {
+  return Effect.gen(function* () {
+    const domains = nonEmpty(env.SCRATCHWORK_HOMEPAGE_DOMAINS?.trim());
+    const project = nonEmpty(env.SCRATCHWORK_HOMEPAGE_PROJECT?.trim());
+    if (domains == null && project == null) return { homepageUrls: [] };
+    if (domains == null || project == null) {
+      return yield* Effect.fail(
+        new ServerConfigError({
+          message: "SCRATCHWORK_HOMEPAGE_DOMAINS and SCRATCHWORK_HOMEPAGE_PROJECT must be set together: the domains say where the homepage is served, the project says which project it is",
+        }),
+      );
+    }
+    if (!isSafeProjectIdentifier(project) || isReservedSlug(project)) {
+      return yield* Effect.fail(invalidValue("SCRATCHWORK_HOMEPAGE_PROJECT", project, 'a publishable project name, like "home"'));
+    }
+
+    const homepageUrls: Array<string> = [];
+    for (const item of csvItems(domains)) {
+      const url = yield* readPublicUrl(urlFromDomain(item), "SCRATCHWORK_HOMEPAGE_DOMAINS");
+      if (url == null || homepageUrls.includes(url)) continue;
+      if (url === appUrl || url === contentUrl) {
+        return yield* Effect.fail(
+          invalidValue("SCRATCHWORK_HOMEPAGE_DOMAINS", item, "a homepage origin distinct from the app and content origins, which use path-based routing"),
+        );
+      }
+      homepageUrls.push(url);
+    }
+    if (homepageUrls.length === 0) {
+      return yield* Effect.fail(
+        invalidValue("SCRATCHWORK_HOMEPAGE_DOMAINS", domains, 'a comma-separated list of domains or origins, like "example.com,www.example.com"'),
+      );
+    }
+    return { homepageUrls, homepageProject: project };
+  });
 }
 
 /** Parses required OAuth settings from environment variables. Auth cannot be disabled. */

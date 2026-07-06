@@ -36,6 +36,7 @@ function record(visibility: string, groups: { readers?: string; writers?: string
 function config(maxVisibility: string): ServerConfigShape {
   return {
     port: 3001,
+    homepageUrls: [],
     maxVisibility,
     shareAllowedDomains: new Set(),
     usersCanSetProjectNames: true,

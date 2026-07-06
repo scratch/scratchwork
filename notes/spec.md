@@ -71,8 +71,8 @@ export const server = {
   // home domain is canonical; the others 308-redirect to it. Home domains must
   // be distinct from appDomain and contentDomain, and like those hostnames they
   // do not create DNS records or provider routing. See "Server homepage" below.
-  homeDomains: ["example.com", "www.example.com"],
-  homeProject: "home",
+  homepageDomains: ["example.com", "www.example.com"],
+  homepageProject: "home",
 
   // Authentication method. "oauth" is the only supported option; auth cannot be disabled.
   // Every server requires OAuth credentials, and every project has an owner.
@@ -235,8 +235,8 @@ A server can serve a homepage project on its home domains — typically the nake
 
 Two server config fields, set together (setting one without the other is a config error):
 
-- `homeDomains` — the hostnames served from the homepage project. The first entry is the canonical home origin; requests to the other entries receive a 308 redirect to it. Home domains must be distinct from `appDomain` and `contentDomain`.
-- `homeProject` — the globally unique name of the homepage project.
+- `homepageDomains` — the hostnames served from the homepage project. The first entry is the canonical home origin; requests to the other entries receive a 308 redirect to it. Home domains must be distinct from `appDomain` and `contentDomain`.
+- `homepageProject` — the globally unique name of the homepage project.
 
 As with `appDomain` and `contentDomain`, these are canonical names consumed by the running server; they do not create DNS records or attach provider infrastructure. The provider deploy config must bind the home hostnames to the server — for Cloudflare, route patterns such as `example.com/*` and `www.example.com/*`; for AWS, external CloudFront/DNS configuration, the same as the other hostnames.
 
@@ -246,11 +246,11 @@ The hostname determines which routing model applies:
 
 - On the app domain, the server exposes auth and the API.
 - On the content domain, the first path segment is the project name and a site's files are served under `/<project>/`.
-- On a home domain, path-based project routing is disabled and the entire path space belongs to the homepage project: the full request path resolves as a file path inside `homeProject`, through the same serve pipeline (markdown rendering, extensionless HTML, index handling, default favicon).
+- On a home domain, path-based project routing is disabled and the entire path space belongs to the homepage project: the full request path resolves as a file path inside `homepageProject`, through the same serve pipeline (markdown rendering, extensionless HTML, index handling, default favicon).
 
 This keeps routing deterministic — on any given host, a request path still resolves to at most one route. The reserved path prefixes keep their server-level behavior on every host, including home domains: `/auth/*` redirects to the app origin, and `/api/*` and `/health` are never served from project files. Homepage files under those prefixes are unreachable; everything else, including `/favicon.ico`, resolves within the project.
 
-The homepage project also remains addressable at its normal content route (`pages.example.com/<project>/`). When the published project is the configured `homeProject`, the publish response and the saved project config report the canonical home origin as the project `url`.
+The homepage project also remains addressable at its normal content route (`pages.example.com/<project>/`). When the published project is the configured `homepageProject`, the publish response and the saved project config report the canonical home origin as the project `url`.
 
 Access control is unchanged: the homepage project has an owner, a visibility toggle, and grant groups, checked on every request under the server's `maxVisibility` ceiling. A non-public homepage runs the standard project-access handoff, with the access cookie scoped to `/` on the home origin. Because the home origin is separate from the content origin, homepage JavaScript does not share an origin with projects on the content domain, so the same-origin exposures described under Security do not extend across the two hosts. Most servers will want the homepage published as `public`.
 
@@ -266,14 +266,14 @@ scratchwork publish --server https://app.example.com \
 
 Two affordances make this easy to get right:
 
-- When `homeProject` is configured, the deploy output prints the exact publish command above, derived from the server config.
+- When `homepageProject` is configured, the deploy output prints the exact publish command above, derived from the server config.
 - Until the homepage project exists, requests to a home domain return a plain setup page carrying the same instructions, instead of the generic server banner. A freshly deployed server tells its own deployer how to finish setting it up.
 
 Updating the homepage is a re-publish (or `scratchwork stream` while iterating); it never requires a redeploy. Changing which project is the homepage, or which hostnames serve it, is a config change and a redeploy, like any other server setting.
 
 ### Claiming the homepage name
 
-The server does not reserve the `homeProject` name. On a server with open `allowedUsers` and `usersCanSetProjectNames: true`, the first user to publish a name owns it — including the configured homepage name. Deployers of open servers should publish the homepage promptly after the first deploy. On a server with `usersCanSetProjectNames: false` a name cannot be predeclared at all: publish the homepage first, then set `homeProject` to the returned slug and redeploy — a predeclared homepage really wants user-set names. If a stronger guarantee is needed later, a config-level owner restriction on the home project is a natural extension.
+The server does not reserve the `homepageProject` name. On a server with open `allowedUsers` and `usersCanSetProjectNames: true`, the first user to publish a name owns it — including the configured homepage name. Deployers of open servers should publish the homepage promptly after the first deploy. On a server with `usersCanSetProjectNames: false` a name cannot be predeclared at all: publish the homepage first, then set `homepageProject` to the returned slug and redeploy — a predeclared homepage really wants user-set names. If a stronger guarantee is needed later, a config-level owner restriction on the home project is a natural extension.
 
 ## Scratchwork CLI interface
 
@@ -370,7 +370,7 @@ The server exposes an API on the `app.` subdomain, and serves published projects
 
 Published pages are served with normal, unrestrictive policies — no `Content-Security-Policy: sandbox` — so published JavaScript behaves like an ordinary static site. Isolation from the API and the login session comes from the host split alone: the `app.` session cookie is host-bound and never visible to `pages.`.
 
-To view a non-public project in the browser, a viewer needs a _project access cookie_ for that project. When a user requests a non-public project at its clean URL (`pages.example.com/<project>/...`), the content host redirects them to `app.example.com/auth/project?route=<project>&returnTo=<content-url>`, where they authenticate if needed via the `app.`-scoped session cookie. If they hold at least read access (public visibility, a grant naming their email or domain, or ownership) under the server `maxVisibility` ceiling, `app.` mints a **handoff token** — an HMAC-signed, ~60-second, single-purpose token bound to the project name, a path scope (normally `/<project>`, carried as its own claim so a future homepage alias can scope to `/`), and the viewer email — and redirects back to the content URL with the token in a reserved query parameter (`?_scratchwork_handoff=...`). The content host redeems it: it re-signs the same claims as a longer-lived **cookie token** (`authSessionSeconds`, matching the app session) and sets it as an `HttpOnly; Secure; SameSite=Lax` cookie scoped to `Path=/<project>`, then immediately redirects to the clean URL. The token never stays in the address bar, so the URL a viewer shares never carries a credential; a recipient who follows it just runs the same handoff under their own identity. An invalid or expired handoff token redirects to the clean URL, which re-runs the handoff.
+To view a non-public project in the browser, a viewer needs a _project access cookie_ for that project. When a user requests a non-public project at its clean URL (`pages.example.com/<project>/...`), the content host redirects them to `app.example.com/auth/project?route=<project>&returnTo=<content-url>`, where they authenticate if needed via the `app.`-scoped session cookie. If they hold at least read access (public visibility, a grant naming their email or domain, or ownership) under the server `maxVisibility` ceiling, `app.` mints a **handoff token** — an HMAC-signed, ~60-second, single-purpose token bound to the project name and the viewer email — and redirects back to the content URL with the token in a reserved query parameter (`?_scratchwork_handoff=...`). The content host redeems it: it re-signs the same claims as a longer-lived **cookie token** (`authSessionSeconds`, matching the app session) and sets it as an `HttpOnly; Secure; SameSite=Lax` cookie whose `Path` matches where the redeeming host serves the project — `/<project>` on the content host, `/` on a home origin — then immediately redirects to the clean URL. The token never stays in the address bar, so the URL a viewer shares never carries a credential; a recipient who follows it just runs the same handoff under their own identity. An invalid or expired handoff token redirects to the clean URL, which re-runs the handoff.
 
 Every private-content request re-verifies the cookie signature and re-checks project access (the visibility toggle, grant groups, and `maxVisibility`) against the cookie's email, so revoking access (unpublish, revoke, tightened policy) takes effect immediately despite the long-lived cookie. The redirect dance only repeats when the cookie expires or access changes. Because the cookie is minted by the content host for its own hostname, the flow does not depend on `app.` and `pages.` sharing a registrable domain.
 

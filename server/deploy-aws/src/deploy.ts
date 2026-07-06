@@ -10,6 +10,7 @@ import { definedEnv, loadDeployEnv, type DeployEnv } from "../../scripts/env";
 import { createRunner, type RunOptions, type RunResult } from "../../scripts/proc";
 import {
   deployArgv,
+  homepagePublishHint,
   optional,
   resolveServerConfig,
   serverConfigEnv,
@@ -119,6 +120,9 @@ export async function deployServer(
   await writeEnvironment(env, bucketName, resolvedDeploy.storageRegion, tableName);
   await upsertFunction(aws, resolvedDeploy.functionName, roleArn);
   const url = await ensureFunctionUrl(aws, awsText, resolvedDeploy.functionName);
+
+  const homepageHint = homepagePublishHint(serverConfig, resolvedServer);
+  if (homepageHint != null) console.log(homepageHint);
 
   return {
     url,

@@ -72,6 +72,15 @@ Project naming:
 SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES=true
 ```
 
+Server homepage (optional, set both together): serve one ordinary project across the
+whole path space of the server's home domains. The first domain is canonical; the
+others 308-redirect to it. Keep them distinct from the app and content hosts.
+
+```sh
+SCRATCHWORK_HOMEPAGE_DOMAINS=example.com,www.example.com
+SCRATCHWORK_HOMEPAGE_PROJECT=home
+```
+
 CLI users authenticate once per server:
 
 ```sh
