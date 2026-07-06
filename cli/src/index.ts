@@ -78,8 +78,7 @@ const publishCommand = Command.make(
   {
     path: pathArg("path", ".", "File or directory to publish. Default: current directory. Directories are uploaded recursively, excluding .git, node_modules, and .scratchwork-data."),
     server: textOption("server", "url", "Scratchwork app server, such as sndbx.sh or https://app.sndbx.sh. Required on first publish; later publishes read it from .scratchwork.json."),
-    workspace: textOption("workspace", "name", "Workspace/owner segment for the published URL. Default: saved config, or the server's default workspace policy."),
-    project: textOption("project", "name", "Project name segment for the published URL. Default: saved config or the published directory name."),
+    project: textOption("project", "name", "Project name for the published URL. Default: saved config, the directory name, or the file name without its extension. Servers in random-naming mode assign a name on first publish."),
     visibility: textOption("visibility", "scope", "Access level: private, public, an email address, or a domain group like @example.com. Default: saved config, the project's current visibility, or the server default."),
   },
   runPublish,
@@ -87,7 +86,6 @@ const publishCommand = Command.make(
 
 const projectRefOptions = {
   server: textOption("server", "url", "Scratchwork app server. May be omitted when the project reference or .scratchwork.json provides it."),
-  workspace: textOption("workspace", "name", "Workspace/owner name. Overrides values from .scratchwork.json or a URL."),
   project: textOption("project", "name", "Project name. Overrides values from .scratchwork.json or a URL."),
   pathOrUrl: pathArg("path-or-url", ".", "Published project URL or a local path containing .scratchwork.json. Default: current directory."),
 };
@@ -131,7 +129,7 @@ const unpublishCommand = Command.make("unpublish", projectRefOptions, runUnpubli
 );
 
 const deleteCommand = Command.make("delete", projectRefOptions, runDelete).pipe(
-  Command.withDescription("Delete a project pointer and route from the server"),
+  Command.withDescription("Delete a project from the server, releasing its name"),
 );
 
 const cloneCommand = Command.make(

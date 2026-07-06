@@ -33,6 +33,7 @@ export function resolveDevTarget(
       return {
         root: paths.dirname(target),
         openPath: openPathForFile(paths.basename(target)),
+        file: paths.basename(target),
       };
     }
     return yield* noSuchFile(command, target);

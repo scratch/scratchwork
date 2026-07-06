@@ -71,12 +71,15 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
   },
   publish: {
     notes: [
-      "Writes .scratchwork.json after a successful publish so later project commands can omit server/workspace/project.",
+      "Writes .scratchwork.json after a successful publish so later project commands can omit server/project.",
+      "Default project name: the directory name, or the file name without its extension for a file target.",
+      "On servers that assign random project names, the first publish returns the assigned name; it is saved to .scratchwork.json so republishes update the same project.",
       "If the server returns 401, the CLI starts scratchwork login and retries.",
     ],
     examples: [
       "scratchwork publish . --server sndbx.sh --visibility public",
-      "scratchwork publish docs --server https://app.sndbx.sh --workspace koomen --project hello-world",
+      "scratchwork publish notes.md --server sndbx.sh",
+      "scratchwork publish docs --server https://app.sndbx.sh --project hello-world",
       "scratchwork publish --visibility private",
     ],
   },
@@ -103,31 +106,31 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
     ],
   },
   info: {
-    notes: ["Explicit --workspace and --project override values found in .scratchwork.json or a URL."],
+    notes: ["An explicit --project overrides values found in .scratchwork.json or a URL."],
     examples: [
-      "scratchwork info https://pages.sndbx.sh/koomen/hello-world/",
-      "scratchwork info --server sndbx.sh --workspace koomen --project hello-world",
+      "scratchwork info https://pages.sndbx.sh/hello-world/",
+      "scratchwork info --server sndbx.sh --project hello-world",
       "scratchwork info",
     ],
   },
   unpublish: {
     notes: ["This does not delete files or project metadata; it changes visibility to private."],
     examples: [
-      "scratchwork unpublish https://pages.sndbx.sh/koomen/hello-world/",
-      "scratchwork unpublish --server sndbx.sh --workspace koomen --project hello-world",
+      "scratchwork unpublish https://pages.sndbx.sh/hello-world/",
+      "scratchwork unpublish --server sndbx.sh --project hello-world",
     ],
   },
   delete: {
-    notes: ["Requires project ownership. Use carefully; the route is removed from the server index."],
+    notes: ["Requires project ownership. Use carefully; deleting releases the project name for anyone to claim."],
     examples: [
-      "scratchwork delete https://pages.sndbx.sh/koomen/old-demo/",
-      "scratchwork delete --server sndbx.sh --workspace koomen --project old-demo",
+      "scratchwork delete https://pages.sndbx.sh/old-demo/",
+      "scratchwork delete --server sndbx.sh --project old-demo",
     ],
   },
   clone: {
-    notes: ["Uses stored login credentials for private projects."],
+    notes: ["Uses stored login credentials for private projects. Writes .scratchwork.json into the destination so a republish updates the same project."],
     examples: [
-      "scratchwork clone https://pages.sndbx.sh/koomen/hello-world/",
+      "scratchwork clone https://pages.sndbx.sh/hello-world/",
       "scratchwork clone .",
     ],
   },

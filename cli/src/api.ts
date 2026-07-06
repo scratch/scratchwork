@@ -31,10 +31,9 @@ export interface ApiRequestOptions {
   readonly body?: unknown;
 }
 
-/** A workspace/project pair fully resolved to the server that hosts it. */
+/** A project name fully resolved to the server that hosts it. */
 export interface ResolvedProjectRef {
   readonly server: string;
-  readonly workspace: string;
   readonly project: string;
 }
 
@@ -93,21 +92,21 @@ export function apiErrorText(response: ApiResponse): string {
 export function projectApiUrl(ref: ResolvedProjectRef, suffix = ""): URL {
   return serverApiUrl(
     ref.server,
-    `/api/projects/${encodeURIComponent(ref.workspace)}/${encodeURIComponent(ref.project)}${suffix}`,
+    `/api/projects/${encodeURIComponent(ref.project)}${suffix}`,
   );
 }
 
 /**
- * Asks the server which project a published content path belongs to. Route
- * paths depend on server config (random slugs, username/project, ...), so only
- * the server can map a URL back to its workspace/project.
+ * Asks the server which project a published content path belongs to. The
+ * endpoint centralizes validation and authorization, and stays host-aware for
+ * URL shapes a local parse cannot resolve.
  */
 export function resolveProjectByPath(
   server: string,
   pathname: string,
   command: string,
 ): Effect.Effect<
-  { readonly workspace: string; readonly project: string },
+  { readonly project: string },
   PlatformError | CliError,
   HttpClient.HttpClient | FileSystem.FileSystem | Path.Path
 > {
@@ -117,10 +116,10 @@ export function resolveProjectByPath(
     url.searchParams.set("path", pathname === "" ? "/" : pathname);
     const body = yield* apiJson(`scratchwork ${command}`, url, { token });
     const project = isRecord(body) && isRecord(body.project) ? body.project : null;
-    if (project == null || typeof project.workspace !== "string" || typeof project.project !== "string") {
+    if (project == null || typeof project.project !== "string") {
       return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: invalid server response` }));
     }
-    return { workspace: project.workspace, project: project.project };
+    return { project: project.project };
   });
 }
 

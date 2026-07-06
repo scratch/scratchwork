@@ -60,8 +60,17 @@ describe("CLI help", () => {
       expect(result.stdout, command).toContain("Usage:");
       expect(result.stdout, command).toContain("Examples:");
       expect(result.stdout, command).not.toContain("A user-defined piece of text");
+      expect(result.stdout, command).not.toContain("--workspace");
       expect(result.stdout, command).not.toContain("\u001b[");
     }
+  });
+
+  test("documents the project-name defaults on publish", async () => {
+    const result = await runCli(["publish", "--help"]);
+
+    expect(result.stdout).toContain("--project <name>");
+    expect(result.stdout).toContain("the directory name, or the file name without its extension");
+    expect(result.stdout.toLowerCase()).not.toContain("workspace");
   });
 
   test("supports help before or after the subcommand name", async () => {

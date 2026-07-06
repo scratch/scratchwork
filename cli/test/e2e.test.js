@@ -658,12 +658,10 @@ describe("scratchwork publish", () => {
         authorization = request.headers.get("authorization");
         publishBody = await request.json();
         return Response.json({
-          workspace: publishBody.workspace,
           project: publishBody.project,
-          routePath: `${publishBody.workspace}/${publishBody.project}`,
           visibility: publishBody.visibility,
           openPath: publishBody.openPath,
-          url: `${serverUrl}/${publishBody.workspace}/${publishBody.project}/`,
+          url: `${serverUrl}/${publishBody.project}/`,
         });
       },
     });
@@ -693,10 +691,9 @@ describe("scratchwork publish", () => {
         `${JSON.stringify(
           {
             server: serverUrl,
-            workspace: "founder",
             project: "site",
             visibility: "public",
-            url: `${serverUrl}/founder/site/`,
+            url: `${serverUrl}/site/`,
             updatedAt: "2026-06-29T00:00:00.000Z",
           },
           null,
@@ -710,9 +707,9 @@ describe("scratchwork publish", () => {
 
       expect(code).toBe(0);
       expect(stderr).toBe("");
-      expect(stdout).toContain(`${serverUrl}/founder/site/`);
+      expect(stdout).toContain(`${serverUrl}/site/`);
       expect(authorization).toBe(`Bearer ${authToken}`);
-      expect(publishBody.workspace).toBe("founder");
+      expect("workspace" in publishBody).toBe(false);
       expect(publishBody.project).toBe("site");
       expect(publishBody.visibility).toBe("public");
       expect(publishBody.bundle.files.map((file) => file.path)).toEqual(["index.html"]);
@@ -731,11 +728,9 @@ describe("scratchwork project commands", () => {
     const serverUrl = `http://localhost:${port}`;
     const seen = [];
     const project = {
-      workspace: "founder",
       project: "site",
-      routePath: "founder/site",
       visibility: "public",
-      url: `${serverUrl}/founder/site/`,
+      url: `${serverUrl}/site/`,
       updatedAt: "2026-06-29T00:00:00.000Z",
     };
 
@@ -745,15 +740,15 @@ describe("scratchwork project commands", () => {
         const url = new URL(request.url);
         seen.push(`${request.method} ${url.pathname}`);
         if (url.pathname === "/api/projects") return Response.json({ projects: [project] });
-        if (url.pathname === "/api/resolve" && url.searchParams.get("path") === "/founder/site/") {
+        if (url.pathname === "/api/resolve" && url.searchParams.get("path") === "/site/") {
           return Response.json({ project });
         }
-        if (url.pathname === "/api/projects/founder/site" && request.method === "GET") return Response.json({ project });
-        if (url.pathname === "/api/projects/founder/site/unpublish" && request.method === "POST") {
+        if (url.pathname === "/api/projects/site" && request.method === "GET") return Response.json({ project });
+        if (url.pathname === "/api/projects/site/unpublish" && request.method === "POST") {
           return Response.json({ project: { ...project, visibility: "private" } });
         }
-        if (url.pathname === "/api/projects/founder/site" && request.method === "DELETE") return Response.json({ ok: true });
-        if (url.pathname === "/api/projects/founder/site/bundle") {
+        if (url.pathname === "/api/projects/site" && request.method === "DELETE") return Response.json({ ok: true });
+        if (url.pathname === "/api/projects/site/bundle") {
           return Response.json({
             bundle: {
               version: 1,
@@ -766,20 +761,26 @@ describe("scratchwork project commands", () => {
     });
 
     try {
-      expect((await runCli(["projects", "--server", serverUrl], dir)).stdout).toContain("founder/site");
-      expect((await runCli(["info", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain('"routePath": "founder/site"');
-      expect((await runCli(["unpublish", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain('"visibility": "private"');
-      expect((await runCli(["delete", "--server", serverUrl, "--workspace", "founder", "--project", "site"], dir)).stdout).toContain("Deleted founder/site");
-      expect((await runCli(["info", `${serverUrl}/founder/site/`], dir)).stdout).toContain('"routePath": "founder/site"');
-      expect((await runCli(["unpublish", `${serverUrl}/founder/site/`], dir)).stdout).toContain('"visibility": "private"');
-      expect((await runCli(["delete", `${serverUrl}/founder/site/`], dir)).stdout).toContain("Deleted founder/site");
-      expect((await runCli(["clone", `${serverUrl}/founder/site/`], dir)).stdout).toContain("Cloned founder/site");
+      expect((await runCli(["projects", "--server", serverUrl], dir)).stdout).toContain(`site\tpublic\t${serverUrl}/site/`);
+      expect((await runCli(["info", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"project": "site"');
+      expect((await runCli(["unpublish", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["delete", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain("Deleted site");
+      expect((await runCli(["info", `${serverUrl}/site/`], dir)).stdout).toContain('"project": "site"');
+      expect((await runCli(["unpublish", `${serverUrl}/site/`], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["delete", `${serverUrl}/site/`], dir)).stdout).toContain("Deleted site");
+      expect((await runCli(["clone", `${serverUrl}/site/`], dir)).stdout).toContain("Cloned site");
       expect(readFileSync(join(dir, "site", "index.html"), "utf8")).toBe("<h1>cloned</h1>");
+      // Clone writes identity into the destination so a republish (even after a
+      // directory rename) updates the same project.
+      expect(JSON.parse(readFileSync(join(dir, "site", ".scratchwork.json"), "utf8"))).toEqual({
+        server: serverUrl,
+        project: "site",
+      });
       expect(seen).toContain("GET /api/projects");
       expect(seen).toContain("GET /api/resolve");
-      expect(seen).toContain("POST /api/projects/founder/site/unpublish");
-      expect(seen).toContain("DELETE /api/projects/founder/site");
-      expect(seen).toContain("GET /api/projects/founder/site/bundle");
+      expect(seen).toContain("POST /api/projects/site/unpublish");
+      expect(seen).toContain("DELETE /api/projects/site");
+      expect(seen).toContain("GET /api/projects/site/bundle");
     } finally {
       server.stop(true);
       rmSync(dir, { recursive: true, force: true });
@@ -796,9 +797,9 @@ describe("scratchwork project commands", () => {
       async fetch(request) {
         const url = new URL(request.url);
         if (url.pathname === "/api/resolve") {
-          return Response.json({ project: { workspace: "founder", project: "site" } });
+          return Response.json({ project: { project: "site" } });
         }
-        if (url.pathname === "/api/projects/founder/site/bundle") {
+        if (url.pathname === "/api/projects/site/bundle") {
           return Response.json({
             bundle: {
               version: 1,
@@ -814,7 +815,7 @@ describe("scratchwork project commands", () => {
     });
 
     try {
-      const { code, stderr } = await runCli(["clone", `${serverUrl}/founder/site/`], dir);
+      const { code, stderr } = await runCli(["clone", `${serverUrl}/site/`], dir);
       expect(code).toBe(1);
       expect(stderr).toContain("invalid server response");
       expect(existsSync(join(dir, "escape.html"))).toBe(false);
@@ -851,12 +852,10 @@ describe("scratchwork stream", () => {
       async fetch(request) {
         publishes.push(await request.json());
         return Response.json({
-          workspace: "founder",
           project: "site",
-          routePath: "founder/site",
           visibility: "public",
           openPath: "/",
-          url: `${serverUrl}/founder/site/`,
+          url: `${serverUrl}/site/`,
         });
       },
     });
@@ -864,7 +863,7 @@ describe("scratchwork stream", () => {
     writeFileSync(join(dir, "index.html"), staticPage("stream-v1"));
     writeFileSync(
       join(dir, ".scratchwork.json"),
-      `${JSON.stringify({ server: serverUrl, workspace: "founder", project: "site" }, null, 2)}\n`,
+      `${JSON.stringify({ server: serverUrl, project: "site" }, null, 2)}\n`,
     );
 
     const proc = Bun.spawn(["bun", SCRATCHWORK, "stream", "."], {
@@ -916,12 +915,10 @@ describe("publish and auth safety", () => {
       async fetch(request) {
         publishBody = await request.json();
         return Response.json({
-          workspace: publishBody.workspace ?? "founder",
           project: publishBody.project,
-          routePath: `founder/${publishBody.project}`,
           visibility: "public",
           openPath: "/",
-          url: `${serverUrl}/founder/${publishBody.project}/`,
+          url: `${serverUrl}/${publishBody.project}/`,
         });
       },
     });
@@ -931,7 +928,7 @@ describe("publish and auth safety", () => {
       // inherited when publishing the docs/ subdirectory.
       writeFileSync(
         join(dir, ".scratchwork.json"),
-        `${JSON.stringify({ server: serverUrl, workspace: "founder", project: "parent-site" }, null, 2)}\n`,
+        `${JSON.stringify({ server: serverUrl, project: "parent-site" }, null, 2)}\n`,
       );
       mkdirSync(join(dir, "docs"), { recursive: true });
       writeFileSync(join(dir, "docs", "index.html"), staticPage("docs"));
@@ -941,7 +938,6 @@ describe("publish and auth safety", () => {
       });
       expect(code).toBe(0);
       expect(publishBody.project).toBe("docs");
-      expect(publishBody.workspace).toBeUndefined();
     } finally {
       server.stop(true);
       rmSync(dir, { recursive: true, force: true });
@@ -970,13 +966,191 @@ describe("publish and auth safety", () => {
     try {
       writeFileSync(
         join(dir, ".scratchwork.json"),
-        `${JSON.stringify({ server: "http://localhost:9", workspace: "founder", project: "../evil" }, null, 2)}\n`,
+        `${JSON.stringify({ server: "http://localhost:9", project: "../evil" }, null, 2)}\n`,
       );
       const { code, stderr } = await runCli(["clone", "."], dir);
       expect(code).toBe(1);
       expect(stderr).toContain("unsafe project name");
       expect(existsSync(join(dirname(dir), "evil"))).toBe(false);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("project naming", () => {
+  /** Starts a fake publish server that echoes the request's project (or assigns one). */
+  function publishEcho(port, serverUrl, bodies, assignedName) {
+    return Bun.serve({
+      port,
+      async fetch(request) {
+        const body = await request.json();
+        bodies.push(body);
+        if (assignedName == null && body.project == null) {
+          return Response.json({ error: "project name is required (pass --project)" }, { status: 400 });
+        }
+        const project = assignedName ?? body.project;
+        return Response.json({
+          project,
+          visibility: "public",
+          openPath: body.openPath ?? "/",
+          url: `${serverUrl}/${project}/`,
+        });
+      },
+    });
+  }
+
+  test("derives the project name from the file stem or the directory name", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-naming-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const bodies = [];
+    const server = publishEcho(port, serverUrl, bodies);
+
+    try {
+      const cases = [
+        ["notes.md", "notes"],
+        ["report.v2.md", "report.v2"],
+        ["data.tar.gz", "data.tar"],
+        ["Makefile", "makefile"],
+      ];
+      for (const [filename, expected] of cases) {
+        const sub = join(dir, `case-${expected.replace(/[^a-z0-9]+/g, "-")}`);
+        mkdirSync(sub, { recursive: true });
+        writeFileSync(join(sub, filename), "# hello\n");
+        const { code } = await runCli(["publish", join(sub, filename), "--server", serverUrl], dir);
+        expect(code).toBe(0);
+        expect(bodies[bodies.length - 1].project).toBe(expected);
+      }
+
+      // A directory target derives from its basename.
+      const project = join(dir, "my-project");
+      mkdirSync(project, { recursive: true });
+      writeFileSync(join(project, "index.html"), staticPage("naming"));
+      const { code } = await runCli(["publish", project, "--server", serverUrl], dir);
+      expect(code).toBe(0);
+      expect(bodies[bodies.length - 1].project).toBe("my-project");
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit --project beats every derived default", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-naming-explicit-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const bodies = [];
+    const server = publishEcho(port, serverUrl, bodies);
+
+    try {
+      writeFileSync(join(dir, "notes.md"), "# hello\n");
+      const { code } = await runCli(["publish", "notes.md", "--server", serverUrl, "--project", "custom-name"], dir);
+      expect(code).toBe(0);
+      expect(bodies[0].project).toBe("custom-name");
+
+      const invalid = await runCli(["publish", "notes.md", "--server", serverUrl, "--project", "Docs"], dir);
+      expect(invalid.code).toBe(1);
+      expect(invalid.stderr).toContain("invalid project Docs");
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file publish bundles its siblings and later reuses the saved project", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-naming-siblings-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const bodies = [];
+    const server = publishEcho(port, serverUrl, bodies);
+
+    try {
+      writeFileSync(join(dir, "report.md"), "# report\n");
+      writeFileSync(join(dir, "style.css"), "body {}\n");
+
+      const first = await runCli(["publish", "report.md", "--server", serverUrl], dir);
+      expect(first.code).toBe(0);
+      expect(bodies[0].project).toBe("report");
+      // The publish root stays the containing directory, so sibling assets ride along.
+      expect(bodies[0].bundle.files.map((file) => file.path).sort()).toEqual(["report.md", "style.css"]);
+
+      // A second sibling file reuses the directory's saved project instead of
+      // inferring a second identity from its own stem.
+      writeFileSync(join(dir, "notes.md"), "# notes\n");
+      const second = await runCli(["publish", "notes.md", "--server", serverUrl], dir);
+      expect(second.code).toBe(0);
+      expect(bodies[1].project).toBe("report");
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an underivable name sends no project and maps the server's 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-naming-underivable-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const bodies = [];
+    const server = publishEcho(port, serverUrl, bodies);
+
+    try {
+      writeFileSync(join(dir, "日本語.md"), "# hello\n");
+      const { code, stderr } = await runCli(["publish", "日本語.md", "--server", serverUrl], dir);
+      expect(code).toBe(1);
+      expect("project" in bodies[0]).toBe(false);
+      expect(stderr).toContain('cannot derive a project name from "日本語.md"; use --project');
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a workspace-era .scratchwork.json fails with an explicit error", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-naming-legacy-"));
+    try {
+      writeFileSync(join(dir, "index.html"), staticPage("legacy"));
+      writeFileSync(
+        join(dir, ".scratchwork.json"),
+        `${JSON.stringify({ server: "http://localhost:9", workspace: "founder", project: "site" }, null, 2)}\n`,
+      );
+      const { code, stderr } = await runCli(["publish", "."], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain('legacy field "workspace"');
+      expect(stderr).toContain("republish");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("saves and reuses a server-assigned random name", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-naming-random-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    const bodies = [];
+    const server = publishEcho(port, serverUrl, bodies, "x7k2mqp3ra");
+
+    try {
+      const project = join(dir, "mysite");
+      mkdirSync(project, { recursive: true });
+      writeFileSync(join(project, "index.html"), staticPage("random"));
+
+      // First publish sends the derived candidate; the server assigns a slug and the
+      // CLI both surfaces it and saves it as the project's identity.
+      const first = await runCli(["publish", project, "--server", serverUrl], dir);
+      expect(first.code).toBe(0);
+      expect(bodies[0].project).toBe("mysite");
+      expect(first.stdout).toContain('server assigned project name "x7k2mqp3ra"');
+      const saved = JSON.parse(readFileSync(join(project, ".scratchwork.json"), "utf8"));
+      expect(saved.project).toBe("x7k2mqp3ra");
+
+      // The second publish echoes the saved slug, updating the same project.
+      const second = await runCli(["publish", project, "--server", serverUrl], dir);
+      expect(second.code).toBe(0);
+      expect(bodies[1].project).toBe("x7k2mqp3ra");
+      expect(second.stdout).not.toContain("server assigned project name");
+    } finally {
+      server.stop(true);
       rmSync(dir, { recursive: true, force: true });
     }
   });

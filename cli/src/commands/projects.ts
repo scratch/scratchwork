@@ -18,15 +18,13 @@ import { isRecord } from "../../../shared/src/util/json";
 import { apiJson, projectApiUrl } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
 import { CliError, errorMessage } from "../errors";
-import { PROJECT_CONFIG_FILE, resolveProjectRef, resolveServerFromCwd } from "../project-config";
+import { PROJECT_CONFIG_FILE, resolveProjectRef, resolveServerFromCwd, writeProjectConfig } from "../project-config";
 import type { CloneConfig, PathConfig, ProjectRefConfig, ServerConfig } from "../types";
 import { runPublish, SKIPPED_DIRECTORIES, type PublishServices } from "./publish";
 
 /** Project metadata as returned by /api/projects. */
 interface ApiProject {
-  readonly workspace: string;
   readonly project: string;
-  readonly routePath: string;
   readonly visibility: string;
   readonly url?: string;
   readonly updatedAt: string;
@@ -61,7 +59,7 @@ export function runProjects(
       return;
     }
     yield* Console.log(projects.map((project) =>
-      `${project.workspace}/${project.project}\t${project.visibility}\t${project.url ?? project.routePath}`,
+      `${project.project}\t${project.visibility}\t${project.url ?? `/${project.project}/`}`,
     ).join("\n"));
   });
 }
@@ -90,7 +88,7 @@ export function runUnpublish(
   });
 }
 
-/** Runs `scratchwork delete`: removes a project's pointer and route from the server. */
+/** Runs `scratchwork delete`: removes a project from the server, releasing its name. */
 export function runDelete(
   config: ProjectRefConfig,
 ): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
@@ -98,7 +96,7 @@ export function runDelete(
     const ref = yield* resolveProjectRef({ ...config, command: "delete" });
     const token = yield* readAuthToken(ref.server);
     yield* apiJson("scratchwork delete", projectApiUrl(ref), { method: "DELETE", token });
-    yield* Console.log(`Deleted ${ref.workspace}/${ref.project}`);
+    yield* Console.log(`Deleted ${ref.project}`);
   });
 }
 
@@ -133,7 +131,11 @@ export function runClone(
       yield* fs.makeDirectory(paths.dirname(outputPath), { recursive: true });
       yield* fs.writeFile(outputPath, bytes);
     }
-    yield* Console.log(`Cloned ${ref.workspace}/${ref.project} to ${destination}`);
+    // Publish bundles exclude the root config, so without this a clone carries no
+    // identity and a republish would ride on the (renamable) directory name — on a
+    // random-naming server, a renamed clone would silently fork a new project.
+    yield* writeProjectConfig(destination, { server: ref.server, project: ref.project });
+    yield* Console.log(`Cloned ${ref.project} to ${destination}`);
   });
 }
 

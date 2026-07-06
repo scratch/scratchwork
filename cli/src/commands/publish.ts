@@ -37,11 +37,10 @@ export const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", ".scratchwor
 /** Services runPublish needs; exported for callers that wrap it (stream). */
 export type PublishServices = CommandExecutor | FileSystem.FileSystem | HttpClient.HttpClient | Path.Path;
 
-/** The server's response to a successful publish. */
+/** The server's response to a successful publish. `project` is authoritative: on a
+ * random-naming server it is how the CLI learns the assigned name. */
 interface PublishResponse {
-  readonly workspace: string;
   readonly project: string;
-  readonly routePath: string;
   readonly visibility: string;
   readonly openPath: string;
   readonly url: string;
@@ -66,17 +65,16 @@ export function runPublish(
     const projectConfig = lookup?.directory === target.root ? lookup.config : null;
     const server = yield* resolveServer(config.server, lookup?.config ?? null, "publish");
     const authToken = yield* readAuthToken(server);
-    const project = yield* resolveProjectName(config, projectConfig);
-    // Omitted workspace/visibility let the server preserve an existing project's
-    // visibility and apply its defaultWorkspace/defaultVisibility policy.
-    const workspace = nonEmpty(config.workspace) ?? nonEmpty(projectConfig?.workspace);
+    const project = yield* resolveProjectName(config, projectConfig, target);
+    const nameSource = target.file ?? (yield* basename(target.root));
+    // An omitted visibility lets the server preserve an existing project's visibility
+    // or apply its default; an omitted project lets a random-naming server mint one.
     const visibility = nonEmpty(config.visibility) ?? nonEmpty(projectConfig?.visibility);
 
     const bundle = yield* createBundle(target.root);
     const body = {
       bundle,
       openPath: target.openPath,
-      workspace,
       project,
       visibility,
     };
@@ -88,10 +86,19 @@ export function runPublish(
           return yield* postPublish(server, body, refreshed);
         }),
       ),
+      // The server requires a name we could not derive locally; make the fix obvious.
+      Effect.catchIf(
+        (error): error is CliError =>
+          project == null && error instanceof CliError && error.message.includes("project name is required"),
+        () => Effect.fail(new CliError({
+          code: 1,
+          message: `scratchwork publish: cannot derive a project name from "${nameSource}"; use --project`,
+        })),
+      ),
     );
 
     const saved = yield* writeMetadata(target.root, server, response);
-    yield* printResult(response, bundle, saved);
+    yield* printResult(response, bundle, saved, project);
     if (options.openBrowser !== false) yield* openBrowser(response.url);
   });
 }
@@ -176,8 +183,7 @@ function postPublish(
   body: {
     readonly bundle: PublishBundle;
     readonly openPath: string;
-    readonly workspace?: string;
-    readonly project: string;
+    readonly project?: string;
     readonly visibility?: string;
   },
   authToken: string | undefined,
@@ -223,10 +229,8 @@ function writeMetadata(
 ): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> {
   return writeProjectConfig(root, {
     server,
-    workspace: response.workspace,
     project: response.project,
     visibility: response.visibility,
-    routePath: response.routePath,
     url: response.url,
     updatedAt: new Date().toISOString(),
   }).pipe(
@@ -239,18 +243,23 @@ function writeMetadata(
   );
 }
 
-/** Prints the post-publish summary block. */
+/** Prints the post-publish summary block. The note line is how random-naming users
+ * learn their assigned slug (and how a typo'd --project on such a server surfaces). */
 function printResult(
   response: PublishResponse,
   bundle: PublishBundle,
   saved: boolean,
+  sentProject: string | undefined,
 ): Effect.Effect<void> {
   const bytes = bundle.files.reduce((sum, file) => sum + (decodedBase64ByteLength(file.contentBase64) ?? 0), 0);
   return Console.log(
     [
       "\n  scratchwork publish",
       `  url     ${response.url}`,
-      `  project ${response.workspace}/${response.project}`,
+      `  project ${response.project}`,
+      ...(sentProject != null && sentProject !== response.project
+        ? [`  note    server assigned project name "${response.project}"`]
+        : []),
       `  access  ${response.visibility}`,
       `  files   ${bundle.files.length} (${formatBytes(bytes)})`,
       ...(saved ? [`  saved   ${PROJECT_CONFIG_FILE}\n`] : [""]),
@@ -262,9 +271,7 @@ function printResult(
 function decodePublishResponse(value: unknown): PublishResponse | null {
   if (!isRecord(value)) return null;
   if (
-    typeof value.workspace !== "string" ||
     typeof value.project !== "string" ||
-    typeof value.routePath !== "string" ||
     typeof value.visibility !== "string" ||
     typeof value.openPath !== "string" ||
     typeof value.url !== "string"
@@ -272,9 +279,7 @@ function decodePublishResponse(value: unknown): PublishResponse | null {
     return null;
   }
   return {
-    workspace: value.workspace,
     project: value.project,
-    routePath: value.routePath,
     visibility: value.visibility,
     openPath: value.openPath,
     url: value.url,
@@ -289,31 +294,46 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * Picks the project name: an explicit or config-file name (validated), or the
- * published directory's name slugified. Publishing a single file requires an
- * explicit name.
+ * Picks the project name, highest precedence first: an explicit --project (validated,
+ * never slugified), the publish root's saved config, or a derived default — the
+ * directory basename, or the file basename minus its final extension for a file
+ * target. When nothing usable can be derived, returns undefined so no name is sent:
+ * a random-naming server mints one, and a user-naming server's 400 is mapped to a
+ * "use --project" error in runPublish. Never fall back to a fixed name — under global
+ * uniqueness a shared literal would make unrelated projects republish over each other.
  */
 function resolveProjectName(
   config: PublishConfig,
   projectConfig: ProjectConfigFile | null,
-): Effect.Effect<string, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+  target: { readonly root: string; readonly file?: string },
+): Effect.Effect<string | undefined, CliError, Path.Path> {
   return Effect.gen(function* () {
     const explicit = nonEmpty(config.project) ?? nonEmpty(projectConfig?.project);
     if (explicit != null) {
       if (!isSafeProjectIdentifier(explicit)) {
-        return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork publish: invalid project ${explicit}` }));
+        return yield* Effect.fail(new CliError({
+          code: 1,
+          message: `scratchwork publish: invalid project ${explicit} (lowercase letters, digits, ".", "_", "-"; must start and end with a letter or digit)`,
+        }));
       }
       return explicit;
     }
 
-    const fs = yield* FileSystem.FileSystem;
-    const paths = yield* Path.Path;
-    const target = paths.resolve(process.cwd(), config.path);
-    const info = yield* fs.stat(target);
-    if (info.type === "Directory") return slugifyIdentifier(paths.basename(target), "project");
-    return yield* Effect.fail(new CliError({
-      code: 1,
-      message: "scratchwork publish: --project is required when publishing a file",
-    }));
+    const derived = target.file != null ? fileStem(target.file) : yield* basename(target.root);
+    return nonEmpty(slugifyIdentifier(derived, ""));
   });
+}
+
+/** Strips a filename's final extension: the substring after the last ".", unless that
+ * dot leads the name or no stem would remain ("notes.md" -> "notes", "data.tar.gz" ->
+ * "data.tar", ".env" -> ".env"). Deliberately not openPathForFile, which strips only
+ * .html/.md because it builds a servable route, not a name. */
+function fileStem(filename: string): string {
+  const dot = filename.lastIndexOf(".");
+  return dot > 0 ? filename.slice(0, dot) : filename;
+}
+
+/** Reads a path's basename through the Path service. */
+function basename(value: string): Effect.Effect<string, never, Path.Path> {
+  return Effect.map(Path.Path, (paths) => paths.basename(value));
 }

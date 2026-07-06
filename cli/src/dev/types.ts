@@ -12,6 +12,9 @@ import type * as Scope from "effect/Scope";
 export interface DevTarget {
   readonly root: string;
   readonly openPath: string;
+  /** Basename of the file argument when the target is a single file; the root is
+   * then the file's containing directory. */
+  readonly file?: string;
 }
 
 /** Mutable per-session state threaded through the dev server modules. */

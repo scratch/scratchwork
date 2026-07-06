@@ -25,7 +25,6 @@ export interface TemplateConfig {
 export interface PublishConfig {
   readonly path: string;
   readonly server?: string;
-  readonly workspace?: string;
   readonly project?: string;
   readonly visibility?: string;
 }
@@ -44,7 +43,6 @@ export interface ServerConfig {
 export interface ProjectRefConfig {
   readonly pathOrUrl: string;
   readonly server?: string;
-  readonly workspace?: string;
   readonly project?: string;
 }
 
