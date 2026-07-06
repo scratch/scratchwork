@@ -14,11 +14,13 @@ export {
   ServerConfig,
   ServerConfigError,
   type AuthConfig,
+  type CloudflareAccessAuthConfig,
   type EnvVars,
+  type OAuthAuthConfig,
   type ServerConfigShape,
 } from "./config";
 
-// Google OAuth auth service and signed session tokens.
+// The auth service (Google OAuth or Cloudflare Access) and signed session tokens.
 export { Auth, AuthError, AuthLive, createSessionToken, makeAuth, type AuthShape, type AuthUser } from "./auth";
 
 // Access-group expressions ("public" | "private" | emails/@domains) and identifier helpers.

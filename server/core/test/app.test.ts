@@ -736,6 +736,7 @@ describe("server app", () => {
       config: {
         appUrl: "https://app.scratch.test",
         auth: {
+          mode: "oauth",
           clientId: "client-id",
           clientSecret: "client-secret",
           sessionSecret: "session-secret-session-secret-32-bytes",
@@ -803,6 +804,7 @@ describe("server app", () => {
 
   test("authenticates private content through a handoff token and path-scoped cookie", async () => {
     const authConfig = {
+      mode: "oauth",
       clientId: "client-id",
       clientSecret: "client-secret",
       sessionSecret: "session-secret-session-secret-32-bytes",
@@ -886,6 +888,7 @@ describe("server app", () => {
 
   test("rejects cross-project and unauthenticated access to private content", async () => {
     const authConfig = {
+      mode: "oauth",
       clientId: "client-id",
       clientSecret: "client-secret",
       sessionSecret: "session-secret-session-secret-32-bytes",
@@ -1044,6 +1047,7 @@ describe("server app", () => {
     const handler = await appHandler({
       config: {
         auth: {
+          mode: "oauth",
           clientId: "client-id",
           clientSecret: "client-secret",
           sessionSecret: "session-secret-session-secret-32-bytes",
@@ -1171,6 +1175,7 @@ describe("server homepage", () => {
 
   test("gates a private homepage behind the handoff flow with a /-scoped cookie", async () => {
     const authConfig = {
+      mode: "oauth",
       clientId: "client-id",
       clientSecret: "client-secret",
       sessionSecret: "session-secret-session-secret-32-bytes",
