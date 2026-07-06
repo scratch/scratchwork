@@ -61,12 +61,13 @@ export function clearSessionCookie(baseUrl: string): string {
 }
 
 /** Builds the Set-Cookie header for a redeemed project-access token, scoped to the project
- * path on the content host. */
-export function projectAccessCookie(token: string, project: string, baseUrl: string, ttlSeconds: number): string {
+ * path on the content host — or to `path` when the project is served elsewhere (the
+ * homepage project owns the whole home origin, so its cookie is scoped to "/"). */
+export function projectAccessCookie(token: string, project: string, baseUrl: string, ttlSeconds: number, path = `/${project}`): string {
   const secure = baseUrl.startsWith("https://");
   return [
     `${projectAccessCookieName(project, secure)}=${encodeURIComponent(token)}`,
-    `Path=/${project}`,
+    `Path=${path}`,
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${ttlSeconds}`,

@@ -29,6 +29,13 @@ describe("serverConfigEnv", () => {
     expect(env.SCRATCHWORK_APP_URL).toBe("https://app.example");
     expect(env.SCRATCHWORK_CONTENT_URL).toBe("https://pages.example");
   });
+
+  test("maps the homepage settings onto their environment variables", () => {
+    expect(serverConfigEnv({ homepageDomains: ["example.com", "www.example.com"], homepageProject: "home" }, {})).toEqual({
+      SCRATCHWORK_HOMEPAGE_DOMAINS: "example.com,www.example.com",
+      SCRATCHWORK_HOMEPAGE_PROJECT: "home",
+    });
+  });
 });
 
 describe("validateDeploymentConfig", () => {
@@ -57,5 +64,29 @@ describe("validateDeploymentConfig", () => {
   test("still enforces the OAuth requirements", () => {
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SESSION_SECRET: undefined }, "Test"))
       .toThrow("SCRATCHWORK_SESSION_SECRET is required");
+  });
+
+  test("validates the homepage settings", () => {
+    const homepage = {
+      SCRATCHWORK_HOMEPAGE_DOMAINS: "example.com,www.example.com",
+      SCRATCHWORK_HOMEPAGE_PROJECT: "home",
+    };
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage }, "Test")).not.toThrow();
+
+    // Set both or neither.
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_HOMEPAGE_PROJECT: "home" }, "Test"))
+      .toThrow("must be set together");
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_HOMEPAGE_DOMAINS: "example.com" }, "Test"))
+      .toThrow("must be set together");
+
+    // The homepage project must be a publishable name.
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_PROJECT: "api" }, "Test"))
+      .toThrow("a publishable project name");
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_PROJECT: "_www" }, "Test"))
+      .toThrow("a publishable project name");
+
+    // Home domains cannot collide with the app or content hosts.
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_DOMAINS: "app.example" }, "Test"))
+      .toThrow("distinct from the app and content origins");
   });
 });

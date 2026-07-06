@@ -1065,6 +1065,191 @@ describe("server app", () => {
   });
 });
 
+describe("server homepage", () => {
+  const homepageConfig = {
+    appUrl: "https://app.scratch.test",
+    contentUrl: "https://pages.scratch.test",
+    homepageUrls: ["https://scratch.test", "https://www.scratch.test"],
+    homepageProject: "www",
+  } as const;
+
+  /** Builds a request carrying its URL's host as forwarded headers: the server detects
+   * home domains by request host, and web-handler requests carry no implicit Host. */
+  function homeRequest(url: string, init: RequestInit = {}): Request {
+    const { host } = new URL(url);
+    return new Request(url, {
+      ...init,
+      headers: {
+        ...(init.headers as Record<string, string> | undefined),
+        host,
+        "x-forwarded-host": host,
+        "x-forwarded-proto": "https",
+      },
+    });
+  }
+
+  test("serves the homepage project across the home origin's whole path space", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: homepageConfig });
+
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({
+        "index.html": "<h1>Welcome home</h1>",
+        "docs/index.html": "<h1>Docs</h1>",
+        "style.css": "body {}",
+      }),
+      openPath: "/",
+      project: "www",
+      visibility: "public",
+    }));
+    expect(publish.status).toBe(200);
+    // The publish response reports the canonical home origin, not the content route.
+    expect(((await json(publish)) as { url: string }).url).toBe("https://scratch.test/");
+
+    const home = await handler(homeRequest("https://scratch.test/"));
+    expect(home.status).toBe(200);
+    expect(await home.text()).toContain("Welcome home");
+
+    const nested = await handler(homeRequest("https://scratch.test/docs/"));
+    expect(nested.status).toBe(200);
+
+    const asset = await handler(homeRequest("https://scratch.test/style.css"));
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("content-type")).toContain("text/css");
+
+    // The homepage project stays addressable at its normal content route.
+    const contentRoute = await handler(new Request("https://pages.scratch.test/www/"));
+    expect(contentRoute.status).toBe(200);
+    expect(await contentRoute.text()).toContain("Welcome home");
+
+    // On the home origin there is no path-based project routing.
+    const otherProject = await handler(homeRequest("https://scratch.test/www/", { redirect: "manual" }));
+    expect(otherProject.status).toBe(404);
+  });
+
+  test("redirects the other home domains to the canonical origin", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: homepageConfig });
+    const response = await handler(homeRequest("https://www.scratch.test/docs/page?q=1", { redirect: "manual" }));
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://scratch.test/docs/page?q=1");
+  });
+
+  test("answers home domains with setup instructions until the homepage is published", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: homepageConfig });
+    const command = "scratchwork publish --server https://app.scratch.test --project www --visibility public";
+
+    const plain = await handler(homeRequest("https://scratch.test/"));
+    expect(plain.status).toBe(404);
+    expect(await plain.text()).toContain(command);
+
+    const page = await handler(homeRequest("https://scratch.test/", { headers: { accept: "text/html" } }));
+    expect(page.status).toBe(404);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain("scratchwork publish");
+  });
+
+  test("keeps reserved prefixes server-owned on home domains", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: homepageConfig });
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "home", "api/index.html": "unreachable", "health": "unreachable" }),
+      openPath: "/",
+      project: "www",
+      visibility: "public",
+    }));
+    expect(publish.status).toBe(200);
+
+    const health = await handler(homeRequest("https://scratch.test/health"));
+    expect(health.status).toBe(200);
+    expect(await health.text()).toContain("ok");
+
+    const api = await handler(homeRequest("https://scratch.test/api/index.html"));
+    expect(api.status).toBe(404);
+
+    const auth = await handler(homeRequest("https://scratch.test/auth/login", { redirect: "manual" }));
+    expect(auth.status).toBe(302);
+    expect(new URL(auth.headers.get("location") ?? "https://invalid").origin).toBe("https://app.scratch.test");
+  });
+
+  test("gates a private homepage behind the handoff flow with a /-scoped cookie", async () => {
+    const authConfig = {
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      sessionSecret: "session-secret-session-secret-32-bytes",
+      allowedUsers: "public",
+      sessionTtlSeconds: 60,
+    } as const;
+    const token = await Effect.runPromise(createSessionToken(user, authConfig));
+    const handler = await appHandler({ config: { ...homepageConfig, auth: authConfig } });
+
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "private homepage", "data.json": "{}" }),
+      openPath: "/",
+      project: "www",
+      visibility: "private",
+    }, token));
+    expect(publish.status).toBe(200);
+
+    // An unauthenticated navigation bounces through the app host's project auth.
+    const bounce = await handler(homeRequest("https://scratch.test/", { redirect: "manual" }));
+    expect(bounce.status).toBe(302);
+    const authUrl = new URL(bounce.headers.get("location") ?? "https://invalid");
+    expect(authUrl.origin).toBe("https://app.scratch.test");
+    expect(authUrl.pathname).toBe("/auth/project");
+    expect(authUrl.searchParams.get("route")).toBe("www");
+    expect(authUrl.searchParams.get("returnTo")).toBe("https://scratch.test/");
+
+    // The app host accepts the home-origin returnTo and hands off to the home origin.
+    const appRedirect = await handler(new Request(authUrl.toString(), {
+      headers: { authorization: `Bearer ${token}` },
+      redirect: "manual",
+    }));
+    expect(appRedirect.status).toBe(302);
+    const handoffUrl = new URL(appRedirect.headers.get("location") ?? "https://invalid");
+    expect(handoffUrl.origin).toBe("https://scratch.test");
+    expect(handoffUrl.pathname).toBe("/");
+    expect(handoffUrl.searchParams.get("_scratchwork_handoff")).not.toBeNull();
+
+    // The home origin redeems the token into a cookie scoped to "/".
+    const redeem = await handler(homeRequest(handoffUrl.toString(), { redirect: "manual" }));
+    expect(redeem.status).toBe(302);
+    expect(redeem.headers.get("location")).toBe("/");
+    const setCookie = redeem.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("__Secure-scratchwork_access_www=");
+    expect(setCookie).toContain("Path=/;");
+    const cookie = setCookie.split(";")[0];
+
+    const doc = await handler(homeRequest("https://scratch.test/", {
+      headers: { cookie, "sec-fetch-dest": "document" },
+    }));
+    expect(doc.status).toBe(200);
+    expect(await doc.text()).toContain("private homepage");
+
+    // Subresources must come from a home-origin page; same-site content-host pages are refused.
+    const sameOrigin = await handler(homeRequest("https://scratch.test/data.json", {
+      headers: { cookie, "sec-fetch-dest": "empty", referer: "https://scratch.test/" },
+    }));
+    expect(sameOrigin.status).toBe(200);
+    const crossSite = await handler(homeRequest("https://scratch.test/data.json", {
+      headers: { cookie, "sec-fetch-dest": "empty", referer: "https://pages.scratch.test/other/" },
+    }));
+    expect(crossSite.status).toBe(403);
+  });
+
+  test("reports the home origin as the project url in API summaries", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: homepageConfig });
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "home" }),
+      openPath: "/",
+      project: "www",
+      visibility: "public",
+    }));
+    expect(publish.status).toBe(200);
+
+    const info = await handler(new Request("https://app.scratch.test/api/projects/www"));
+    expect(info.status).toBe(200);
+    expect(((await json(info)) as { project: { url: string } }).project.url).toBe("https://scratch.test/");
+  });
+});
+
 /** Builds a JSON POST request for app endpoint tests. */
 function post(path: string, body: unknown, bearer?: string): Request {
   return new Request(`https://scratch.test${path}`, {

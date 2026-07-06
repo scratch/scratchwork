@@ -52,6 +52,7 @@ export async function appHandler(options: {
       sessionTtlSeconds: 60,
     },
     ...options.config,
+    homepageUrls: options.config?.homepageUrls ?? [],
   };
   const base = Layer.mergeAll(
     Layer.succeed(ServerConfig, ServerConfig.of(config)),

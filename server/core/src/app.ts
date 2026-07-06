@@ -130,6 +130,10 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
       return yield* Effect.fail(new HttpError({ status: 405, message: "Method not allowed" }));
     }
 
+    const homepageOrigin = requestHomepageOrigin(request, config);
+    if (homepageOrigin != null) {
+      return yield* serveHomepage(request, url, homepageOrigin);
+    }
     return yield* servePublishedSite(request, url);
   });
 }
@@ -165,7 +169,7 @@ function publish(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const publishRequest = yield* readPublishRequest(request);
     const siteStore = yield* SiteStore;
     const result = yield* siteStore.publish(publishRequest, user, config);
-    const url = publishedUrl(contentBaseUrl(request, config), result.project, result.openPath);
+    const url = publishedUrl(contentBaseUrl(request, config), result.project, result.openPath, config);
     return jsonResponse({ ...result, url }, 200);
   });
 }
@@ -181,7 +185,7 @@ function listProjects(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const projects = yield* siteStore.listProjects(user);
     const contentBase = contentBaseUrl(request, config);
     return jsonResponse({
-      projects: projects.map((project) => projectSummary(project, contentBase, projectRole(project, user, config))),
+      projects: projects.map((project) => projectSummary(project, contentBase, projectRole(project, user, config), config)),
     }, 200);
   });
 }
@@ -200,7 +204,7 @@ function resolveProjectPath(request: HttpServerRequest.HttpServerRequest, url: U
     const user = yield* auth.requireApiUser(request);
     const site = yield* requireReadableSite(yield* loadSiteForPath(path), user, config);
     return jsonResponse({
-      project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config)),
+      project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config), config),
     }, 200);
   });
 }
@@ -214,7 +218,7 @@ function projectInfo(request: HttpServerRequest.HttpServerRequest, project: stri
     const siteStore = yield* SiteStore;
     const site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
     return jsonResponse({
-      project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config)),
+      project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config), config),
     }, 200);
   });
 }
@@ -243,7 +247,7 @@ function unpublishProject(request: HttpServerRequest.HttpServerRequest, project:
     const siteStore = yield* SiteStore;
     const record = yield* siteStore.unpublish(project, user, config);
     return jsonResponse({
-      project: projectSummary(record, contentBaseUrl(request, config), projectRole(record, user, config)),
+      project: projectSummary(record, contentBaseUrl(request, config), projectRole(record, user, config), config),
     }, 200);
   });
 }
@@ -259,7 +263,7 @@ function shareProject(request: HttpServerRequest.HttpServerRequest, project: str
     const siteStore = yield* SiteStore;
     const result = yield* siteStore.share(project, user, changes, config);
     return jsonResponse({
-      project: projectSummary(result.record, contentBaseUrl(request, config), projectRole(result.record, user, config)),
+      project: projectSummary(result.record, contentBaseUrl(request, config), projectRole(result.record, user, config), config),
       warnings: result.warnings,
     }, 200);
   });
@@ -312,7 +316,7 @@ function rejectCrossOriginApiRequest(
  * toggle; `permissions` lists the per-role grants and names other users' emails, so it
  * is shown only to admins and the owner (the caller's role decides, never appears in
  * the payload). */
-function projectSummary(record: SiteRecord, contentBase: string, callerRole: ProjectRole): Record<string, unknown> {
+function projectSummary(record: SiteRecord, contentBase: string, callerRole: ProjectRole, config: ServerConfigShape): Record<string, unknown> {
   const permissions = roleAtLeast(callerRole, "admin")
     ? {
         permissions: {
@@ -326,7 +330,7 @@ function projectSummary(record: SiteRecord, contentBase: string, callerRole: Pro
     project: record.project,
     visibility: record.visibility,
     ...permissions,
-    url: `${contentBase}/${encodeURIComponent(record.project)}/`,
+    url: projectUrl(record.project, contentBase, config),
     owner: record.owner,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -353,6 +357,7 @@ function issueProjectAccess(request: HttpServerRequest.HttpServerRequest, url: U
     const config = yield* ServerConfig;
     const contentBase = contentBaseUrl(request, config);
     const returnTo = safeContentReturnTo(url.searchParams.get("returnTo"), contentBase, project)
+      ?? safeHomepageReturnTo(url.searchParams.get("returnTo"), project, config)
       ?? `${contentBase}/${project}/`;
     const auth = yield* Auth;
     const user = yield* auth.currentUser(request);
@@ -625,6 +630,21 @@ function safeContentReturnTo(value: string | null, contentBase: string, project:
   }
 }
 
+/** Accepts a returnTo on the canonical home origin, where the homepage project owns the
+ * whole path space, when the handoff is for the homepage project. */
+function safeHomepageReturnTo(value: string | null, project: string, config: ServerConfigShape): string | null {
+  const canonical = homepageBaseUrl(project, config);
+  if (canonical == null || value == null || value.length > 4096) return null;
+  try {
+    const url = new URL(value);
+    if (url.origin !== new URL(canonical).origin) return null;
+    if (url.username !== "" || url.password !== "") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Rebuilds the requested path and query as an absolute URL on the content origin. */
 function contentRequestUrl(url: URL, contentBase: string): string {
   return new URL(`${url.pathname}${url.search}`, contentBase).toString();
@@ -640,6 +660,143 @@ function publishedSiteHeaders(isPublic: boolean): Record<string, string> {
     headers["Access-Control-Allow-Origin"] = "*";
   }
   return headers;
+}
+
+// ---------------------------------------------------------------------------
+// The server homepage: one ordinary project served across a home origin's whole
+// path space (spec "Server homepage"). Reserved prefixes (/auth/*, /api/*, /health)
+// are handled before dispatch reaches here, so they keep their server-level behavior
+// on every host and the matching homepage files are unreachable.
+// ---------------------------------------------------------------------------
+
+/** Matches the request's origin against the configured homepage origins; null when the
+ * server has no homepage or the request is for another host. */
+function requestHomepageOrigin(
+  request: HttpServerRequest.HttpServerRequest,
+  config: ServerConfigShape,
+): string | null {
+  if (config.homepageProject == null || config.homepageUrls.length === 0) return null;
+  const requestBase = requestBaseUrl(request);
+  if (requestBase == null) return null;
+  return config.homepageUrls.find((url) => sameOrigin(url, requestBase)) ?? null;
+}
+
+/** Serves the homepage project on a home origin. Non-canonical home origins 308 to the
+ * canonical one; an unpublished homepage answers with setup instructions instead. */
+function serveHomepage(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+  origin: string,
+): AppEffect {
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    const canonical = config.homepageUrls[0];
+    if (origin !== canonical) {
+      return HttpServerResponse.redirect(new URL(`${url.pathname}${url.search}`, canonical).toString(), { status: 308 });
+    }
+    const project = config.homepageProject;
+    if (project == null) return yield* Effect.fail(new HttpError({ status: 404, message: "Not found" }));
+    const siteStore = yield* SiteStore;
+    const site = yield* siteStore.loadProject(project);
+    if (site == null) {
+      return homepageSetupResponse(request, project, appBaseUrl(request, config));
+    }
+    if (canReadProject(site.record, null, config)) {
+      return yield* serveSiteFiles(site, url.pathname, url.search, "", true);
+    }
+    return yield* servePrivateHomepage(request, url, site, config, canonical);
+  });
+}
+
+/** Gates a non-public homepage: redeems a handoff token into a "/"-scoped cookie, honors
+ * an existing cookie, or sends the viewer through the app-host authentication handoff.
+ * Mirrors servePrivateContent, adjusted for a project that owns its whole origin. */
+function servePrivateHomepage(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+  site: LoadedSite,
+  config: ServerConfigShape,
+  canonical: string,
+): AppEffect {
+  return Effect.gen(function* () {
+    const auth = yield* Auth;
+    const project = site.record.project;
+
+    const handoffToken = url.searchParams.get(HANDOFF_PARAM);
+    if (handoffToken != null) {
+      const cleanTarget = pathWithoutHandoff(url);
+      const user = yield* auth
+        .verifyProjectAccessToken(handoffToken, project, "handoff")
+        .pipe(Effect.orElseSucceed(() => null));
+      if (user == null || !canReadProject(site.record, user, config)) {
+        return HttpServerResponse.redirect(cleanTarget, { status: 302 });
+      }
+      const cookieToken = yield* auth.issueProjectAccessToken(project, user, "cookie");
+      return HttpServerResponse.redirect(cleanTarget, {
+        status: 302,
+        headers: {
+          "set-cookie": projectAccessCookie(cookieToken, project, canonical, config.auth.sessionTtlSeconds, "/"),
+        },
+      });
+    }
+
+    const cookieUser = yield* projectAccessUser(request, auth, site, config);
+    if (cookieUser != null) {
+      // The content host is same-site with a typical home origin, so a project's JS
+      // there could fetch/iframe the private homepage with the viewer's cookie attached.
+      // As on the content host, subresource requests must prove (via Referer) that the
+      // requesting page lives on the home origin; top-level navigations stay unrestricted.
+      if (isSubresourceRequest(request) && !refererMatchesOrigin(request, canonical)) {
+        return yield* Effect.fail(new HttpError({ status: 403, message: "Cross-site request rejected" }));
+      }
+      return yield* serveSiteFiles(site, url.pathname, url.search, "", false);
+    }
+
+    if (isSubresourceRequest(request)) {
+      return yield* Effect.fail(new HttpError({ status: 401, message: "Authentication required" }));
+    }
+    const redirect = new URL("/auth/project", appBaseUrl(request, config));
+    redirect.searchParams.set("route", project);
+    redirect.searchParams.set("returnTo", new URL(`${url.pathname}${url.search}`, canonical).toString());
+    return HttpServerResponse.redirect(redirect, { status: 302 });
+  });
+}
+
+/** Setup instructions served on a home domain until the homepage project is published.
+ * A freshly deployed server tells its own deployer how to finish setting it up. */
+function homepageSetupResponse(
+  request: HttpServerRequest.HttpServerRequest,
+  project: string,
+  appBase: string,
+): HttpServerResponse.HttpServerResponse {
+  const command = `scratchwork publish --server ${appBase} --project ${project} --visibility public`;
+  if (!acceptsHtmlPage(request)) {
+    return HttpServerResponse.text(
+      `This server's homepage is the project "${project}", which has not been published yet.\nPublish it with:\n\n  ${command}\n`,
+      { status: 404, contentType: "text/plain; charset=utf-8", headers: securityHeaders() },
+    );
+  }
+  return errorPageResponse({
+    status: 404,
+    title: "This homepage hasn't been published yet",
+    message: `This domain serves the project "${project}", which doesn't exist on this server yet.`,
+    note: `Publish it with: ${command}`,
+  });
+}
+
+/** The request's path and query with the handoff parameter removed. */
+function pathWithoutHandoff(url: URL): string {
+  const params = new URLSearchParams(url.search);
+  params.delete(HANDOFF_PARAM);
+  const search = params.toString();
+  return `${url.pathname}${search === "" ? "" : `?${search}`}`;
+}
+
+/** Returns true when the request's Referer page lives on the given origin. */
+function refererMatchesOrigin(request: HttpServerRequest.HttpServerRequest, origin: string): boolean {
+  const referer = request.headers.referer;
+  if (referer == null) return false;
+  return sameOrigin(referer, origin);
 }
 
 // ---------------------------------------------------------------------------
@@ -713,9 +870,26 @@ function sameOrigin(left: string, right: string): boolean {
   }
 }
 
-/** Builds the user-facing URL returned by publish. */
-function publishedUrl(baseUrl: string, project: string, openPath: string): string {
+/** Builds the user-facing URL returned by publish. The homepage project reports its
+ * canonical home origin; every other project reports its content route. */
+function publishedUrl(baseUrl: string, project: string, openPath: string, config: ServerConfigShape): string {
+  const homepageBase = homepageBaseUrl(project, config);
+  if (homepageBase != null) return `${homepageBase}${encodeOpenPath(openPath)}`;
   return `${baseUrl}/${encodeURIComponent(project)}${encodeOpenPath(openPath)}`;
+}
+
+/** The user-facing root URL of one project (see publishedUrl). */
+function projectUrl(project: string, contentBase: string, config: ServerConfigShape): string {
+  const homepageBase = homepageBaseUrl(project, config);
+  if (homepageBase != null) return `${homepageBase}/`;
+  return `${contentBase}/${encodeURIComponent(project)}/`;
+}
+
+/** The canonical home origin when the project is the configured homepage, else null. */
+function homepageBaseUrl(project: string, config: ServerConfigShape): string | null {
+  return config.homepageProject != null && project === config.homepageProject
+    ? config.homepageUrls[0] ?? null
+    : null;
 }
 
 /** URL-encodes each path segment without encoding slashes. */

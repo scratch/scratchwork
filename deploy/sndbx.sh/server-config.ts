@@ -4,10 +4,12 @@ import type { ScratchworkServerConfig } from "@scratchwork/server-deploy-cloudfl
 export const server = {
   appDomain: "app.sndbx.sh",
   contentDomain: "pages.sndbx.sh",
+  homepageDomains: ["sndbx.sh", "www.sndbx.sh"],
+  homepageProject: "www",
   auth: "oauth",
   authSessionSeconds: 2_592_000,
   allowedUsers: "public",
-  maxVisibility: "@gmail.com,@koomen.org",
+  maxVisibility: "public",
   usersCanSetProjectNames: true,
   defaultVisibility: "private",
 } satisfies ScratchworkServerConfig;
