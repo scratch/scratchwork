@@ -3,20 +3,25 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+/** A JSON leaf value. */
 export type JsonPrimitive = string | number | boolean | null;
+/** Any JSON-serializable value, as stored by PrimitiveDb. */
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
+/** Raised when a database backend cannot complete an operation. */
 export class PrimitiveDbError extends Data.TaggedError("PrimitiveDbError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
+/** Raised when an ifMatch/ifNoneMatch write precondition fails. */
 export class PrimitiveDbConflict extends Data.TaggedError("PrimitiveDbConflict")<{
   readonly namespace: string;
   readonly key: string;
   readonly message: string;
 }> {}
 
+/** One stored record with the version metadata used for conditional writes. */
 export interface PrimitiveDbRecord<A extends JsonValue = JsonValue> {
   readonly namespace: string;
   readonly key: string;
@@ -25,15 +30,18 @@ export interface PrimitiveDbRecord<A extends JsonValue = JsonValue> {
   readonly updatedAt: string;
 }
 
+/** Write preconditions: `ifNoneMatch: "*"` requires a new key, `ifMatch` pins the version. */
 export interface PutPrimitiveDbRecordOptions {
   readonly ifNoneMatch?: "*";
   readonly ifMatch?: number;
 }
 
+/** Delete precondition: `ifMatch` pins the version. */
 export interface DeletePrimitiveDbRecordOptions {
   readonly ifMatch?: number;
 }
 
+/** Options for prefix listing with cursor pagination. */
 export interface ListPrimitiveDbRecordsOptions {
   readonly prefix?: string;
   readonly limit?: number;
@@ -41,12 +49,14 @@ export interface ListPrimitiveDbRecordsOptions {
   readonly startAfter?: string;
 }
 
+/** One page of a listing. */
 export interface PrimitiveDbListResult<A extends JsonValue = JsonValue> {
   readonly records: ReadonlyArray<PrimitiveDbRecord<A>>;
   /** Pass as startAfter to fetch the next page. Absent when the listing is complete. */
   readonly cursor?: string;
 }
 
+/** The versioned JSON key-value contract every DB backend (memory, DynamoDB, D1) must satisfy. */
 export interface PrimitiveDbShape {
   readonly get: <A extends JsonValue = JsonValue>(
     namespace: string,
@@ -69,11 +79,13 @@ export interface PrimitiveDbShape {
   ) => Effect.Effect<PrimitiveDbListResult<A>, PrimitiveDbError>;
 }
 
+/** Service tag for the primitive database backend. */
 export class PrimitiveDb extends Context.Tag("@scratchwork/server/PrimitiveDb")<
   PrimitiveDb,
   PrimitiveDbShape
 >() {}
 
+/** Internal storage format of the in-memory backend. */
 interface MemoryRecord {
   readonly encoded: string;
   readonly version: number;
@@ -179,12 +191,12 @@ export function requireSafeDbKeyPrefix(prefix: string): Effect.Effect<void, Prim
     : Effect.fail(new PrimitiveDbError({ message: `Invalid database key prefix: ${prefix}` }));
 }
 
-/** Namespace syntax for logical record groups. */
+/** Returns true for namespace syntax accepted by every backend. */
 export function safeDbNamespace(namespace: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(namespace);
 }
 
-/** Key syntax shared by all primitive DB backends. */
+/** Returns true for key syntax accepted by every backend. */
 export function safeDbKey(key: string): boolean {
   return (
     key.length > 0 &&
@@ -196,7 +208,7 @@ export function safeDbKey(key: string): boolean {
   );
 }
 
-/** Prefix syntax for database list operations. Allows one trailing slash. */
+/** Returns true for a valid list prefix; allows one trailing slash. */
 export function safeDbKeyPrefix(prefix: string): boolean {
   if (prefix === "") return true;
   if (safeDbKey(prefix)) return true;
@@ -258,6 +270,7 @@ export function normalizeListLimit(limit: number | undefined): Effect.Effect<num
   return Effect.succeed(limit);
 }
 
+/** Returns true when a runtime value is JSON-serializable without loss. */
 function isJsonValue(value: unknown): value is JsonValue {
   if (value == null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
@@ -266,6 +279,7 @@ function isJsonValue(value: unknown): value is JsonValue {
   return Object.values(value as Record<string, unknown>).every(isJsonValue);
 }
 
+/** Decodes one in-memory record back into the public record shape. */
 function materializeRecord<A extends JsonValue>(
   namespace: string,
   key: string,
@@ -276,12 +290,15 @@ function materializeRecord<A extends JsonValue>(
   );
 }
 
+/** Joins namespace and key with a separator no valid key can contain. */
 function memoryKey(namespace: string, key: string): string {
   return `${namespace}\0${key}`;
 }
 
 const utf8Encoder = new TextEncoder();
 
+/** Compares strings by UTF-8 byte order so in-memory listing matches DynamoDB/D1 key order
+ * rather than JS UTF-16 ordering. */
 function compareUtf8Bytes(a: string, b: string): number {
   const left = utf8Encoder.encode(a);
   const right = utf8Encoder.encode(b);
@@ -293,6 +310,7 @@ function compareUtf8Bytes(a: string, b: string): number {
   return left.length - right.length;
 }
 
+/** Validates an ifMatch version number. */
 function validateVersionPrecondition(version: number | undefined): Effect.Effect<void, PrimitiveDbError> {
   if (version != null && (!Number.isInteger(version) || version < 1)) {
     return Effect.fail(new PrimitiveDbError({ message: "ifMatch must be a positive integer version" }));

@@ -6,32 +6,42 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context as LambdaContext,
 } from "aws-lambda";
-import { AwsPrimitiveDbLive } from "./dynamodb-db";
-import { AwsObjectStorageLive } from "./storage";
+import { DynamoDbPrimitiveDbLive } from "./dynamodb-db";
+import { S3ObjectStorageLive } from "./s3-storage";
 
 const env = process.env as EnvVars;
+/** The full service graph for the Lambda runtime, built from process.env. */
 const MainLayer = Layer.provideMerge(
   Layer.mergeAll(AuthLive, SiteStoreLive),
-  Layer.mergeAll(AwsObjectStorageLive(env), AwsPrimitiveDbLive(env), makeServerConfigLayer(env)),
+  Layer.mergeAll(S3ObjectStorageLive(env), DynamoDbPrimitiveDbLive(env), makeServerConfigLayer(env)),
 );
 
-const web = HttpApp.toWebHandlerLayer(app, MainLayer);
+/** The core app as a Web fetch handler, built lazily inside the request guard so even a
+ * handler-construction failure answers as a 500 instead of killing the invocation. */
+let web: { readonly handler: (request: Request) => Promise<Response> } | null = null;
 
-/** Handles one API Gateway v2 event with the shared server app. */
+/** Handles one API Gateway v2 event with the shared server app. No failure may escape:
+ * anything the app's own error handling did not catch — most importantly a service layer
+ * that fails to build, e.g. malformed SCRATCHWORK_* config — is logged for CloudWatch
+ * and answered with a plain 500. */
 export async function handler(
   event: APIGatewayProxyEventV2,
   _context: LambdaContext,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const request = eventToRequest(event);
-  const response = await web.handler(request);
-  return responseToResult(response);
-}
-
-/** Creates a testable Lambda handler from a Web Fetch handler. */
-export function makeAwsHandler(
-  webHandler: (request: Request) => Promise<Response>,
-): (event: APIGatewayProxyEventV2, context: LambdaContext) => Promise<APIGatewayProxyStructuredResultV2> {
-  return async (event) => responseToResult(await webHandler(eventToRequest(event)));
+  try {
+    web ??= HttpApp.toWebHandlerLayer(app, MainLayer);
+    const request = eventToRequest(event);
+    const response = await web.handler(request);
+    return responseToResult(response);
+  } catch (error) {
+    console.error("scratchwork handler: unhandled error", error);
+    return {
+      statusCode: 500,
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ error: "Internal server error" }),
+      isBase64Encoded: false,
+    };
+  }
 }
 
 /** Converts an API Gateway v2 event into a standard Web Request. */

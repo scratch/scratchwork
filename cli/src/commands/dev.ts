@@ -1,6 +1,12 @@
+/*
+ * `scratchwork dev` - serve a project directory locally with hot reload.
+ * Wires together the dev server, the live-reload watcher, and the heartbeat
+ * that keeps browser SSE connections alive.
+ */
 import type { PlatformError } from "@effect/platform/Error";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
 import * as LogLevel from "effect/LogLevel";
 import * as PubSub from "effect/PubSub";
@@ -21,16 +27,14 @@ export function runDev(
 ): Effect.Effect<void, PlatformError | CliError, DevServices> {
   const program = Effect.scoped(
     Effect.gen(function* () {
-      const startPort = config.port ?? DEFAULT_PORT;
-      const pathArg = config.path ?? ".";
       yield* logDebug("dev command starting", {
-        path: pathArg,
-        start_port: startPort,
+        path: config.path,
+        start_port: config.port,
       });
 
-      yield* validatePort(startPort);
+      yield* validatePort(config.port);
 
-      const target = yield* resolveDevTarget(pathArg);
+      const target = yield* resolveDevTarget(config.path);
       yield* Effect.annotateLogsScoped({
         root: target.root,
         open_path: target.openPath,
@@ -47,16 +51,17 @@ export function runDev(
         loggedMarkdownRoutes: new Set(),
       };
 
-      const { port } = yield* serve(state, startPort);
+      const { port } = yield* serve(state, config.port);
       const url = `http://localhost:${port}${state.openPath}`;
       yield* logDebug("dev server started", { port, url });
 
       yield* heartbeat(state).pipe(Effect.forkScoped);
-      yield* startReloadWatcher(state).pipe(Effect.forkScoped);
-
+      const watcher = yield* startReloadWatcher(state).pipe(Effect.forkScoped);
       yield* printBanner(state, url);
       yield* openBrowser(url);
-      return yield* Effect.never;
+      // Joining the watcher fiber makes its failure surface as a CliError
+      // instead of dying silently; zipRight keeps serving if it ever completes.
+      return yield* Fiber.join(watcher).pipe(Effect.zipRight(Effect.never));
     }),
   ).pipe(Effect.annotateLogs("command", "dev"));
 

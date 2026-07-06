@@ -7,23 +7,30 @@ import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
 import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath } from "../../../shared/src/site/paths";
 import { parseJson } from "../../../shared/src/util/json";
-import { normalizeAccessGroup, safeProjectIdentifier, type AccessGroup } from "./access";
-import { HttpError } from "./http-error";
+import { normalizeAccessGroup, isSafeProjectIdentifier, type AccessGroup } from "./access";
+import { HttpError } from "./http";
 
+/** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
 export const MAX_PUBLISH_BODY_BYTES = 30 * 1024 * 1024;
+/** Maximum number of files in one publish bundle. */
 export const MAX_PUBLISH_FILES = 1_000;
+/** Maximum decoded size of a single published file. */
 export const MAX_PUBLISH_FILE_BYTES = 10 * 1024 * 1024;
+/** Maximum decoded size of the whole bundle. */
 export const MAX_PUBLISH_TOTAL_BYTES = 25 * 1024 * 1024;
 
+/** A validated publish request: the bundle plus normalized publish options. `project`
+ * stays optional at the protocol level — the server mints a name when the naming mode is
+ * random, and requires one in the store when publishers choose names. */
 export interface PublishRequest {
   readonly bundle: PublishBundle;
   readonly openPath: string;
-  readonly workspace?: string;
   readonly project?: string;
   readonly visibility?: AccessGroup;
   readonly totalBytes: number;
 }
 
+/** Runtime validators for the untrusted publish request body. */
 const PublishBundleFileSchema = Schema.Struct({
   path: Schema.String.pipe(
     Schema.filter((path) => isSafeSitePath(path) || "Invalid site path"),
@@ -41,8 +48,7 @@ const PublishBundleSchema = Schema.Struct({
 const RawPublishRequestSchema = Schema.Struct({
   bundle: PublishBundleSchema,
   openPath: Schema.optional(Schema.String),
-  workspace: Schema.optional(Schema.String.pipe(Schema.filter((workspace) => safeProjectIdentifier(workspace) || "Invalid workspace"))),
-  project: Schema.optional(Schema.String.pipe(Schema.filter((project) => safeProjectIdentifier(project) || "Invalid project"))),
+  project: Schema.optional(Schema.String.pipe(Schema.filter((project) => isSafeProjectIdentifier(project) || "Invalid project"))),
   visibility: Schema.optional(Schema.String),
 });
 
@@ -124,11 +130,18 @@ function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishR
       : yield* normalizeAccessGroup(raw.visibility).pipe(
         Effect.mapError((cause) => new HttpError({ status: 400, message: cause.message })),
       );
+    // Visibility is the public/private toggle; per-account and per-domain access is a
+    // separate grant list managed through the share API, not a publish-time setting.
+    if (visibility != null && visibility !== "public" && visibility !== "private") {
+      return yield* Effect.fail(new HttpError({
+        status: 400,
+        message: 'visibility must be "public" or "private"; grant per-account access with scratchwork share',
+      }));
+    }
 
     return {
       bundle: raw.bundle,
       openPath,
-      workspace: raw.workspace,
       project: raw.project,
       visibility,
       totalBytes,
@@ -137,7 +150,7 @@ function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishR
 }
 
 /** Normalizes the path the published URL should open after upload. */
-export function normalizeOpenPath(value: string): string | null {
+function normalizeOpenPath(value: string): string | null {
   if (!value.startsWith("/") || value.includes("\0") || value.includes("\\") || value.includes("?") || value.includes("#")) return null;
   let decoded: string;
   try {

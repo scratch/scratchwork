@@ -1,14 +1,11 @@
-import * as Effect from "effect/Effect";
 import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
-import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
-import { bytesToHex } from "../../../shared/src/encoding/hex";
-import { StorageError } from "./storage";
 
+/** Slug alphabet without ambiguous characters (no 0/1/i/l/o), safe to read aloud or retype. */
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 const SLUG_LENGTH = 10;
 const REVISION_BYTES = 16;
 
-/** Generates a human-safe random publish slug. */
+/** Generates a random project name for servers that assign names on first publish. */
 export function randomSlug(): string {
   return randomAlphabetString(SLUG_LENGTH, SLUG_ALPHABET);
 }
@@ -18,15 +15,7 @@ export function randomRevisionId(): string {
   return bytesToBase64Url(randomBytes(REVISION_BYTES));
 }
 
-/** Computes a SHA-256 digest as lowercase hex. */
-export function sha256Hex(bytes: Uint8Array): Effect.Effect<string, StorageError> {
-  return Effect.tryPromise({
-    try: async () => bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes)))),
-    catch: (cause) => new StorageError({ message: "Could not hash bytes", cause }),
-  });
-}
-
-/** Compares two same-length strings without early exits. */
+/** Compares two strings in constant time per character; unequal lengths return false immediately. */
 export function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;

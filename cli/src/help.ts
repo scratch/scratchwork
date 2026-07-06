@@ -12,11 +12,13 @@
  */
 import type { Command } from "@effect/cli/Command";
 
+/** Whether argv was a help request, and the exit code to use if it was. */
 export interface HelpResult {
   readonly handled: boolean;
   readonly exitCode: number;
 }
 
+/** Everything the renderer needs to document one subcommand. */
 interface CommandInfo {
   readonly name: string;
   readonly summary: string;
@@ -24,6 +26,7 @@ interface CommandInfo {
   readonly options: ReadonlyArray<OptionInfo>;
 }
 
+/** One aligned label/description row in a help listing. */
 interface HelpItem {
   readonly label: string;
   readonly description: string;
@@ -34,6 +37,7 @@ interface OptionInfo extends HelpItem {
   readonly usage: string;
 }
 
+/** Hand-written prose (notes, examples) that has no home in the command graph. */
 interface CommandExtras {
   readonly notes?: ReadonlyArray<string>;
   readonly examples: ReadonlyArray<string>;
@@ -67,12 +71,15 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
   },
   publish: {
     notes: [
-      "Writes .scratchwork.json after a successful publish so later project commands can omit server/workspace/project.",
+      "Writes .scratchwork.json after a successful publish so later project commands can omit server/project.",
+      "Default project name: the directory name, or the file name without its extension for a file target.",
+      "On servers that assign random project names, the first publish returns the assigned name; it is saved to .scratchwork.json so republishes update the same project.",
       "If the server returns 401, the CLI starts scratchwork login and retries.",
     ],
     examples: [
       "scratchwork publish . --server sndbx.sh --visibility public",
-      "scratchwork publish docs --server https://app.sndbx.sh --workspace koomen --project hello-world",
+      "scratchwork publish notes.md --server sndbx.sh",
+      "scratchwork publish docs --server https://app.sndbx.sh --project hello-world",
       "scratchwork publish --visibility private",
     ],
   },
@@ -99,31 +106,53 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
     ],
   },
   info: {
-    notes: ["Explicit --workspace and --project override values found in .scratchwork.json or a URL."],
+    notes: ["An explicit --project overrides values found in .scratchwork.json or a URL."],
     examples: [
-      "scratchwork info https://pages.sndbx.sh/koomen/hello-world/",
-      "scratchwork info --server sndbx.sh --workspace koomen --project hello-world",
+      "scratchwork info https://pages.sndbx.sh/hello-world/",
+      "scratchwork info --server sndbx.sh --project hello-world",
       "scratchwork info",
     ],
   },
-  unpublish: {
-    notes: ["This does not delete files or project metadata; it changes visibility to private."],
+  share: {
+    notes: [
+      "Roles: read (view), write (read + publish updates), admin (write + manage sharing, visibility, and unpublish). The project creator is the owner (admin + delete); ownership cannot be granted.",
+      "Sharing sets the targets' role — a target holding another role is moved, and other grants are kept.",
+      "Requires admin access. Grants are independent of the public/private visibility toggle and work on public projects too.",
+    ],
     examples: [
-      "scratchwork unpublish https://pages.sndbx.sh/koomen/hello-world/",
-      "scratchwork unpublish --server sndbx.sh --workspace koomen --project hello-world",
+      "scratchwork share alice@example.com",
+      "scratchwork share --role write alice@example.com bob@example.com",
+      "scratchwork share --role admin @example.com https://pages.sndbx.sh/hello-world/",
+    ],
+  },
+  revoke: {
+    notes: [
+      "Strips every role (read, write, admin) the exact email/@domain targets hold.",
+      "Warns when a revoked address still has access through a remaining domain grant, public visibility, or ownership.",
+    ],
+    examples: [
+      "scratchwork revoke alice@example.com",
+      "scratchwork revoke @example.com https://pages.sndbx.sh/hello-world/",
+    ],
+  },
+  unpublish: {
+    notes: ["This does not delete files or project metadata; it resets the project to owner-only, setting visibility to private and clearing every share grant."],
+    examples: [
+      "scratchwork unpublish https://pages.sndbx.sh/hello-world/",
+      "scratchwork unpublish --server sndbx.sh --project hello-world",
     ],
   },
   delete: {
-    notes: ["Requires project ownership. Use carefully; the route is removed from the server index."],
+    notes: ["Requires project ownership. Use carefully; deleting releases the project name for anyone to claim."],
     examples: [
-      "scratchwork delete https://pages.sndbx.sh/koomen/old-demo/",
-      "scratchwork delete --server sndbx.sh --workspace koomen --project old-demo",
+      "scratchwork delete https://pages.sndbx.sh/old-demo/",
+      "scratchwork delete --server sndbx.sh --project old-demo",
     ],
   },
   clone: {
-    notes: ["Uses stored login credentials for private projects."],
+    notes: ["Uses stored login credentials for private projects. Writes .scratchwork.json into the destination so a republish updates the same project."],
     examples: [
-      "scratchwork clone https://pages.sndbx.sh/koomen/hello-world/",
+      "scratchwork clone https://pages.sndbx.sh/hello-world/",
       "scratchwork clone .",
     ],
   },
@@ -142,6 +171,10 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
   },
 };
 
+/**
+ * Detects a help request in argv and, when found, prints the appropriate help
+ * text and reports the exit code the process should use.
+ */
 export function printHelpIfRequested<Name extends string, R, E, A>(
   argv: ReadonlyArray<string>,
   version: string,
@@ -166,6 +199,57 @@ export function printHelpIfRequested<Name extends string, R, E, A>(
   return { handled: true, exitCode: request.noCommand ? 1 : 0 };
 }
 
+/**
+ * Detects an unrecognized subcommand in argv and, when found, prints a short
+ * error with a near-miss suggestion instead of letting @effect/cli fail with
+ * its raw parser output.
+ */
+export function printUnknownCommandIfFound<Name extends string, R, E, A>(
+  argv: ReadonlyArray<string>,
+  root: Command<Name, R, E, A>,
+): HelpResult {
+  const first = argv[2];
+  if (first == null || first.startsWith("-")) return { handled: false, exitCode: 0 };
+  const names = subcommandInfos(root).map((command) => command.name);
+  if (names.includes(first)) return { handled: false, exitCode: 0 };
+
+  console.error(`scratchwork: unknown command '${first}'`);
+  const suggestion = closestName(first, names);
+  if (suggestion != null) {
+    console.error(`Did you mean 'scratchwork ${suggestion}'?`);
+  }
+  console.error("Run 'scratchwork --help' to see available commands.");
+  return { handled: true, exitCode: 1 };
+}
+
+/** Finds the command name within edit distance 2 of the input, if any. */
+function closestName(input: string, names: ReadonlyArray<string>): string | null {
+  let best: { name: string; distance: number } | null = null;
+  for (const name of names) {
+    const distance = editDistance(input.toLowerCase(), name);
+    if (distance <= 2 && (best == null || distance < best.distance)) {
+      best = { name, distance };
+    }
+  }
+  return best?.name ?? null;
+}
+
+/** Levenshtein distance between two short strings. */
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = a[i - 1] === b[j - 1]
+        ? previous[j - 1]!
+        : 1 + Math.min(previous[j - 1]!, previous[j]!, current[j - 1]!);
+    }
+    previous = current;
+  }
+  return previous[b.length]!;
+}
+
+/** Recognizes `--help`/`-h`/`help` forms in argv, or empty argv, as help requests. */
 function helpRequest(args: ReadonlyArray<string>): { readonly command?: string; readonly noCommand?: boolean } | null {
   if (args.length === 0) return { noCommand: true };
   const [first, second, ...rest] = args;
@@ -182,6 +266,7 @@ function helpRequest(args: ReadonlyArray<string>): { readonly command?: string; 
 // Rendering
 // ---------------------------------------------------------------------------
 
+/** Renders the top-level help screen listing every subcommand. */
 function renderRootHelp(version: string, commands: ReadonlyArray<CommandInfo>): string {
   return [
     `scratchwork ${version}`,
@@ -209,6 +294,7 @@ function renderRootHelp(version: string, commands: ReadonlyArray<CommandInfo>): 
   ].join("\n");
 }
 
+/** Renders one subcommand's help screen, or null for an unknown command. */
 function renderCommandHelp(version: string, command: CommandInfo | undefined): string | null {
   if (command == null) return null;
   const extras = EXTRAS[command.name];
@@ -234,6 +320,7 @@ function renderCommandHelp(version: string, command: CommandInfo | undefined): s
   return parts.join("\n");
 }
 
+/** Builds the one-line usage string for a command from its args and options. */
 function commandUsage(command: CommandInfo): string {
   return [
     "scratchwork",
@@ -243,6 +330,7 @@ function commandUsage(command: CommandInfo): string {
   ].join(" ");
 }
 
+/** Formats label/description pairs into aligned, wrapped two-column rows. */
 function formatItems(items: ReadonlyArray<HelpItem>): string {
   const width = Math.min(Math.max(...items.map((item) => item.label.length)), 28);
   return items.map((item) => {
@@ -254,14 +342,17 @@ function formatItems(items: ReadonlyArray<HelpItem>): string {
   }).join("\n");
 }
 
+/** Formats note lines as an indented bullet list. */
 function formatBullets(items: ReadonlyArray<string>): string {
   return items.map((item) => `  - ${item}`).join("\n");
 }
 
+/** Formats example command lines with the standard indent. */
 function formatExamples(examples: ReadonlyArray<string>): string {
   return examples.map((example) => `  ${example}`).join("\n");
 }
 
+/** Greedily wraps text at word boundaries to the given column width. */
 function wrapText(text: string, columns: number): ReadonlyArray<string> {
   const lines: Array<string> = [];
   let line = "";
@@ -284,6 +375,7 @@ function wrapText(text: string, columns: number): ReadonlyArray<string> {
 /** Loosely-typed @effect/cli descriptor node; only `_tag` is guaranteed. */
 type Node = { readonly _tag: string } & Record<string, any>;
 
+/** Extracts name, summary, args, and options for every subcommand of the root. */
 function subcommandInfos<Name extends string, R, E, A>(
   root: Command<Name, R, E, A>,
 ): ReadonlyArray<CommandInfo> {
@@ -325,6 +417,7 @@ function collectSingles(node: Node | undefined, childKey: "args" | "options"): R
   }
 }
 
+/** Converts a Single argument descriptor into a help row. */
 function argItem(single: Node): HelpItem {
   return {
     label: pseudoName(single) ?? String(single.name).replace(/[<>]/g, ""),
@@ -332,6 +425,7 @@ function argItem(single: Node): HelpItem {
   };
 }
 
+/** Converts a Single option descriptor into a help row plus its usage form. */
 function optionInfo(single: Node): OptionInfo {
   const aliases: ReadonlyArray<string> = Array.isArray(single.aliases) ? single.aliases : [];
   const flags = [
@@ -347,11 +441,13 @@ function optionInfo(single: Node): OptionInfo {
   };
 }
 
+/** Reads a descriptor's display placeholder set via withPseudoName, if any. */
 function pseudoName(single: Node): string | null {
   const pseudo = single.pseudoName;
   return typeof pseudo?.value === "string" ? pseudo.value : null;
 }
 
+/** Flattens an @effect/printer HelpDoc tree into plain text. */
 function helpDocText(doc: Node | undefined): string {
   if (doc == null) return "";
   switch (doc._tag) {
@@ -365,6 +461,7 @@ function helpDocText(doc: Node | undefined): string {
   }
 }
 
+/** Flattens a HelpDoc span node into plain text. */
 function spanText(span: Node | undefined): string {
   if (span == null) return "";
   switch (span._tag) {

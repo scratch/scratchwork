@@ -1,28 +1,23 @@
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Data from "effect/Data";
-import * as Effect from "effect/Effect";
 
+/** Generic HTTP failure; `status` becomes the response status and `message` the error body. */
 export class HttpError extends Data.TaggedError("HttpError")<{
   readonly status: number;
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
-/** Creates a JSON response with common API security headers. */
-export function jsonResponse(
-  body: unknown,
-  status: number,
-): Effect.Effect<HttpServerResponse.HttpServerResponse> {
-  return Effect.succeed(
-    HttpServerResponse.unsafeJson(body, {
-      status,
-      headers: securityHeaders(),
-    }),
-  );
+/** Builds a JSON response with common API security headers. */
+export function jsonResponse(body: unknown, status: number): HttpServerResponse.HttpServerResponse {
+  return HttpServerResponse.unsafeJson(body, {
+    status,
+    headers: securityHeaders(),
+  });
 }
 
-/** Creates the standard `{ error }` JSON response. */
-export function errorJson(status: number, message: string): Effect.Effect<HttpServerResponse.HttpServerResponse> {
+/** Builds the standard `{ error }` JSON response. */
+export function errorJson(status: number, message: string): HttpServerResponse.HttpServerResponse {
   return jsonResponse({ error: message }, status);
 }
 

@@ -40,20 +40,22 @@ const ALIASES = {
   mdx: "markdown",
 };
 
-export function resolveLang(lang) {
+// Map a fence label to Prism's canonical language name ("js" -> "javascript").
+function resolveLang(lang) {
   if (!lang) return null;
   const key = lang.toLowerCase();
   return ALIASES[key] || key;
 }
 
-// Returns highlighted HTML for a code block, or null if the language is
-// unknown (caller falls back to a plain, unhighlighted <code>).
+// Highlight a code block. Returns { html, lang } — highlighted markup plus
+// the resolved language name (for the language-* class) — or null when the
+// language is unknown (caller falls back to a plain, unhighlighted <code>).
 export function highlight(code, lang) {
   const resolved = resolveLang(lang);
   if (!resolved) return null;
   const grammar = Prism.languages[resolved];
   if (!grammar) return null;
-  return Prism.highlight(code, grammar, resolved);
+  return { html: Prism.highlight(code, grammar, resolved), lang: resolved };
 }
 
 export default Prism;

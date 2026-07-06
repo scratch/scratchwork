@@ -1,3 +1,9 @@
+/**
+ * The SiteStore service: publishing (content-addressed blobs + an immutable revision +
+ * pointer records written with optimistic-concurrency preconditions), loading published
+ * sites by project name, listing, unpublishing, deleting, and bundle export.
+ * See site-records.ts for the persisted data model.
+ */
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -5,17 +11,14 @@ import * as Layer from "effect/Layer";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
 import { base64ToBytes, bytesToBase64 } from "../../../shared/src/encoding/base64";
-import { isHex } from "../../../shared/src/encoding/hex";
 import { contentType } from "../../../shared/src/site/content";
-import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
-import { isRecord, parseJson } from "../../../shared/src/util/json";
 import {
   accessGroupIsSubset,
   accessGroupMatches,
+  accessGroupModify,
   accessGroupUsesOnlyDomains,
   isReservedSlug,
-  safeProjectIdentifier,
-  workspaceFromEmail,
+  isSafeProjectIdentifier,
   type AccessGroup,
 } from "./access";
 import type { AuthUser } from "./auth";
@@ -30,112 +33,112 @@ import {
 } from "./db";
 import { makeObjectSiteFiles } from "./object-site-files";
 import type { PublishRequest } from "./publish-request";
-import { ObjectStorage, StorageConflict, StorageError, type ObjectStorageShape } from "./storage";
-import { randomRevisionId, randomSlug, sha256Hex } from "./tokens";
+import {
+  blobObjectKey,
+  OWNER_INDEX_NAMESPACE,
+  OwnerProjectRecordSchema,
+  ownerIndexKey,
+  ownerIndexPrefix,
+  PROJECTS_NAMESPACE,
+  revisionRecordKey,
+  SiteRecordSchema,
+  SiteRevisionRecordSchema,
+  type SiteFileObject,
+  type SiteOwner,
+  type SiteRecord,
+  type SiteRevisionRecord,
+} from "./site-records";
+import { ObjectStorage, sha256Hex, StorageError, type ObjectStorageShape } from "./storage";
+import { randomRevisionId, randomSlug } from "./tokens";
 
-const MAX_ROUTE_ATTEMPTS = 20;
-const PROJECTS_NAMESPACE = "projects";
-const ROUTES_NAMESPACE = "routes";
-const OWNER_INDEX_NAMESPACE = "projects-by-owner";
+/** How many random-name candidates a create attempts before giving up. */
+const RANDOM_NAME_ATTEMPTS = 3;
 
-export interface SiteOwner {
-  readonly id: string;
-  readonly email: string;
-}
-
-export interface SiteFileObject {
-  readonly path: SitePath;
-  readonly objectKey: string;
-  readonly sha256: string;
-  readonly size: number;
-  readonly contentType: string;
-}
-
-export interface SiteRecord {
-  readonly version: 3;
-  readonly workspace: string;
-  readonly project: string;
-  readonly routePath: string;
-  readonly visibility: AccessGroup;
-  readonly owner: SiteOwner;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly currentRevisionId: string;
-  readonly currentOpenPath: string;
-  readonly fileCount: number;
-  readonly totalBytes: number;
-}
-
-export interface RouteRecord {
-  readonly version: 1;
-  readonly routePath: string;
-  readonly workspace: string;
-  readonly project: string;
-}
-
-export interface OwnerProjectRecord {
-  readonly version: 1;
-  readonly workspace: string;
-  readonly project: string;
-}
-
-export interface SiteRevisionRecord {
-  readonly version: 2;
-  readonly workspace: string;
-  readonly project: string;
-  readonly revisionId: string;
-  readonly createdAt: string;
-  readonly openPath: string;
-  readonly files: ReadonlyArray<SiteFileObject>;
-}
-
+/** A published site loaded for serving: pointer, current revision, and its file reader. */
 export interface LoadedSite {
   readonly record: SiteRecord;
   readonly revision: SiteRevisionRecord;
   readonly siteFiles: ReturnType<typeof makeObjectSiteFiles>;
 }
 
+/** What publish returns to the CLI. `project` is authoritative: on a random-name server
+ * it is how the CLI learns the assigned name. */
 export interface PublishResult {
-  readonly workspace: string;
   readonly project: string;
-  readonly routePath: string;
   readonly visibility: AccessGroup;
   readonly openPath: string;
 }
 
+/** A user's effective permission level on one project, from least to greatest. Each
+ * level implies the ones below it; `owner` is fixed at creation and cannot be granted. */
+export type ProjectRole = "none" | "read" | "write" | "admin" | "owner";
+
+/** The roles a share grant can assign (ownership is not grantable). */
+export type ShareRole = "read" | "write" | "admin";
+
+/** Requested grant changes for one share call; targets are emails or @domain groups.
+ * `add` assigns the role (moving targets already holding another role), `remove` strips
+ * every role. */
+export interface ShareChanges {
+  readonly role: ShareRole;
+  readonly add: ReadonlyArray<string>;
+  readonly remove: ReadonlyArray<string>;
+}
+
+/** What share returns: the updated pointer plus advisory warnings (grants that were
+ * revoked but leave the account with access anyway). */
+export interface ShareResult {
+  readonly record: SiteRecord;
+  readonly warnings: ReadonlyArray<string>;
+}
+
+/** Site-store failure; `status` becomes the HTTP response status. */
 export class SiteStoreError extends Data.TaggedError("SiteStoreError")<{
   readonly status: number;
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
+/** The site-store service contract. */
 export interface SiteStoreShape {
+  /** Publishes a new project or a new revision of an existing one. */
   readonly publish: (
     request: PublishRequest,
     user: AuthUser,
     config: ServerConfigShape,
   ) => Effect.Effect<PublishResult, SiteStoreError | StorageError>;
-  readonly loadByRoute: (routePath: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
-  readonly loadProject: (workspace: string, project: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
+  /** Loads a published site by project name. */
+  readonly loadProject: (project: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
+  /** Lists the projects the user owns. */
   readonly listProjects: (user: AuthUser) => Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError | StorageError>;
+  /** Sets a project's visibility to private, keeping all content. */
   readonly unpublish: (
-    workspace: string,
     project: string,
     user: AuthUser,
+    config: ServerConfigShape,
   ) => Effect.Effect<SiteRecord, SiteStoreError | StorageError>;
+  /** Grants and revokes individual email/@domain access on a project's visibility. */
+  readonly share: (
+    project: string,
+    user: AuthUser,
+    changes: ShareChanges,
+    config: ServerConfigShape,
+  ) => Effect.Effect<ShareResult, SiteStoreError | StorageError>;
+  /** Deletes the project pointer and owner index; immutable blobs are retained. */
   readonly deleteProject: (
-    workspace: string,
     project: string,
     user: AuthUser,
   ) => Effect.Effect<void, SiteStoreError | StorageError>;
+  /** Reads the current revision back into a publish bundle for clone workflows. */
   readonly bundle: (
-    workspace: string,
     project: string,
   ) => Effect.Effect<PublishRequest["bundle"] | null, SiteStoreError | StorageError>;
 }
 
+/** Service tag for the site store. */
 export class SiteStore extends Context.Tag("@scratchwork/server/SiteStore")<SiteStore, SiteStoreShape>() {}
 
+/** Provides the site store over the ObjectStorage and PrimitiveDb services. */
 export const SiteStoreLive: Layer.Layer<SiteStore, never, ObjectStorage | PrimitiveDb> = Layer.effect(
   SiteStore,
   Effect.gen(function* () {
@@ -145,79 +148,28 @@ export const SiteStoreLive: Layer.Layer<SiteStore, never, ObjectStorage | Primit
   }),
 );
 
-const SiteOwnerSchema = Schema.Struct({
-  id: Schema.String,
-  email: Schema.String,
-});
-
-const SiteFileObjectSchema = Schema.Struct({
-  path: Schema.String.pipe(Schema.filter((path) => isSafeSitePath(path) || "Invalid site path")),
-  objectKey: Schema.String,
-  sha256: Schema.String.pipe(Schema.filter((hash) => hash.length === 64 && isHex(hash) || "Invalid SHA-256")),
-  size: Schema.Number.pipe(Schema.filter((size) => Number.isInteger(size) && size >= 0 || "Invalid file size")),
-  contentType: Schema.String,
-});
-
-const SiteRecordSchema = Schema.Struct({
-  version: Schema.Literal(3),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
-  routePath: Schema.String.pipe(Schema.filter((value) => safeRoutePath(value) || "Invalid route path")),
-  visibility: Schema.String,
-  owner: SiteOwnerSchema,
-  createdAt: Schema.String,
-  updatedAt: Schema.String,
-  currentRevisionId: Schema.String,
-  currentOpenPath: Schema.String,
-  fileCount: Schema.Number.pipe(Schema.filter((count) => Number.isInteger(count) && count >= 0 || "Invalid file count")),
-  totalBytes: Schema.Number.pipe(Schema.filter((bytes) => Number.isInteger(bytes) && bytes >= 0 || "Invalid total bytes")),
-});
-
-const RouteRecordSchema = Schema.Struct({
-  version: Schema.Literal(1),
-  routePath: Schema.String.pipe(Schema.filter((value) => safeRoutePath(value) || "Invalid route path")),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
-});
-
-const OwnerProjectRecordSchema = Schema.Struct({
-  version: Schema.Literal(1),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
-});
-
-const SiteRevisionRecordSchema = Schema.Struct({
-  version: Schema.Literal(2),
-  workspace: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid workspace")),
-  project: Schema.String.pipe(Schema.filter((value) => safeProjectIdentifier(value) || "Invalid project")),
-  revisionId: Schema.String,
-  createdAt: Schema.String,
-  openPath: Schema.String,
-  files: Schema.Array(SiteFileObjectSchema),
-}).pipe(
-  Schema.filter((revision) => uniquePaths(revision.files) || "Duplicate revision paths"),
-);
-
-interface LoadedDbRecord<A> {
-  readonly value: A;
-  readonly version: number;
-  readonly updatedAt: string;
-}
-
 /** Creates the SiteStore service over concrete object storage and primitive DB backends. */
 function makeSiteStore(storage: ObjectStorageShape, db: PrimitiveDbShape): SiteStoreShape {
   return SiteStore.of({
     publish: (request, user, config) => publishProject(storage, db, request, user, config),
-    loadByRoute: (routePath) => loadPublishedSiteByRoute(storage, db, routePath),
-    loadProject: (workspace, project) => loadPublishedSite(storage, db, workspace, project),
-    listProjects: (user) => listProjects(storage, db, user),
-    unpublish: (workspace, project, user) => unpublishProject(db, workspace, project, user),
-    deleteProject: (workspace, project, user) => deleteProject(db, workspace, project, user),
-    bundle: (workspace, project) => projectBundle(storage, db, workspace, project),
+    loadProject: (project) => loadPublishedSite(storage, db, project),
+    listProjects: (user) => listProjects(db, user),
+    unpublish: (project, user, config) => unpublishProject(db, project, user, config),
+    share: (project, user, changes, config) => updateProjectSharing(db, project, user, changes, config),
+    deleteProject: (project, user) => deleteProject(db, project, user),
+    bundle: (project) => projectBundle(storage, db, project),
   });
 }
 
-/** Publishes a new project or creates a new revision for an existing project. */
+/** Publishes a new project or creates a new revision for an existing project.
+ *
+ * Publishing is a name-based upsert. A requested name that exists and is owned by the
+ * caller is updated in both naming modes — this is how republish works, including on
+ * random-name servers where the CLI echoes the saved slug. A requested name owned by
+ * someone else is a 409 in both modes: a stale or copied local config surfaces as an
+ * explicit error, never a silent fork. Creation is where the modes differ: user-set
+ * names are required and claimed first-writer-wins; random mode discards the request's
+ * name and mints a slug. */
 function publishProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
@@ -226,109 +178,103 @@ function publishProject(
   config: ServerConfigShape,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const workspace = request.workspace ?? defaultWorkspace(config, user);
-    const project = request.project;
-    if (workspace == null) {
-      return yield* Effect.fail(new SiteStoreError({ status: 400, message: "workspace is required" }));
-    }
-    if (project == null) {
-      return yield* Effect.fail(new SiteStoreError({ status: 400, message: "project is required" }));
-    }
-    yield* requireProjectIdentifier("workspace", workspace);
-    yield* requireProjectIdentifier("project", project);
-    if (isReservedSlug(workspace)) {
-      return yield* Effect.fail(new SiteStoreError({ status: 400, message: `Workspace name is reserved: ${workspace}` }));
-    }
+    const requested = request.project;
+    if (requested != null) yield* requireProjectIdentifier(requested);
 
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = requested == null ? null : yield* loadSiteRecord(db, requested);
     const visibility = request.visibility ?? loaded?.value.visibility ?? config.defaultVisibility;
     yield* validateVisibility(visibility, config);
 
-    if (loaded == null) {
-      return yield* createProject(storage, db, request, user, config, workspace, project, visibility);
+    if (loaded != null && requested != null) {
+      if (!roleAtLeast(projectRole(loaded.value, user, config), "write")) {
+        return yield* Effect.fail(projectNameTaken(requested));
+      }
+      return yield* updateProject(storage, db, request, user, loaded, visibility, config);
     }
-    return yield* updateProject(storage, db, request, user, loaded, visibility);
+
+    if (config.usersCanSetProjectNames) {
+      if (requested == null) {
+        return yield* Effect.fail(new SiteStoreError({ status: 400, message: "project name is required (pass --project)" }));
+      }
+      if (isReservedSlug(requested)) {
+        return yield* Effect.fail(new SiteStoreError({ status: 400, message: `Project name is reserved: ${requested}` }));
+      }
+      return yield* writeNewProject(storage, db, request, user, requested, visibility).pipe(
+        Effect.catchTag("PrimitiveDbConflict", () => Effect.fail(projectNameTaken(requested))),
+      );
+    }
+
+    return yield* createRandomProject(storage, db, request, user, visibility);
   });
 }
 
-/** Creates a new project record and route index entry. */
-function createProject(
+/** Creates a project under a server-minted random name, retrying only name collisions
+ * (each retry rebuilds the complete create attempt for a fresh candidate). */
+function createRandomProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
   user: AuthUser,
-  config: ServerConfigShape,
-  workspace: string,
-  project: string,
   visibility: AccessGroup,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
-      const routePath = routePathForProject(config, user, workspace, project);
-      const firstSegment = routePath.split("/")[0] ?? "";
-      if (isReservedSlug(firstSegment)) {
-        return yield* Effect.fail(new SiteStoreError({
-          status: 400,
-          message: `Project URL /${routePath} would shadow the reserved /${firstSegment} route`,
-        }));
-      }
-      const result = yield* writeNewProject(storage, db, request, user, workspace, project, routePath, visibility).pipe(
-        Effect.catchTag("SiteStoreError", (error) =>
-          error.status === 409 && config.projectPath === "random"
-            ? Effect.succeed(null)
-            : Effect.fail(error),
-        ),
+    for (let attempt = 0; attempt < RANDOM_NAME_ATTEMPTS; attempt += 1) {
+      const slug = randomSlug();
+      // Defense in depth: today's slug alphabet cannot produce a reserved name.
+      if (isReservedSlug(slug)) continue;
+      if ((yield* loadSiteRecord(db, slug)) != null) continue;
+      const result = yield* writeNewProject(storage, db, request, user, slug, visibility).pipe(
+        Effect.catchTag("PrimitiveDbConflict", () => Effect.succeed(null)),
       );
       if (result != null) return result;
     }
-    return yield* Effect.fail(new SiteStoreError({ status: 500, message: "Could not allocate project URL" }));
+    return yield* Effect.fail(new SiteStoreError({ status: 500, message: "Could not allocate a project name" }));
   });
 }
 
-/** Writes blobs, an immutable revision, a route index entry, and the project record. */
+/** Writes blobs, an immutable revision, and the project record. The `ifNoneMatch: "*"`
+ * put of the record is the single server-wide uniqueness claim on the name; a lost race
+ * surfaces as PrimitiveDbConflict for the caller to map. The revision JSON is written
+ * before the claim so readers never see a record pointing at a missing revision — a lost
+ * race can therefore orphan one revision document under the winner's prefix, which is
+ * accepted (revision ids are 16 random bytes and the document is unreferenced). */
 function writeNewProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
   user: AuthUser,
-  workspace: string,
   project: string,
-  routePath: string,
   visibility: AccessGroup,
-): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
+): Effect.Effect<PublishResult, SiteStoreError | StorageError | PrimitiveDbConflict> {
   return Effect.gen(function* () {
     const now = new Date().toISOString();
-    const revision = yield* buildRevision(storage, workspace, project, request, now);
+    const revision = yield* buildRevision(storage, project, request, now);
     const record = siteRecord({
-      workspace,
       project,
-      routePath,
       visibility,
+      readers: "private",
+      writers: "private",
+      admins: "private",
       user,
       createdAt: now,
       updatedAt: now,
       revision,
     });
-    const route = yield* putRouteRecord(db, routePath, workspace, project, { ifNoneMatch: "*" });
-    // The route is claimed before the project record exists; release it on failure so a
-    // partial write cannot permanently squat the route path.
-    const written = yield* putProjectRecord(db, record, { ifNoneMatch: "*" }).pipe(
-      Effect.tapError(() =>
-        db.delete(ROUTES_NAMESPACE, routePath, { ifMatch: route.version }).pipe(Effect.catchAll(() => Effect.void)),
-      ),
+    const written = yield* db.put(PROJECTS_NAMESPACE, project, record, { ifNoneMatch: "*" }).pipe(
+      Effect.mapError((error) => error instanceof PrimitiveDbConflict ? error : dbError(error)),
+      Effect.flatMap((result) => decodeDbRecord(result, SiteRecordSchema)),
     );
-    yield* putOwnerIndex(db, record).pipe(Effect.catchAll(() => Effect.void));
+    yield* putOwnerIndex(db, written.value).pipe(Effect.ignore);
     return {
-      workspace: written.value.workspace,
       project: written.value.project,
-      routePath: written.value.routePath,
       visibility: written.value.visibility,
       openPath: request.openPath,
     };
   });
 }
 
-/** Writes a new immutable revision and flips an existing project pointer. */
+/** Writes a new immutable revision and flips an existing project pointer. Writers may
+ * publish content; changing visibility along the way stays an admin action. */
 function updateProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
@@ -336,30 +282,34 @@ function updateProject(
   user: AuthUser,
   loaded: LoadedDbRecord<SiteRecord>,
   visibility: AccessGroup,
+  config: ServerConfigShape,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    if (!canWriteProject(loaded.value, user)) {
-      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can publish updates" }));
+    const role = projectRole(loaded.value, user, config);
+    if (!roleAtLeast(role, "write")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Publishing updates requires write access to this project" }));
+    }
+    if (visibility !== loaded.value.visibility && !roleAtLeast(role, "admin")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Changing project visibility requires admin access" }));
     }
 
     const now = new Date().toISOString();
-    const revision = yield* buildRevision(storage, loaded.value.workspace, loaded.value.project, request, now);
+    const revision = yield* buildRevision(storage, loaded.value.project, request, now);
     const record = siteRecord({
-      workspace: loaded.value.workspace,
       project: loaded.value.project,
-      routePath: loaded.value.routePath,
       visibility,
+      readers: loaded.value.readers,
+      writers: loaded.value.writers,
+      admins: loaded.value.admins,
       user: loaded.value.owner,
       createdAt: loaded.value.createdAt,
       updatedAt: now,
       revision,
     });
     const written = yield* putProjectRecord(db, record, { ifMatch: loaded.version });
-    yield* putOwnerIndex(db, record).pipe(Effect.catchAll(() => Effect.void));
+    yield* putOwnerIndex(db, written.value).pipe(Effect.ignore);
     return {
-      workspace: written.value.workspace,
       project: written.value.project,
-      routePath: written.value.routePath,
       visibility: written.value.visibility,
       openPath: request.openPath,
     };
@@ -370,16 +320,15 @@ function updateProject(
 function loadPublishedSite(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
 ): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return null;
-    const revision = yield* loadRevisionRecord(storage, loaded.value.workspace, loaded.value.project, loaded.value.currentRevisionId);
+    const revision = yield* loadRevisionRecord(storage, loaded.value.project, loaded.value.currentRevisionId);
     if (revision == null) {
       return yield* Effect.fail(
-        new SiteStoreError({ status: 500, message: `Missing project revision: ${projectKey(workspace, project)}` }),
+        new SiteStoreError({ status: 500, message: `Missing project revision: ${project}` }),
       );
     }
     return {
@@ -390,28 +339,13 @@ function loadPublishedSite(
   });
 }
 
-/** Loads a project through the route-path index. */
-function loadPublishedSiteByRoute(
-  storage: ObjectStorageShape,
-  db: PrimitiveDbShape,
-  routePath: string,
-): Effect.Effect<LoadedSite | null, SiteStoreError | StorageError> {
-  return Effect.gen(function* () {
-    if (!safeRoutePath(routePath)) return null;
-    const route = yield* loadRouteRecord(db, routePath);
-    if (route == null) return null;
-    return yield* loadPublishedSite(storage, db, route.value.workspace, route.value.project);
-  });
-}
-
-/** Lists projects owned by the given user. */
+/** Lists projects owned by the given user via the owner index. */
 function listProjects(
-  _storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   user: AuthUser,
 ): Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError> {
   return Effect.gen(function* () {
-    const prefix = `${encodeKeySegment(user.id)}/`;
+    const prefix = ownerIndexPrefix(user.id);
     const index: Array<PrimitiveDbRecord<JsonValue>> = [];
     let startAfter: string | undefined;
     do {
@@ -421,47 +355,123 @@ function listProjects(
     } while (startAfter != null);
     const loaded = yield* Effect.forEach(index, (record) =>
       decodeDbRecord(record, OwnerProjectRecordSchema).pipe(
-        Effect.flatMap((ownerRecord) => loadSiteRecord(db, ownerRecord.value.workspace, ownerRecord.value.project)),
+        Effect.flatMap((ownerRecord) => loadSiteRecord(db, ownerRecord.value.project)),
       ),
     );
     return loaded.flatMap((record) => record == null ? [] : [record.value]);
   });
 }
 
-/** Sets project visibility to private, preserving all content and owner metadata. */
+/** Resets a project to owner-only, preserving all content and owner metadata: visibility
+ * becomes private and every grant is cleared. Fine-grained changes go through share. */
 function unpublishProject(
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
   user: AuthUser,
+  config: ServerConfigShape,
 ): Effect.Effect<SiteRecord, SiteStoreError> {
   return Effect.gen(function* () {
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return yield* Effect.fail(new SiteStoreError({ status: 404, message: "Project not found" }));
-    if (!canWriteProject(loaded.value, user)) {
-      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can unpublish this project" }));
+    if (!roleAtLeast(projectRole(loaded.value, user, config), "admin")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Unpublishing requires admin access to this project" }));
     }
-    const next = { ...loaded.value, visibility: "private", updatedAt: new Date().toISOString() } satisfies SiteRecord;
+    const next = {
+      ...loaded.value,
+      visibility: "private",
+      readers: "private",
+      writers: "private",
+      admins: "private",
+      updatedAt: new Date().toISOString(),
+    } satisfies SiteRecord;
     return (yield* putProjectRecord(db, next, { ifMatch: loaded.version })).value;
   });
 }
 
-/** Deletes the mutable project and route records. Immutable blobs are retained. */
+/** Applies grant/revoke deltas to a project's role groups. `add` assigns the requested
+ * role — a target holding a different role is moved, never duplicated — and `remove`
+ * strips every role. Grants are validated against server sharing policy; pure revokes are
+ * not — the result is strictly narrower than what the policy already admitted, and a
+ * later policy tightening must never block revocation. */
+function updateProjectSharing(
+  db: PrimitiveDbShape,
+  project: string,
+  user: AuthUser,
+  changes: ShareChanges,
+  config: ServerConfigShape,
+): Effect.Effect<ShareResult, SiteStoreError> {
+  return Effect.gen(function* () {
+    const loaded = yield* loadSiteRecord(db, project);
+    if (loaded == null) return yield* Effect.fail(new SiteStoreError({ status: 404, message: "Project not found" }));
+    if (!roleAtLeast(projectRole(loaded.value, user, config), "admin")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Changing project sharing requires admin access" }));
+    }
+
+    const groups = { read: loaded.value.readers, write: loaded.value.writers, admin: loaded.value.admins };
+    const modified = {} as Record<ShareRole, AccessGroup>;
+    for (const role of ["read", "write", "admin"] as const) {
+      // Targets are added to the requested role's group and removed everywhere else.
+      modified[role] = yield* accessGroupModify(groups[role], {
+        add: role === changes.role ? changes.add : [],
+        remove: role === changes.role ? changes.remove : [...changes.remove, ...changes.add],
+      }).pipe(Effect.mapError((error) => new SiteStoreError({ status: 400, message: error.message })));
+    }
+    if (changes.add.length > 0) yield* validateVisibility(modified[changes.role], config);
+
+    const next = {
+      ...loaded.value,
+      readers: modified.read,
+      writers: modified.write,
+      admins: modified.admin,
+      updatedAt: new Date().toISOString(),
+    } satisfies SiteRecord;
+    const written = yield* putProjectRecord(db, next, { ifMatch: loaded.version });
+    return { record: written.value, warnings: revokeWarnings(written.value, changes.remove, config) };
+  });
+}
+
+/** Flags revoked emails that still have access: the owner (always readable to them), an
+ * address a remaining grant covers, or public visibility — so a revoke never looks more
+ * effective than it is. */
+function revokeWarnings(
+  record: SiteRecord,
+  removed: ReadonlyArray<string>,
+  config: ServerConfigShape,
+): ReadonlyArray<string> {
+  const warnings: Array<string> = [];
+  for (const target of removed) {
+    const email = target.trim().toLowerCase();
+    if (!email.includes("@") || email.startsWith("@")) continue;
+    if (email === record.owner.email) {
+      warnings.push(`${email} owns this project and always has access`);
+      continue;
+    }
+    const remaining = projectRole(record, { id: "", email }, config);
+    if (remaining === "none") continue;
+    const viaGrant = [record.readers, record.writers, record.admins].some((group) =>
+      accessGroupIsSubset(group, config.maxVisibility) && accessGroupMatches(group, { email }));
+    warnings.push(viaGrant
+      ? `${email} still has ${remaining} access through remaining grants`
+      : `${email} still has read access because the project is public`);
+  }
+  return warnings;
+}
+
+/** Deletes the mutable project record and owner index, releasing the name. Immutable
+ * blobs are retained. */
 function deleteProject(
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
   user: AuthUser,
 ): Effect.Effect<void, SiteStoreError> {
   return Effect.gen(function* () {
-    const loaded = yield* loadSiteRecord(db, workspace, project);
+    const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return;
-    if (!canWriteProject(loaded.value, user)) {
+    if (!isProjectOwner(loaded.value, user)) {
       return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can delete this project" }));
     }
-    yield* db.delete(PROJECTS_NAMESPACE, projectKey(workspace, project), { ifMatch: loaded.version }).pipe(Effect.mapError(dbError));
-    yield* db.delete(ROUTES_NAMESPACE, loaded.value.routePath).pipe(Effect.catchAll(() => Effect.void));
-    yield* db.delete(OWNER_INDEX_NAMESPACE, ownerIndexKey(loaded.value.owner, workspace, project)).pipe(Effect.catchAll(() => Effect.void));
+    yield* db.delete(PROJECTS_NAMESPACE, project, { ifMatch: loaded.version }).pipe(Effect.mapError(dbError));
+    yield* db.delete(OWNER_INDEX_NAMESPACE, ownerIndexKey(loaded.value.owner, project)).pipe(Effect.ignore);
   });
 }
 
@@ -469,11 +479,10 @@ function deleteProject(
 function projectBundle(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
 ): Effect.Effect<PublishRequest["bundle"] | null, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const site = yield* loadPublishedSite(storage, db, workspace, project);
+    const site = yield* loadPublishedSite(storage, db, project);
     if (site == null) return null;
     const files = yield* Effect.forEach(site.revision.files, (file) =>
       storage.getObject(file.objectKey).pipe(
@@ -491,7 +500,6 @@ function projectBundle(
 /** Stores bundle files as content-addressed blobs and returns revision metadata. */
 function buildRevision(
   storage: ObjectStorageShape,
-  workspace: string,
   project: string,
   request: PublishRequest,
   createdAt: string,
@@ -509,6 +517,7 @@ function buildRevision(
         contentType: contentType(file.path),
         ifNoneMatch: "*",
       }).pipe(
+        // A conflict means the identical content-addressed blob already exists.
         Effect.catchTag("StorageConflict", () => Effect.succeed({})),
       );
       files.push({
@@ -521,95 +530,86 @@ function buildRevision(
     }
 
     const revision: SiteRevisionRecord = {
-      version: 2,
-      workspace,
+      version: 3,
       project,
       revisionId: randomRevisionId(),
       createdAt,
       openPath: request.openPath,
       files,
     };
-    yield* storage.putText(revisionRecordKey(workspace, project, revision.revisionId), serialize(revision), {
+    yield* storage.putText(revisionRecordKey(project, revision.revisionId), serialize(revision), {
       contentType: "application/json; charset=utf-8",
       ifNoneMatch: "*",
     }).pipe(
-      Effect.mapError((error) =>
-        error instanceof StorageConflict
-          ? new SiteStoreError({ status: 409, message: "Revision already exists", cause: error })
-          : error,
+      Effect.catchTag("StorageConflict", (error) =>
+        Effect.fail(new SiteStoreError({ status: 409, message: "Revision already exists", cause: error })),
       ),
     );
     return revision;
   });
 }
 
-/** Returns true when the user may read a project under server policy. The owner can always
- * read their own project, even when a later maxVisibility tightening exceeds the stored
- * visibility — the ceiling gates other readers, not ownership. */
+/** Role precedence, least to greatest. */
+const ROLE_ORDER: Record<ProjectRole, number> = { none: 0, read: 1, write: 2, admin: 3, owner: 4 };
+
+/** Returns true when `role` grants at least `minimum`'s permissions. */
+export function roleAtLeast(role: ProjectRole, minimum: ProjectRole): boolean {
+  return ROLE_ORDER[role] >= ROLE_ORDER[minimum];
+}
+
+/** Resolves a user's effective role on a project under server policy. The owner always
+ * holds every role, even when a later maxVisibility tightening exceeds the stored groups —
+ * the ceiling gates other principals, not ownership. Each granted group (and public
+ * visibility itself) is honored only while it sits within maxVisibility, so tightening
+ * the ceiling locks a project down without touching its records. */
+export function projectRole(record: SiteRecord, user: AuthUser | null, config: ServerConfigShape): ProjectRole {
+  if (user != null && isProjectOwner(record, user)) return "owner";
+  const admits = (group: AccessGroup) =>
+    accessGroupIsSubset(group, config.maxVisibility) && accessGroupMatches(group, user);
+  if (user != null && admits(record.admins)) return "admin";
+  if (user != null && admits(record.writers)) return "write";
+  if (admits(record.readers) || admits(record.visibility)) return "read";
+  return "none";
+}
+
+/** Returns true when the user may read a project under server policy. */
 export function canReadProject(record: SiteRecord, user: AuthUser | null, config: ServerConfigShape): boolean {
-  if (user != null && canWriteProject(record, user)) return true;
-  if (!accessGroupIsSubset(record.visibility, config.maxVisibility)) return false;
-  return accessGroupMatches(record.visibility, user);
+  return roleAtLeast(projectRole(record, user, config), "read");
 }
 
 /** Returns true when the user owns the project. */
-export function canWriteProject(record: SiteRecord, user: AuthUser): boolean {
+export function isProjectOwner(record: SiteRecord, user: AuthUser): boolean {
   return record.owner.id === user.id || record.owner.email.toLowerCase() === user.email.toLowerCase();
 }
 
-/** Splits a content path into the longest route prefix and remaining site path. Each decoded
- * segment must itself be a safe identifier, so an encoded slash cannot fabricate a
- * multi-segment route from one raw segment. */
-export function candidateRoutePaths(pathname: string): ReadonlyArray<string> {
-  const segments = rawPathSegments(pathname);
-  const candidates: Array<string> = [];
-  for (let length = segments.length; length >= 1; length -= 1) {
-    const decoded = segments.slice(0, length).map(decodePathSegment);
-    if (!decoded.every(safeProjectIdentifier)) continue;
-    const candidate = decoded.join("/");
-    if (safeRoutePath(candidate)) candidates.push(candidate);
-  }
-  return candidates;
-}
-
-/** Computes the site path remainder for a matched route path. Compares decoded segments,
- * matching candidateRoutePaths. Returns null when the route has no remainder (or does not
- * prefix the path), which redirects to the canonical route root. */
-export function routeRest(pathname: string, routePath: string): string | null {
-  const segments = rawPathSegments(pathname);
-  const routeSegments = routePath.split("/");
-  if (segments.length < routeSegments.length) return null;
-  for (let index = 0; index < routeSegments.length; index += 1) {
-    if (decodePathSegment(segments[index]) !== routeSegments[index]) return null;
-  }
-  const rest = segments.slice(routeSegments.length);
-  const trailingSlash = pathname.endsWith("/");
-  if (rest.length === 0) return trailingSlash ? "/" : null;
-  return `/${rest.join("/")}${trailingSlash ? "/" : ""}`;
-}
-
-/** Builds the stable project key used by API paths and DB records. */
-export function projectKey(workspace: string, project: string): string {
-  return `${workspace}/${project}`;
+/** The canonical name-collision failure, for load-time checks, not-owner publishes, and
+ * lost create races alike. Never surface the raw DB conflict message. */
+function projectNameTaken(project: string): SiteStoreError {
+  return new SiteStoreError({
+    status: 409,
+    message: `Project name "${project}" is already taken on this server. Choose another with --project.`,
+  });
 }
 
 /** Builds the metadata-only project pointer for a current revision. */
 function siteRecord(input: {
-  readonly workspace: string;
   readonly project: string;
-  readonly routePath: string;
   readonly visibility: AccessGroup;
+  readonly readers: AccessGroup;
+  readonly writers: AccessGroup;
+  readonly admins: AccessGroup;
   readonly user: AuthUser | SiteOwner;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly revision: SiteRevisionRecord;
 }): SiteRecord {
   return {
-    version: 3,
-    workspace: input.workspace,
+    version: 4,
     project: input.project,
-    routePath: input.routePath,
     visibility: input.visibility,
+    readers: input.readers,
+    writers: input.writers,
+    admins: input.admins,
     owner: ownerFromUser(input.user),
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
@@ -620,6 +620,7 @@ function siteRecord(input: {
   };
 }
 
+/** Fails when the requested visibility exceeds server-wide sharing policy. */
 function validateVisibility(visibility: AccessGroup, config: ServerConfigShape): Effect.Effect<void, SiteStoreError> {
   if (!accessGroupIsSubset(visibility, config.maxVisibility)) {
     return Effect.fail(new SiteStoreError({ status: 403, message: `Visibility ${visibility} exceeds server maxVisibility ${config.maxVisibility}` }));
@@ -630,81 +631,60 @@ function validateVisibility(visibility: AccessGroup, config: ServerConfigShape):
   return Effect.void;
 }
 
-function defaultWorkspace(config: ServerConfigShape, user: AuthUser): string | null {
-  if (config.defaultWorkspace === "required") return null;
-  if (config.defaultWorkspace === "random") return randomSlug();
-  return workspaceFromEmail(user.email);
+/** A decoded DB record plus the version/updatedAt metadata needed for conditional writes. */
+interface LoadedDbRecord<A> {
+  readonly value: A;
+  readonly version: number;
+  readonly updatedAt: string;
 }
 
-function routePathForProject(
-  config: ServerConfigShape,
-  user: AuthUser,
-  workspace: string,
-  project: string,
-): string {
-  if (config.projectPath === "random") return randomSlug();
-  if (config.projectPath === "workspace/project") return `${workspace}/${project}`;
-  const email = user.email.toLowerCase();
-  const username = workspaceFromEmail(email);
-  if (config.projectPath === "username/project") return `${username}/${project}`;
-  const domain = email.split("@")[1];
-  return domain == null ? `${workspace}/${project}` : `${domain}/${username}/${project}`;
-}
-
+/** Loads and decodes the project pointer, or null when the project does not exist.
+ * Rejecting unsafe identifiers here (instead of letting them reach safeDbKey and 500)
+ * turns garbage route/API input into a 404 for every caller. */
 function loadSiteRecord(
   db: PrimitiveDbShape,
-  workspace: string,
   project: string,
 ): Effect.Effect<LoadedDbRecord<SiteRecord> | null, SiteStoreError> {
-  return db.get<JsonValue>(PROJECTS_NAMESPACE, projectKey(workspace, project)).pipe(
+  if (!isSafeProjectIdentifier(project)) return Effect.succeed(null);
+  return db.get<JsonValue>(PROJECTS_NAMESPACE, project).pipe(
     Effect.mapError(dbError),
     Effect.flatMap((record) => record == null ? Effect.succeed(null) : decodeDbRecord(record, SiteRecordSchema)),
+    Effect.map((loaded) => loaded == null ? null : { ...loaded, value: migrateSiteRecord(loaded.value) }),
   );
 }
 
-function loadRouteRecord(
-  db: PrimitiveDbShape,
-  routePath: string,
-): Effect.Effect<LoadedDbRecord<RouteRecord> | null, SiteStoreError> {
-  return db.get<JsonValue>(ROUTES_NAMESPACE, routePath).pipe(
-    Effect.mapError(dbError),
-    Effect.flatMap((record) => record == null ? Effect.succeed(null) : decodeDbRecord(record, RouteRecordSchema)),
-  );
+/** Records written before the visibility/grants split stored read grants inside
+ * `visibility` (for example "alice@x.com,@x.com"). Migrate at read time: the grant list
+ * moves to `readers` and visibility becomes the plain private toggle. Every mutation
+ * flows through loadSiteRecord, so the first write after migration persists the new
+ * shape. */
+export function migrateSiteRecord(record: SiteRecord): SiteRecord {
+  if (record.visibility === "public" || record.visibility === "private") return record;
+  return { ...record, visibility: "private", readers: record.visibility };
 }
 
+/** Writes the project pointer under the given precondition and decodes the result. */
 function putProjectRecord(
   db: PrimitiveDbShape,
   record: SiteRecord,
   options: { readonly ifNoneMatch?: "*"; readonly ifMatch?: number },
 ): Effect.Effect<LoadedDbRecord<SiteRecord>, SiteStoreError> {
-  return db.put(PROJECTS_NAMESPACE, projectKey(record.workspace, record.project), record as unknown as JsonValue, options).pipe(
+  return db.put(PROJECTS_NAMESPACE, record.project, record, options).pipe(
     Effect.mapError(dbError),
     Effect.flatMap((written) => decodeDbRecord(written, SiteRecordSchema)),
   );
 }
 
-function putRouteRecord(
-  db: PrimitiveDbShape,
-  routePath: string,
-  workspace: string,
-  project: string,
-  options: { readonly ifNoneMatch?: "*" },
-): Effect.Effect<LoadedDbRecord<RouteRecord>, SiteStoreError> {
-  const record: RouteRecord = { version: 1, routePath, workspace, project };
-  return db.put(ROUTES_NAMESPACE, routePath, record as unknown as JsonValue, options).pipe(
-    Effect.mapError(dbError),
-    Effect.flatMap((written) => decodeDbRecord(written, RouteRecordSchema)),
-  );
-}
-
+/** Upserts the owner-index entry that makes the project appear in listings. */
 function putOwnerIndex(db: PrimitiveDbShape, record: SiteRecord): Effect.Effect<void, SiteStoreError> {
-  const value: OwnerProjectRecord = { version: 1, workspace: record.workspace, project: record.project };
-  return db.put(OWNER_INDEX_NAMESPACE, ownerIndexKey(record.owner, record.workspace, record.project), value as unknown as JsonValue).pipe(
+  const value = { version: 2, project: record.project };
+  return db.put(OWNER_INDEX_NAMESPACE, ownerIndexKey(record.owner, record.project), value).pipe(
     Effect.asVoid,
     Effect.mapError(dbError),
   );
 }
 
+/** Decodes one stored DB record against its schema, keeping the write-precondition metadata. */
 function decodeDbRecord<A, I, R>(
   record: PrimitiveDbRecord<JsonValue>,
   schema: Schema.Schema<A, I, R>,
@@ -720,21 +700,20 @@ function decodeDbRecord<A, I, R>(
   );
 }
 
+/** Decodes revision JSON straight from object-storage text. */
+const SiteRevisionJsonSchema = Schema.parseJson(SiteRevisionRecordSchema);
+
+/** Loads and decodes one immutable revision document, or null when it does not exist. */
 function loadRevisionRecord(
   storage: ObjectStorageShape,
-  workspace: string,
   project: string,
   revisionId: string,
 ): Effect.Effect<SiteRevisionRecord | null, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    const key = revisionRecordKey(workspace, project, revisionId);
+    const key = revisionRecordKey(project, revisionId);
     const object = yield* storage.getObject(key);
     if (object == null) return null;
-    const parsed = parseJson(new TextDecoder().decode(object.body));
-    if (!isRecord(parsed)) {
-      return yield* Effect.fail(new SiteStoreError({ status: 500, message: `Invalid stored JSON: ${key}` }));
-    }
-    return yield* Schema.decodeUnknown(SiteRevisionRecordSchema)(parsed, { errors: "all" }).pipe(
+    return yield* Schema.decodeUnknown(SiteRevisionJsonSchema)(new TextDecoder().decode(object.body), { errors: "all" }).pipe(
       Effect.mapError((error) =>
         new SiteStoreError({
           status: 500,
@@ -745,44 +724,14 @@ function loadRevisionRecord(
   });
 }
 
-function requireProjectIdentifier(label: string, value: string): Effect.Effect<void, SiteStoreError> {
-  return safeProjectIdentifier(value)
+/** Fails with 400 when a project name is not a safe identifier. */
+function requireProjectIdentifier(value: string): Effect.Effect<void, SiteStoreError> {
+  return isSafeProjectIdentifier(value)
     ? Effect.void
-    : Effect.fail(new SiteStoreError({ status: 400, message: `Invalid ${label}: ${value}` }));
+    : Effect.fail(new SiteStoreError({ status: 400, message: `Invalid project: ${value}` }));
 }
 
-function safeRoutePath(routePath: string): boolean {
-  return routePath.length > 0 && routePath.length <= 512 && routePath.split("/").every(safeProjectIdentifier);
-}
-
-function revisionRecordKey(workspace: string, project: string, revisionId: string): string {
-  return `projects/${workspace}/${project}/revisions/${revisionId}.json`;
-}
-
-function blobObjectKey(sha256: string): string {
-  return `blobs/sha256/${sha256.slice(0, 2)}/${sha256}`;
-}
-
-function ownerIndexKey(owner: SiteOwner, workspace: string, project: string): string {
-  return `${encodeKeySegment(owner.id)}/${workspace}/${project}`;
-}
-
-function encodeKeySegment(value: string): string {
-  return encodeURIComponent(value).replace(/\./g, "%2E");
-}
-
-function rawPathSegments(pathname: string): ReadonlyArray<string> {
-  return pathname.split("/").filter((segment) => segment !== "");
-}
-
-function decodePathSegment(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
+/** Maps primitive-DB failures onto site-store errors (409 for conflicts, 500 otherwise). */
 function dbError(error: PrimitiveDbError | PrimitiveDbConflict): SiteStoreError {
   if (error instanceof PrimitiveDbConflict) {
     return new SiteStoreError({ status: 409, message: error.message, cause: error });
@@ -790,19 +739,12 @@ function dbError(error: PrimitiveDbError | PrimitiveDbConflict): SiteStoreError 
   return new SiteStoreError({ status: 500, message: error.message, cause: error });
 }
 
+/** Serializes a stored JSON document with a trailing newline. */
 function serialize(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
+/** Normalizes a user or stored owner into the persisted owner shape. */
 function ownerFromUser(user: AuthUser | SiteOwner): SiteOwner {
   return { id: user.id, email: user.email.toLowerCase() };
-}
-
-function uniquePaths(files: ReadonlyArray<{ readonly path: string }>): boolean {
-  const paths = new Set<string>();
-  for (const file of files) {
-    if (paths.has(file.path)) return false;
-    paths.add(file.path);
-  }
-  return true;
 }

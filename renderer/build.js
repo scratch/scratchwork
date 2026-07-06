@@ -12,8 +12,6 @@
  *
  * Outputs:
  *   • dist/index.html — the single-file renderer, served as a file.
- *   • dist/shell.js   — the same HTML as an importable JS module
- *                       (`export default "<html>"`).
  *   • ../shared/src/site/default-renderer.generated.js — the same HTML plus a
  *                       renderer source hash, imported by the CLI so the
  *                       standalone binary embeds the renderer through shared.
@@ -22,12 +20,18 @@
  * .md itself). The engine — React included — is fully inlined. Content is never
  * rebuilt.
  *
- *   bun run build     # write dist/* + shared default-renderer.generated.js
+ *   bun run build     # write dist/index.html + shared default-renderer.generated.js
  *   bun run dev       # rebuild on change + preview the sample at :5180
  */
 import { build as esbuild } from "esbuild";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, watch } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  watch,
+} from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
 
@@ -35,7 +39,6 @@ const root = dirname(fileURLToPath(import.meta.url));
 const r = (p) => join(root, p);
 const DIST = r("dist");
 const OUT_HTML = join(DIST, "index.html");
-const OUT_SHELL = join(DIST, "shell.js");
 const OUT_SHARED = r("../shared/src/site/default-renderer.generated.js");
 
 // Everything — React, ReactDOM, Prism, htm, parser/renderer — is bundled and
@@ -45,21 +48,33 @@ const OUT_SHARED = r("../shared/src/site/default-renderer.generated.js");
 // Guard against a literal </script> inside inlined JS terminating the tag early.
 const safe = (js) => js.replace(/<\/script>/gi, "<\\/script>");
 
+// Every file that feeds the built artifact (root build inputs + src/), in a
+// stable order. This list and the hash framing below are mirrored by
+// cli/src/renderer/default.ts, which recomputes the hash without importing
+// this file — keep the two in sync.
 function rendererSourceFiles() {
-  const files = [r("build.js"), r("bun.lock"), r("package.json"), r("shell.js")];
+  const files = [
+    r("build.js"),
+    r("bun.lock"),
+    r("package.json"),
+    r("shell.js"),
+  ];
   const walk = (dir) => {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of entries) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const abs = join(dir, entry.name);
       if (entry.isDirectory()) walk(abs);
       else if (entry.isFile()) files.push(abs);
     }
   };
   walk(r("src"));
-  return files.sort((a, b) => relative(root, a).localeCompare(relative(root, b)));
+  return files.sort((a, b) =>
+    relative(root, a).localeCompare(relative(root, b)),
+  );
 }
 
+// Content hash over all renderer sources. The CLI compares this against the
+// hash baked into the generated shared module to detect a stale renderer and
+// rebuild it automatically during source runs.
 export function rendererSourceHash() {
   const hash = createHash("sha256");
   for (const file of rendererSourceFiles()) {
@@ -71,6 +86,8 @@ export function rendererSourceHash() {
   return hash.digest("hex");
 }
 
+// esbuild-bundle src/main.js — React, ReactDOM, Prism, htm, and the markdown
+// engine — into one minified ESM string, in memory (no dist writes).
 async function bundleEngine() {
   const result = await esbuild({
     entryPoints: [r("src/main.js")],
@@ -98,39 +115,39 @@ export async function assemble() {
   This file fetches a .md/.mdx alongside it and renders it in the browser.
   It is organized into three regions, each opened by a unique marker comment.
 
-  ┌─ NOTE TO CODING AGENTS (Claude, Codex, etc.) ──────────────────────────┐
-  │ This is one big file, but the parts you'll want to edit are small and   │
-  │ near the top. The bottom region is a minified bundle that will flood    │
-  │ your context if you read it. DO NOT read the whole file, and DO NOT     │
-  │ page/scroll past the "DO NOT EDIT — BUNDLED ENGINE" marker.             │
-  │                                                                         │
-  │ Navigate by GREPPING for these stable markers (line numbers drift, so   │
-  │ never rely on them):                                                    │
-  │                                                                         │
-  │   "EDITABLE — THEME"                                                    │
-  │       Opens the <style id="scratchwork-theme"> block. Colors, fonts,        │
-  │       spacing, prose typography, code highlighting. Edit freely. To     │
-  │       edit CSS: grep for this marker to get its line N, then read from  │
-  │       N up to the "EDITABLE — PAGE SHELL & COMPONENTS" marker only.     │
-  │                                                                         │
-  │   "EDITABLE — PAGE SHELL & COMPONENTS"                                  │
-  │       Opens a <script type="module"> with the chrome wrapped around     │
-  │       your markdown, plus any components referenced as <Tag/>. Authored │
-  │       as JSX via html\`...\`. Edit freely. Read from this marker up to   │
-  │       the "DO NOT EDIT — BUNDLED ENGINE" marker only.                   │
-  │       To add a component referenced as <Tag/> from markdown, define it  │
-  │       on window.SCRATCHWORK.components here (e.g.                        │
-  │       window.SCRATCHWORK.components.Foo = (props) => html\`...\`). Prefer │
-  │       this over a ./components/Foo.js sibling file — it keeps everything │
-  │       in this one file, which is the whole point.                       │
-  │                                                                         │
-  │   "DO NOT EDIT — BUNDLED ENGINE"                                        │
-  │       Everything from this marker to end-of-file is a minified bundle   │
-  │       (React + ReactDOM + Prism + htm + the markdown parser/renderer)   │
-  │       on a few enormous single lines. DO NOT READ IT — a single line    │
-  │       can exceed your read budget. DO NOT EDIT IT by hand. To change    │
-  │       the engine, edit ../renderer/src and run \`bun run build\`.        │
-  └─────────────────────────────────────────────────────────────────────────┘
+  NOTE TO CODING AGENTS (Claude, Codex, etc.)
+
+  This is one big file, but the parts you'll want to edit are small and near
+  the top. The bottom region is a minified bundle that will flood your
+  context if you read it. DO NOT read the whole file, and DO NOT page/scroll
+  past the "DO NOT EDIT — BUNDLED ENGINE" marker.
+
+  Navigate by GREPPING for these stable markers (line numbers drift, so
+  never rely on them):
+
+    "EDITABLE — THEME"
+        Opens the <style id="scratchwork-theme"> block. Colors, fonts,
+        spacing, prose typography, code highlighting. Edit freely. To edit
+        CSS: grep for this marker to get its line N, then read from N up to
+        the "EDITABLE — PAGE SHELL & COMPONENTS" marker only.
+
+    "EDITABLE — PAGE SHELL & COMPONENTS"
+        Opens a <script type="module"> with the chrome wrapped around your
+        markdown, plus any components referenced as <Tag/>. Authored as JSX
+        via html\`...\`. Edit freely. Read from this marker up to the
+        "DO NOT EDIT — BUNDLED ENGINE" marker only.
+        To add a component referenced as <Tag/> from markdown, define it on
+        window.SCRATCHWORK.components here (e.g.
+        window.SCRATCHWORK.components.Foo = (props) => html\`...\`). Prefer
+        this over a ./components/Foo.js sibling file — it keeps everything
+        in this one file, which is the whole point.
+
+    "DO NOT EDIT — BUNDLED ENGINE"
+        Everything from this marker to end-of-file is a minified bundle
+        (React + ReactDOM + Prism + htm + the markdown parser/renderer) on a
+        few enormous single lines. DO NOT READ IT — a single line can exceed
+        your read budget. DO NOT EDIT IT by hand. To change the engine, edit
+        ../renderer/src and run \`bun run build\`.
 -->
 <html lang="en">
   <head>
@@ -173,7 +190,7 @@ ${safe(shell)}
   return html;
 }
 
-// Build the dist artifacts plus the shared embedded-renderer module, then return
+// Build dist/index.html plus the shared embedded-renderer module, then return
 // the HTML. JSON.stringify lets the generated JS survive the backticks/${} in the
 // shell and minified engine.
 export async function buildDist() {
@@ -181,10 +198,6 @@ export async function buildDist() {
   const html = await assemble();
   mkdirSync(DIST, { recursive: true });
   writeFileSync(OUT_HTML, html);
-  writeFileSync(
-    OUT_SHELL,
-    `// AUTO-GENERATED by renderer/build.js — do not edit.\nexport default ${JSON.stringify(html)};\n`,
-  );
   writeFileSync(
     OUT_SHARED,
     [
@@ -196,7 +209,7 @@ export async function buildDist() {
     ].join("\n"),
   );
   console.log(
-    `Built renderer/dist/index.html + renderer/dist/shell.js + shared renderer (${(html.length / 1024).toFixed(1)} KB)`,
+    `Built renderer/dist/index.html + shared renderer (${(html.length / 1024).toFixed(1)} KB)`,
   );
   return html;
 }
@@ -225,7 +238,8 @@ if (import.meta.main) {
         const path = new URL(req.url).pathname;
         const last = path.split("/").pop();
         // Routes (/, extensionless) → the built renderer; assets → the sample.
-        if (path === "/" || !last.includes(".")) return new Response(Bun.file(OUT_HTML));
+        if (path === "/" || !last.includes("."))
+          return new Response(Bun.file(OUT_HTML));
         return new Response(Bun.file(join(docs, path)));
       },
     });

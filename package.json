@@ -24,7 +24,7 @@
     "local:sndbx.sh": "cd deploy/sndbx.sh && bun run local",
     "dev:renderer": "cd renderer && bun run dev",
     "lint": "cd cli && bun run lint",
-    "test": "cd cli && bun run test",
+    "test": "cd renderer && bun test && cd ../cli && bun run test",
     "typecheck": "cd cli && bun run typecheck && cd ../server && bun run typecheck && cd ../deploy/generic-aws && bun run typecheck && cd ../local-dev && bun run typecheck && cd ../sndbx.sh && bun run typecheck"
   },
   "dependencies": {

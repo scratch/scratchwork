@@ -1,3 +1,8 @@
+/*
+ * Compact terminal diagnostics for the dev server: logs which renderer served
+ * each markdown route and where each referenced React component resolved,
+ * flagging components that could not be found.
+ */
 import * as Effect from "effect/Effect";
 import {
   collectComponentNames,
@@ -13,6 +18,7 @@ import { errorMessage } from "../errors";
 import { problem, status } from "./output";
 import type { DevState } from "./types";
 
+/** Where one markdown-referenced React component was found, if anywhere. */
 type ComponentResolution =
   | {
       readonly name: string;

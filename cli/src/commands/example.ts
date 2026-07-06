@@ -1,3 +1,7 @@
+/*
+ * `scratchwork example` - write a runnable example project (Markdown page plus
+ * two sample React components) into a directory.
+ */
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import type { PlatformError } from "@effect/platform/Error";
@@ -15,8 +19,7 @@ const EXAMPLE: Record<string, string> = {
   "components/Highlight.js": EXAMPLE_HIGHLIGHT_JS,
 };
 
-// `scratchwork example [path]` - write example Markdown + components.
-// Refuses to clobber existing files.
+/** Runs `scratchwork example`: writes the example files, refusing to clobber existing ones. */
 export function runExample(
   config: PathConfig,
 ): Effect.Effect<
@@ -25,7 +28,7 @@ export function runExample(
   FileSystem.FileSystem | Path.Path
 > {
   return Effect.gen(function* () {
-    const dest = config.path ?? ".";
+    const dest = config.path;
     const fs = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;
     const root = paths.resolve(process.cwd(), dest);

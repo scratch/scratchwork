@@ -2,15 +2,16 @@ import * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { bytesToBase64 } from "../../../shared/src/publish/bundle";
+import { bytesToBase64 } from "../../../shared/src/encoding/base64";
 import { bytesToHex } from "../../../shared/src/encoding/hex";
 import { app } from "../src/app";
 import { Auth, AuthError, AuthLive, type AuthShape, type AuthUser } from "../src/auth";
 import { ServerConfig, type ServerConfigShape } from "../src/config";
-import { MemoryPrimitiveDbLive } from "../src/db";
+import { MemoryPrimitiveDbLive, PrimitiveDb } from "../src/db";
 import { SiteStoreLive } from "../src/site-store";
 import { ObjectStorage, StorageConflict, StorageError, safeObjectKey, type ObjectStorageShape, type StoredObject } from "../src/storage";
 
+/** One object held by the in-memory test storage. */
 export interface MemoryStoredObject {
   readonly body: Uint8Array;
   readonly contentType?: string;
@@ -32,17 +33,16 @@ export function bundle(files: Record<string, string | Uint8Array>) {
 export async function appHandler(options: {
   readonly config?: Partial<ServerConfigShape>;
   readonly storage?: Map<string, MemoryStoredObject>;
+  readonly db?: Layer.Layer<PrimitiveDb>;
   readonly auth?: Layer.Layer<Auth>;
 } = {}) {
   const config: ServerConfigShape = {
     port: 3001,
-    publicUrl: "https://scratch.test",
     appUrl: "https://scratch.test",
     contentUrl: "https://scratch.test",
     maxVisibility: "public",
     shareAllowedDomains: new Set(),
-    projectPath: "random",
-    defaultWorkspace: "personal",
+    usersCanSetProjectNames: true,
     defaultVisibility: "public",
     auth: {
       clientId: "test-client-id",
@@ -56,7 +56,7 @@ export async function appHandler(options: {
   const base = Layer.mergeAll(
     Layer.succeed(ServerConfig, ServerConfig.of(config)),
     memoryStorageLayer(options.storage),
-    MemoryPrimitiveDbLive(),
+    options.db ?? MemoryPrimitiveDbLive(),
   );
   const services = Layer.provideMerge(
     Layer.mergeAll(options.auth ?? AuthLive, SiteStoreLive),
@@ -76,16 +76,12 @@ export function memoryStorageLayer(
 export function testAuth(user: AuthUser | null, apiUser = user): Layer.Layer<Auth> {
   const shape: AuthShape = {
     currentUser: () => Effect.succeed(user),
-    requireUser: () => user == null
-      ? Effect.fail(new AuthError({ status: 401, message: "Authentication required" }))
-      : Effect.succeed(user),
     requireApiUser: () => apiUser == null
       ? Effect.fail(new AuthError({ status: 401, message: "Authentication required" }))
       : Effect.succeed(apiUser),
     login: () => Effect.succeed(HttpServerResponse.redirect("/auth/login")),
     callback: () => Effect.succeed(HttpServerResponse.redirect("/")),
     logout: () => HttpServerResponse.redirect("/"),
-    loginRedirect: () => HttpServerResponse.redirect("/auth/login"),
     issueProjectAccessToken: () => Effect.succeed("project-access-token"),
     verifyProjectAccessToken: () => apiUser == null
       ? Effect.succeed(null)
@@ -136,7 +132,6 @@ function memoryStorage(map: Map<string, MemoryStoredObject>): ObjectStorageShape
   return {
     getObject,
     putObject,
-    getText: (key) => getObject(key).pipe(Effect.map((object) => object == null ? null : new TextDecoder().decode(object.body))),
     putText: (key, value, options) => putObject(key, new TextEncoder().encode(value), options),
   };
 }

@@ -1,8 +1,19 @@
+/**
+ * Verifies Google OAuth ID tokens: RS256 signature against Google's JWKS (fetched and
+ * cached per its Cache-Control), plus issuer/audience/expiry/email/nonce claim checks.
+ *
+ * This module is a deliberate Promise boundary, not an unfinished Effect migration:
+ * verification is plain async/await (raw fetch + Web Crypto) wrapped exactly once by
+ * Effect.tryPromise in verifyGoogleIdToken, matching the token-exchange fetch in auth.ts.
+ * `keyCache` is intentionally process-global: JWKS refreshes are idempotent, so concurrent
+ * cold-start misses at worst duplicate one fetch.
+ */
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { base64UrlToBytes } from "../../../shared/src/encoding/base64";
 import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
-import { errorMessage, isRecord, parseJson } from "../../../shared/src/util/json";
+import { errorMessage } from "../../../shared/src/util/errors";
+import { isRecord, parseJson } from "../../../shared/src/util/json";
 
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const CLOCK_SKEW_SECONDS = 300;
@@ -10,11 +21,13 @@ const FETCH_TIMEOUT_MS = 5_000;
 const MIN_CACHE_SECONDS = 60;
 const MAX_CACHE_SECONDS = 60 * 60 * 24;
 
+/** Raised when an ID token fails signature or claim validation. */
 export class GoogleJwtError extends Data.TaggedError("GoogleJwtError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
+/** The Google ID-token claims the server reads. */
 export interface GoogleIdTokenClaims {
   readonly iss: string;
   readonly aud: string | ReadonlyArray<string>;
@@ -30,6 +43,7 @@ export interface GoogleIdTokenClaims {
   readonly picture?: string;
 }
 
+/** The JWT header fields checked before verification. */
 interface GoogleJwtHeader {
   readonly alg: string;
   readonly kid: string;
@@ -37,15 +51,18 @@ interface GoogleJwtHeader {
   readonly crit?: unknown;
 }
 
+/** Google's JWKS endpoint response shape. */
 interface JwksResponse {
   readonly keys?: ReadonlyArray<JsonWebKey & { readonly kid?: string }>;
 }
 
+/** One imported verification key with its cache expiry. */
 interface CachedKey {
   readonly key: CryptoKey;
   readonly expiresAt: number;
 }
 
+/** Process-global JWKS key cache, keyed `jwksUrl:kid` and shared across requests. */
 const keyCache = new Map<string, CachedKey>();
 
 /** Verifies a Google ID token signature and required claims. */

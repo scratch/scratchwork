@@ -1,26 +1,27 @@
+/**
+ * Deploys the Scratchwork server to AWS Lambda + S3 + DynamoDB by shelling out to the
+ * `aws` CLI. Like all deploy tooling under server/, this is deliberately plain
+ * Promise-based script code, not Effect: it runs once on a developer's machine.
+ */
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { definedEnv, loadDeployEnv, type DeployEnv } from "./deploy-env";
-import { createRunner, type RunOptions, type RunResult } from "./deploy-proc";
+import { definedEnv, loadDeployEnv, type DeployEnv } from "../../scripts/env";
+import { createRunner, type RunOptions, type RunResult } from "../../scripts/proc";
+import {
+  deployArgv,
+  optional,
+  resolveServerConfig,
+  serverConfigEnv,
+  validateDeploymentConfig,
+  type DeployServerOptions,
+  type ScratchworkServerConfig,
+} from "../../scripts/server-settings";
 
-export interface ScratchworkServerConfig {
-  readonly publicUrl?: string;
-  readonly auth?: "oauth";
-  readonly googleClientId?: string;
-  readonly authAllowedEmails?: string;
-  readonly authAllowedDomains?: string;
-  readonly authSessionSeconds?: number;
-  readonly allowedUsers?: string;
-  readonly maxVisibility?: string;
-  readonly shareAllowedDomains?: string;
-  readonly appDomain?: string;
-  readonly contentDomain?: string;
-  readonly projectPath?: "workspace/project" | "domain/username/project" | "username/project" | "random";
-  readonly defaultWorkspace?: "personal" | "random" | "required";
-  readonly defaultVisibility?: string;
-}
+/** Deploy options and server settings, shared with the other deploy packages. */
+export type { DeployServerOptions as AwsDeployOptions, ScratchworkServerConfig };
 
+/** AWS-specific deploy settings; unset values fall back to env vars and defaults. */
 export interface AwsDeployConfig {
   readonly region?: string;
   readonly storageRegion?: string;
@@ -30,21 +31,13 @@ export interface AwsDeployConfig {
   readonly dynamoDbTable?: string;
 }
 
+/** A deploy project's full config: server settings plus AWS deploy settings. */
 export interface AwsDeployServerConfig {
   readonly server?: ScratchworkServerConfig;
   readonly deploy?: AwsDeployConfig;
 }
 
-/** @deprecated Use AwsDeployServerConfig. */
-export type AwsServerConfig = AwsDeployServerConfig;
-
-export interface AwsDeployOptions {
-  readonly envFile?: string;
-  readonly argv?: ReadonlyArray<string>;
-  readonly processEnv?: DeployEnv;
-  readonly loadPackageEnvFiles?: boolean;
-}
-
+/** What deployServer reports back after a successful deploy. */
 export interface AwsDeployResult {
   readonly url: string;
   readonly functionName: string;
@@ -56,11 +49,7 @@ export interface AwsDeployResult {
   readonly storageRegion: string;
 }
 
-interface ResolvedScratchworkServerConfig {
-  readonly appUrl?: string;
-  readonly contentUrl?: string;
-}
-
+/** AwsDeployConfig with every fallback applied. */
 interface ResolvedAwsDeployConfig {
   readonly region: string;
   readonly storageRegion: string;
@@ -70,18 +59,24 @@ interface ResolvedAwsDeployConfig {
   readonly dynamoDbTable?: string;
 }
 
+/** Runs one `aws` CLI command in the deploy region. */
+type Aws = (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>;
+/** Runs one `aws` CLI command and returns its trimmed stdout ("" on failure). */
+type AwsText = (args: ReadonlyArray<string>, options?: RunOptions) => Promise<string>;
+
+/** Build artifacts written under dist/ for the AWS CLI to consume. */
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
 const handlerPath = join(dist, "handler.mjs");
 const zipPath = join(dist, "function.zip");
 const trustPolicyPath = join(dist, "lambda-trust-policy.json");
-const s3PolicyPath = join(dist, "s3-policy.json");
+const accessPolicyPath = join(dist, "s3-policy.json");
 const environmentPath = join(dist, "environment.json");
 
 /** Deploys the Scratchwork server as an AWS Lambda Function URL. */
 export async function deployServer(
   config: AwsDeployServerConfig = {},
-  options: AwsDeployOptions = {},
+  options: DeployServerOptions = {},
 ): Promise<AwsDeployResult> {
   const loadedEnv = await loadDeployEnv({
     packageRoot: root,
@@ -101,15 +96,15 @@ export async function deployServer(
   };
   const commandEnv = definedEnv(env);
   const { run } = createRunner(commandEnv);
-  const aws = (args: ReadonlyArray<string>, runOptions: RunOptions = {}) =>
+  const aws: Aws = (args, runOptions = {}) =>
     run("aws", ["--region", resolvedDeploy.region, ...args], runOptions);
-  const awsText = async (args: ReadonlyArray<string>, runOptions: RunOptions = {}) => {
+  const awsText: AwsText = async (args, runOptions = {}) => {
     const result = await aws(args, { ...runOptions, capture: true });
     return result.ok ? result.stdout.trim() : "";
   };
 
   await mkdir(dist, { recursive: true });
-  validateDeploymentAuth(env);
+  validateDeploymentConfig(env, "AWS");
   await run("bun", ["run", "build"], { cwd: root });
   await rm(zipPath, { force: true });
   await run("zip", ["-j", zipPath, handlerPath], { cwd: root });
@@ -137,21 +132,7 @@ export async function deployServer(
   };
 }
 
-function deployArgv(options: AwsDeployOptions): ReadonlyArray<string> {
-  return options.envFile == null ? options.argv ?? [] : ["--env", options.envFile, ...(options.argv ?? [])];
-}
-
-function resolveServerConfig(config: ScratchworkServerConfig, env: DeployEnv): ResolvedScratchworkServerConfig {
-  return {
-    appUrl: optional(config.appDomain) == null
-      ? optional(config.publicUrl) ?? optional(env.SCRATCHWORK_APP_URL) ?? optional(env.SCRATCHWORK_PUBLIC_URL)
-      : `https://${config.appDomain}`,
-    contentUrl: optional(config.contentDomain) == null
-      ? optional(config.publicUrl) ?? optional(env.SCRATCHWORK_CONTENT_URL) ?? optional(env.SCRATCHWORK_PUBLIC_URL)
-      : `https://${config.contentDomain}`,
-  };
-}
-
+/** Applies env-var and default fallbacks to the AWS deploy settings. */
 function resolveDeployConfig(config: AwsDeployConfig, env: DeployEnv): ResolvedAwsDeployConfig {
   const region = optional(config.region)
     ?? optional(env.AWS_REGION)
@@ -170,24 +151,7 @@ function resolveDeployConfig(config: AwsDeployConfig, env: DeployEnv): ResolvedA
   };
 }
 
-function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScratchworkServerConfig): DeployEnv {
-  const env: DeployEnv = {};
-  if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
-  if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
-  if (config.authAllowedEmails != null) env.SCRATCHWORK_AUTH_ALLOWED_EMAILS = config.authAllowedEmails;
-  if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
-  if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
-  if (config.allowedUsers != null) env.SCRATCHWORK_ALLOWED_USERS = config.allowedUsers;
-  if (config.maxVisibility != null) env.SCRATCHWORK_MAX_VISIBILITY = config.maxVisibility;
-  if (config.shareAllowedDomains != null) env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS = config.shareAllowedDomains;
-  if (config.projectPath != null) env.SCRATCHWORK_PROJECT_PATH = config.projectPath;
-  if (config.defaultWorkspace != null) env.SCRATCHWORK_DEFAULT_WORKSPACE = config.defaultWorkspace;
-  if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
-  if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
-  if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;
-  return env;
-}
-
+/** Maps resolved AWS deploy settings back onto their environment variables. */
 function deployConfigEnv(resolved: ResolvedAwsDeployConfig): DeployEnv {
   const env: DeployEnv = {};
   env.AWS_REGION = resolved.region;
@@ -200,11 +164,7 @@ function deployConfigEnv(resolved: ResolvedAwsDeployConfig): DeployEnv {
 }
 
 /** Creates the S3 bucket when it does not already exist. */
-async function ensureBucket(
-  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
-  bucket: string,
-  bucketRegion: string,
-): Promise<void> {
+async function ensureBucket(aws: Aws, bucket: string, bucketRegion: string): Promise<void> {
   const exists = await aws(["s3api", "head-bucket", "--bucket", bucket], { allowFailure: true });
   if (exists.ok) return;
 
@@ -216,10 +176,7 @@ async function ensureBucket(
 }
 
 /** Creates the DynamoDB primitive DB table when it does not already exist. */
-async function ensureDynamoDbTable(
-  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
-  table: string,
-): Promise<void> {
+async function ensureDynamoDbTable(aws: Aws, table: string): Promise<void> {
   const exists = await aws(["dynamodb", "describe-table", "--table-name", table], { allowFailure: true });
   if (exists.ok) return;
   await aws([
@@ -239,21 +196,10 @@ async function ensureDynamoDbTable(
   await aws(["dynamodb", "wait", "table-exists", "--table-name", table]);
 }
 
-/** Validates required OAuth secrets. Auth cannot be disabled. */
-function validateDeploymentAuth(env: DeployEnv): void {
-  const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
-  if (authMode !== "" && authMode !== "oauth") {
-    throw new Error('SCRATCHWORK_AUTH must be "oauth" when set');
-  }
-  for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
-    if (!env[key]) throw new Error(`${key} is required: AWS deploys always use OAuth`);
-  }
-}
-
-/** Creates or updates the Lambda execution role and bucket access policy. */
+/** Creates or updates the Lambda execution role and its S3 + DynamoDB access policy. */
 async function ensureRole(
-  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
-  awsText: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<string>,
+  aws: Aws,
+  awsText: AwsText,
   role: string,
   functionName: string,
   bucket: string,
@@ -291,11 +237,12 @@ async function ensureRole(
       "--policy-arn",
       "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
     ]);
+    // Wait for IAM role propagation before the Lambda references the new role.
     await sleep(10_000);
   }
 
   await writeFile(
-    s3PolicyPath,
+    accessPolicyPath,
     JSON.stringify({
       Version: "2012-10-17",
       Statement: [
@@ -320,7 +267,7 @@ async function ensureRole(
     "--policy-name",
     `${functionName}-s3-access`,
     "--policy-document",
-    `file://${s3PolicyPath}`,
+    `file://${accessPolicyPath}`,
   ]);
 
   return awsText(["iam", "get-role", "--role-name", role, "--query", "Role.Arn", "--output", "text"]);
@@ -340,11 +287,7 @@ async function writeEnvironment(env: DeployEnv, bucket: string, bucketRegion: st
 }
 
 /** Creates the Lambda or updates its code and configuration in place. */
-async function upsertFunction(
-  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
-  name: string,
-  roleArn: string,
-): Promise<void> {
+async function upsertFunction(aws: Aws, name: string, roleArn: string): Promise<void> {
   const exists = await aws(["lambda", "get-function", "--function-name", name], { allowFailure: true });
   if (exists.ok) {
     await aws([
@@ -398,11 +341,7 @@ async function upsertFunction(
 }
 
 /** Creates or returns the public Lambda Function URL. */
-async function ensureFunctionUrl(
-  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
-  awsText: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<string>,
-  name: string,
-): Promise<string> {
+async function ensureFunctionUrl(aws: Aws, awsText: AwsText, name: string): Promise<string> {
   const existing = await awsText(
     ["lambda", "get-function-url-config", "--function-name", name, "--query", "FunctionUrl", "--output", "text"],
     { allowFailure: true },
@@ -418,10 +357,7 @@ async function ensureFunctionUrl(
 }
 
 /** Ensures public invoke permissions exist for the Function URL. */
-async function ensureFunctionUrlPermission(
-  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
-  name: string,
-): Promise<void> {
+async function ensureFunctionUrlPermission(aws: Aws, name: string): Promise<void> {
   await addPermission(
     aws,
     name,
@@ -447,7 +383,7 @@ async function ensureFunctionUrlPermission(
 
 /** Adds one Lambda permission statement, ignoring already-existing statements. */
 async function addPermission(
-  aws: (args: ReadonlyArray<string>, options?: RunOptions) => Promise<RunResult>,
+  aws: Aws,
   name: string,
   statementId: string,
   args: ReadonlyArray<string>,
@@ -471,11 +407,7 @@ async function addPermission(
   throw new Error(`Could not add Lambda Function URL permission ${statementId}`);
 }
 
-/** Waits for IAM role propagation before creating the Lambda. */
+/** Resolves after the given delay. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function optional(value: string | undefined): string | undefined {
-  return value == null || value === "" ? undefined : value;
 }

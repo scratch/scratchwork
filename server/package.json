@@ -5,7 +5,7 @@
   "private": true,
   "description": "Scratchwork publishing server workspace commands.",
   "scripts": {
-    "check": "bun run typecheck && bun test scripts/env.test.ts && cd core && bun test && cd ../deploy-aws && bun test && cd ../deploy-cloudflare && bun test",
+    "check": "bun run typecheck && bun test scripts/env.test.ts scripts/server-settings.test.ts && cd core && bun test && cd ../deploy-aws && bun test && cd ../deploy-cloudflare && bun test",
     "typecheck": "cd core && bun run typecheck && cd ../deploy-aws && bun run typecheck && cd ../deploy-cloudflare && bun run typecheck && cd ../deploy-local && bun run typecheck"
   }
 }

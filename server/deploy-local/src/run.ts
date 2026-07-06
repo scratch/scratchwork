@@ -1,6 +1,4 @@
-import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
-import * as BunPath from "@effect/platform-bun/BunPath";
 import { BunRuntime } from "@effect/platform-bun";
 import {
   AuthLive,
@@ -15,30 +13,13 @@ import {
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type { ScratchworkServerConfig } from "../../scripts/server-settings";
 
-/**
- * Server settings a deploy target can run locally. Structurally compatible with the
- * `server` section of the Cloudflare/AWS `ScratchworkServerConfig`, so a deploy project
- * can share one config module between its cloud deploy and a local run.
- */
-export interface LocalServerSettings {
-  readonly auth?: "oauth";
-  readonly googleClientId?: string;
-  readonly authAllowedEmails?: string;
-  readonly authAllowedDomains?: string;
-  readonly authSessionSeconds?: number;
-  readonly allowedUsers?: string;
-  readonly maxVisibility?: string;
-  readonly shareAllowedDomains?: string;
-  readonly appDomain?: string;
-  readonly contentDomain?: string;
-  readonly projectPath?: "workspace/project" | "domain/username/project" | "username/project" | "random";
-  readonly defaultWorkspace?: "personal" | "random" | "required";
-  readonly defaultVisibility?: string;
-}
-
+/** Options for a local run: the deploy project's `server` settings plus an env override
+ * for tests. Using the shared config shape lets a deploy project run one config module
+ * both in the cloud and locally. */
 export interface RunLocalServerOptions {
-  readonly server?: LocalServerSettings;
+  readonly server?: ScratchworkServerConfig;
   readonly processEnv?: EnvVars;
 }
 
@@ -52,8 +33,12 @@ export interface RunLocalServerOptions {
  * and `http://pages.localhost:<port>` (content — *.localhost is loopback per RFC 6761),
  * so host-separated behavior such as the private-content cookie handoff works the same
  * way locally.
+ *
+ * Returns immediately after handing the server program to `BunRuntime.runMain`, which
+ * takes over the process (keeps it alive, installs signal handlers) for the lifetime of
+ * the server.
  */
-export async function runLocalServer(options: RunLocalServerOptions = {}): Promise<void> {
+export function runLocalServer(options: RunLocalServerOptions = {}): void {
   const processEnv = options.processEnv ?? (process.env as EnvVars);
   const server = options.server ?? {};
   const localPort = processEnv.PORT ?? processEnv.SCRATCHWORK_PORT ?? "43118";
@@ -69,10 +54,9 @@ export async function runLocalServer(options: RunLocalServerOptions = {}): Promi
 
   const storageDirectory = env.SCRATCHWORK_STORAGE_DIR ?? ".scratchwork-local-data";
 
+  // BunHttpServer.layerContext already provides FileSystem and Path via BunContext.
   const BaseLayer = Layer.mergeAll(
     BunHttpServer.layerContext,
-    BunFileSystem.layer,
-    BunPath.layer,
     makeServerConfigLayer(env),
   );
 
@@ -109,7 +93,7 @@ export async function runLocalServer(options: RunLocalServerOptions = {}): Promi
 }
 
 /** Maps server settings onto their environment variables, keeping any already set. */
-function serverSettingsEnv(server: LocalServerSettings, processEnv: EnvVars): EnvVars {
+function serverSettingsEnv(server: ScratchworkServerConfig, processEnv: EnvVars): EnvVars {
   const env: Record<string, string | undefined> = {};
   const set = (key: string, value: string | undefined) => {
     const resolved = processEnv[key] ?? value;
@@ -123,8 +107,7 @@ function serverSettingsEnv(server: LocalServerSettings, processEnv: EnvVars): En
   set("SCRATCHWORK_ALLOWED_USERS", server.allowedUsers);
   set("SCRATCHWORK_MAX_VISIBILITY", server.maxVisibility);
   set("SCRATCHWORK_SHARE_ALLOWED_DOMAINS", server.shareAllowedDomains);
-  set("SCRATCHWORK_PROJECT_PATH", server.projectPath);
-  set("SCRATCHWORK_DEFAULT_WORKSPACE", server.defaultWorkspace);
+  set("SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES", server.usersCanSetProjectNames == null ? undefined : String(server.usersCanSetProjectNames));
   set("SCRATCHWORK_DEFAULT_VISIBILITY", server.defaultVisibility);
   return env;
 }

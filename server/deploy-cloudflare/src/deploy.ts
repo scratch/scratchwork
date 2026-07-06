@@ -1,43 +1,49 @@
+/**
+ * Deploys the Scratchwork server as a Cloudflare Worker backed by R2 + D1, by building
+ * the worker bundle, generating a Wrangler config under dist/, and shelling out to the
+ * `wrangler` CLI. Like all deploy tooling under server/, this is deliberately plain
+ * Promise-based script code, not Effect: it runs once on a developer's machine.
+ */
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { copyEnv, definedEnv, loadDeployEnv, type DeployEnv } from "./deploy-env";
-import { createRunner } from "./deploy-proc";
+import { copyEnv, definedEnv, loadDeployEnv, type DeployEnv } from "../../scripts/env";
+import { createRunner } from "../../scripts/proc";
+import {
+  deployArgv,
+  optional,
+  resolveServerConfig,
+  serverConfigEnv,
+  validateDeploymentConfig,
+  type DeployServerOptions,
+  type ResolvedScratchworkServerConfig,
+  type ScratchworkServerConfig,
+} from "../../scripts/server-settings";
 
+/** Deploy options and server settings, shared with the other deploy packages. */
+export type { DeployServerOptions as CloudflareDeployOptions, ScratchworkServerConfig };
+
+/** R2 bucket settings; the binding name is fixed to what worker.ts expects. */
 export interface CloudflareR2BucketConfig {
   readonly name: string;
   readonly binding?: "SCRATCHWORK_R2";
 }
 
+/** D1 database settings; the binding name is fixed to what worker.ts expects. */
 export interface CloudflareD1DatabaseConfig {
   readonly name: string;
   readonly binding?: "SCRATCHWORK_D1";
   readonly id?: string;
 }
 
+/** One Wrangler route entry: a pattern plus optional zone/custom-domain flags. */
 export interface CloudflareRouteConfig {
   readonly pattern: string;
   readonly zoneName?: string;
   readonly customDomain?: boolean;
 }
 
-export interface ScratchworkServerConfig {
-  readonly publicUrl?: string;
-  readonly auth?: "oauth";
-  readonly googleClientId?: string;
-  readonly authAllowedEmails?: string;
-  readonly authAllowedDomains?: string;
-  readonly authSessionSeconds?: number;
-  readonly allowedUsers?: string;
-  readonly maxVisibility?: string;
-  readonly shareAllowedDomains?: string;
-  readonly appDomain?: string;
-  readonly contentDomain?: string;
-  readonly projectPath?: "workspace/project" | "domain/username/project" | "username/project" | "random";
-  readonly defaultWorkspace?: "personal" | "random" | "required";
-  readonly defaultVisibility?: string;
-}
-
+/** Cloudflare-specific deploy settings; unset values fall back to env vars and defaults. */
 export interface CloudflareDeployConfig {
   readonly workerName?: string;
   readonly compatibilityDate?: string;
@@ -51,21 +57,13 @@ export interface CloudflareDeployConfig {
   readonly skipDatabaseCreate?: boolean;
 }
 
+/** A deploy project's full config: server settings plus Cloudflare deploy settings. */
 export interface CloudflareDeployServerConfig {
   readonly server?: ScratchworkServerConfig;
   readonly deploy?: CloudflareDeployConfig;
 }
 
-/** @deprecated Use CloudflareDeployServerConfig. */
-export type CloudflareServerConfig = CloudflareDeployServerConfig;
-
-export interface CloudflareDeployOptions {
-  readonly envFile?: string;
-  readonly argv?: ReadonlyArray<string>;
-  readonly processEnv?: DeployEnv;
-  readonly loadPackageEnvFiles?: boolean;
-}
-
+/** What deployServer reports back after a successful deploy. */
 export interface CloudflareDeployResult {
   readonly workerName: string;
   readonly bucketName: string;
@@ -75,11 +73,7 @@ export interface CloudflareDeployResult {
   readonly workerPath: string;
 }
 
-interface ResolvedScratchworkServerConfig {
-  readonly appUrl?: string;
-  readonly contentUrl?: string;
-}
-
+/** CloudflareDeployConfig with every fallback applied. */
 interface ResolvedCloudflareDeployConfig {
   readonly workerName: string;
   readonly compatibilityDate: string;
@@ -96,6 +90,7 @@ interface ResolvedCloudflareDeployConfig {
   readonly skipDatabaseCreate: boolean;
 }
 
+/** Build artifacts written under dist/ for Wrangler to consume. */
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
 const workerPath = join(dist, "worker.js");
@@ -104,7 +99,7 @@ const configPath = join(dist, "wrangler.jsonc");
 /** Deploys the Scratchwork server as a Cloudflare Worker. */
 export async function deployServer(
   config: CloudflareDeployServerConfig = {},
-  options: CloudflareDeployOptions = {},
+  options: DeployServerOptions = {},
 ): Promise<CloudflareDeployResult> {
   const loadedEnv = await loadDeployEnv({
     packageRoot: root,
@@ -116,7 +111,11 @@ export async function deployServer(
   const serverConfig = config.server ?? {};
   const deployConfig = config.deploy ?? {};
   const resolvedDeploy = resolveDeployConfig(deployConfig, loadedEnv.env);
-  const resolvedServer = resolveServerConfig(serverConfig, loadedEnv.env, resolvedDeploy);
+  const resolvedServer = resolveServerConfig(
+    serverConfig,
+    loadedEnv.env,
+    resolvedDeploy.customDomain == null ? undefined : `https://${resolvedDeploy.customDomain}`,
+  );
   const env = {
     ...loadedEnv.env,
     ...serverConfigEnv(serverConfig, resolvedServer),
@@ -126,7 +125,7 @@ export async function deployServer(
   const { run } = createRunner(commandEnv);
 
   await mkdir(dist, { recursive: true });
-  validateDeploymentAuth(env);
+  validateDeploymentConfig(env, "Cloudflare");
   await run("bun", ["build", "src/worker.ts", "--target=browser", "--format=esm", `--outfile=${workerPath}`], { cwd: root });
   const routes = cloudflareRoutes(resolvedDeploy);
   await ensureBucket(resolvedDeploy, run);
@@ -147,25 +146,7 @@ export async function deployServer(
   };
 }
 
-function deployArgv(options: CloudflareDeployOptions): ReadonlyArray<string> {
-  return options.envFile == null ? options.argv ?? [] : ["--env", options.envFile, ...(options.argv ?? [])];
-}
-
-function resolveServerConfig(
-  config: ScratchworkServerConfig,
-  env: DeployEnv,
-  deploy: ResolvedCloudflareDeployConfig,
-): ResolvedScratchworkServerConfig {
-  return {
-    appUrl: optional(config.appDomain) == null
-      ? optional(config.publicUrl) ?? optional(env.SCRATCHWORK_APP_URL) ?? optional(env.SCRATCHWORK_PUBLIC_URL) ?? (deploy.customDomain == null ? undefined : `https://${deploy.customDomain}`)
-      : `https://${config.appDomain}`,
-    contentUrl: optional(config.contentDomain) == null
-      ? optional(config.publicUrl) ?? optional(env.SCRATCHWORK_CONTENT_URL) ?? optional(env.SCRATCHWORK_PUBLIC_URL) ?? (deploy.customDomain == null ? undefined : `https://${deploy.customDomain}`)
-      : `https://${config.contentDomain}`,
-  };
-}
-
+/** Applies env-var and default fallbacks to the Cloudflare deploy settings. */
 function resolveDeployConfig(config: CloudflareDeployConfig, env: DeployEnv): ResolvedCloudflareDeployConfig {
   const customDomain = optional(config.customDomain) ?? optional(env.SCRATCHWORK_CLOUDFLARE_CUSTOM_DOMAIN);
   const bucket = config.r2Bucket;
@@ -208,24 +189,7 @@ function resolveDeployConfig(config: CloudflareDeployConfig, env: DeployEnv): Re
   };
 }
 
-function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScratchworkServerConfig): DeployEnv {
-  const env: DeployEnv = {};
-  if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
-  if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
-  if (config.authAllowedEmails != null) env.SCRATCHWORK_AUTH_ALLOWED_EMAILS = config.authAllowedEmails;
-  if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
-  if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
-  if (config.allowedUsers != null) env.SCRATCHWORK_ALLOWED_USERS = config.allowedUsers;
-  if (config.maxVisibility != null) env.SCRATCHWORK_MAX_VISIBILITY = config.maxVisibility;
-  if (config.shareAllowedDomains != null) env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS = config.shareAllowedDomains;
-  if (config.projectPath != null) env.SCRATCHWORK_PROJECT_PATH = config.projectPath;
-  if (config.defaultWorkspace != null) env.SCRATCHWORK_DEFAULT_WORKSPACE = config.defaultWorkspace;
-  if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
-  if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
-  if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;
-  return env;
-}
-
+/** Maps resolved Cloudflare deploy settings back onto their environment variables. */
 function deployConfigEnv(resolved: ResolvedCloudflareDeployConfig): DeployEnv {
   const env: DeployEnv = {};
   env.SCRATCHWORK_CLOUDFLARE_WORKER_NAME = resolved.workerName;
@@ -257,8 +221,7 @@ async function writeConfig(
   copyEnv(vars, env, "SCRATCHWORK_AUTH_SESSION_SECONDS");
   copyEnv(vars, env, "SCRATCHWORK_MAX_VISIBILITY");
   copyEnv(vars, env, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_PROJECT_PATH");
-  copyEnv(vars, env, "SCRATCHWORK_DEFAULT_WORKSPACE");
+  copyEnv(vars, env, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES");
   copyEnv(vars, env, "SCRATCHWORK_DEFAULT_VISIBILITY");
   if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;
   if (server.contentUrl != null && server.contentUrl !== "") vars.SCRATCHWORK_CONTENT_URL = server.contentUrl;
@@ -319,17 +282,6 @@ function zoneFor(pattern: string, configured: string | undefined): Record<string
   return labels.length >= 2 ? { zone_name: labels.slice(-2).join(".") } : {};
 }
 
-/** Validates required OAuth secrets. Auth cannot be disabled. */
-function validateDeploymentAuth(env: DeployEnv): void {
-  const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
-  if (authMode !== "" && authMode !== "oauth") {
-    throw new Error('SCRATCHWORK_AUTH must be "oauth" when set');
-  }
-  for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
-    if (!env[key]) throw new Error(`${key} is required: Cloudflare deploys always use OAuth`);
-  }
-}
-
 /** Uploads one configured secret to Wrangler without printing its value. */
 async function putSecret(commandEnv: Record<string, string>, env: DeployEnv, key: string): Promise<void> {
   const value = env[key];
@@ -386,11 +338,12 @@ async function ensureDatabase(
   return databaseIdFromText(created.stdout) ?? databaseIdFromText(created.stderr);
 }
 
-/** Detects Wrangler's bucket-exists message across stdout and stderr. */
+/** Detects Wrangler's resource-already-exists message. */
 function alreadyExists(value: string): boolean {
   return value.toLowerCase().includes("already exists");
 }
 
+/** Finds the database ID for a name in `wrangler d1 list --json` output. */
 function databaseIdFromList(text: string, name: string): string | undefined {
   try {
     const parsed = JSON.parse(text) as unknown;
@@ -408,10 +361,7 @@ function databaseIdFromList(text: string, name: string): string | undefined {
   }
 }
 
+/** Extracts the first UUID in Wrangler's `d1 create` output. */
 function databaseIdFromText(text: string): string | undefined {
   return /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i.exec(text)?.[1];
-}
-
-function optional(value: string | undefined): string | undefined {
-  return value == null || value === "" ? undefined : value;
 }

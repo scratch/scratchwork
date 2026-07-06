@@ -1,3 +1,8 @@
+/*
+ * Lowercase hex encoding and validation, used for content hashes and tokens
+ * that travel between the CLI and server.
+ */
+
 /** Encodes bytes as lowercase hex. */
 export function bytesToHex(bytes: Uint8Array): string {
   let output = "";

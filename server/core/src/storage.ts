@@ -1,4 +1,3 @@
-import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Context from "effect/Context";
@@ -7,17 +6,21 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
 import { bytesToHex } from "../../../shared/src/encoding/hex";
+import { isWithinRoot } from "../../../shared/src/util/fs";
 
+/** Raised when a storage backend cannot complete a read or write. */
 export class StorageError extends Data.TaggedError("StorageError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
+/** Raised when an ifMatch/ifNoneMatch write precondition fails. */
 export class StorageConflict extends Data.TaggedError("StorageConflict")<{
   readonly key: string;
   readonly message: string;
 }> {}
 
+/** One object read back from storage. */
 export interface StoredObject {
   readonly key: string;
   readonly body: Uint8Array;
@@ -25,6 +28,7 @@ export interface StoredObject {
   readonly etag?: string;
 }
 
+/** Write options; `ifNoneMatch: "*"` requires the key to be new, `ifMatch` pins the current ETag. */
 export interface PutObjectOptions {
   readonly contentType?: string;
   readonly cacheControl?: string;
@@ -32,10 +36,12 @@ export interface PutObjectOptions {
   readonly ifMatch?: string;
 }
 
+/** Result of a successful write. */
 export interface PutObjectResult {
   readonly etag?: string;
 }
 
+/** The blob-store contract every storage backend (local, S3, R2) must satisfy. */
 export interface ObjectStorageShape {
   readonly getObject: (key: string) => Effect.Effect<StoredObject | null, StorageError>;
   readonly putObject: (
@@ -43,7 +49,6 @@ export interface ObjectStorageShape {
     value: Uint8Array,
     options?: PutObjectOptions,
   ) => Effect.Effect<PutObjectResult, StorageError | StorageConflict>;
-  readonly getText: (key: string) => Effect.Effect<string | null, StorageError>;
   readonly putText: (
     key: string,
     value: string,
@@ -51,6 +56,7 @@ export interface ObjectStorageShape {
   ) => Effect.Effect<PutObjectResult, StorageError | StorageConflict>;
 }
 
+/** Service tag for the object storage backend. */
 export class ObjectStorage extends Context.Tag("@scratchwork/server/ObjectStorage")<
   ObjectStorage,
   ObjectStorageShape
@@ -72,7 +78,7 @@ export function LocalObjectStorageLive(
         Effect.gen(function* () {
           yield* requireSafeObjectKey(key);
           const absolute = paths.resolve(root, key);
-          if (absolute !== root && !absolute.startsWith(root + paths.sep)) {
+          if (!isWithinRoot(absolute, root, paths.sep)) {
             return yield* Effect.fail(
               new StorageError({ message: `Object key escapes storage root: ${key}` }),
             );
@@ -83,94 +89,81 @@ export function LocalObjectStorageLive(
       /** Reads an existing object body for local conditional writes. */
       const readExisting = (path: string): Effect.Effect<Uint8Array | null, StorageError> =>
         fs.readFile(path).pipe(
-          Effect.catchAll((error) =>
-            isNotFound(error)
-              ? Effect.succeed(null)
-              : Effect.fail(new StorageError({ message: `Could not inspect object: ${path}`, cause: error })),
+          Effect.catchTags({
+            SystemError: (error) =>
+              isNotFound(error)
+                ? Effect.succeed(null)
+                : Effect.fail(new StorageError({ message: `Could not inspect object: ${path}`, cause: error })),
+            BadArgument: (error) =>
+              Effect.fail(new StorageError({ message: `Could not inspect object: ${path}`, cause: error })),
+          }),
+        );
+
+      /** Reads one local object and computes its ETag; a missing file reads as null. */
+      const getObject: ObjectStorageShape["getObject"] = (key) =>
+        resolveKey(key).pipe(
+          Effect.flatMap((path) =>
+            fs.readFile(path).pipe(
+              Effect.flatMap((body) =>
+                sha256Hex(body).pipe(
+                  Effect.map((etag) => ({ key, body, etag } satisfies StoredObject)),
+                ),
+              ),
+              Effect.catchTags({
+                SystemError: (error) =>
+                  isNotFound(error)
+                    ? Effect.succeed(null)
+                    : Effect.fail(new StorageError({ message: `Could not read object: ${key}`, cause: error })),
+                BadArgument: (error) =>
+                  Effect.fail(new StorageError({ message: `Could not read object: ${key}`, cause: error })),
+              }),
+            ),
           ),
         );
 
-      /** Reads one local object and computes its ETag. */
-      const getObject: ObjectStorageShape["getObject"] = (key) =>
-          resolveKey(key).pipe(
-            Effect.flatMap((path) =>
-              fs.readFile(path).pipe(
-                Effect.flatMap((body) =>
-                  sha256Hex(body).pipe(
-                    Effect.map((etag) => ({ key, body, etag } satisfies StoredObject)),
-                  ),
-                ),
-              ),
-            ),
-            Effect.catchAll((error) =>
-              error instanceof StorageError
-                ? Effect.fail(error)
-                : isNotFound(error)
-                  ? Effect.succeed(null)
-                  : Effect.fail(
-                      new StorageError({
-                        message: `Could not read object: ${key}`,
-                        cause: error,
-                      }),
-                    ),
-            ),
-          );
-
       /** Writes one local object while honoring create/update preconditions. */
       const putObject: ObjectStorageShape["putObject"] = (key, value, options) =>
-          resolveKey(key).pipe(
-            Effect.flatMap((path) =>
-              Effect.gen(function* () {
-                const existing = yield* readExisting(path);
-                if (options?.ifNoneMatch === "*" && existing != null) {
+        resolveKey(key).pipe(
+          Effect.flatMap((path) =>
+            Effect.gen(function* () {
+              const existing = yield* readExisting(path);
+              if (options?.ifNoneMatch === "*" && existing != null) {
+                return yield* Effect.fail(
+                  new StorageConflict({ key, message: `Object already exists: ${key}` }),
+                );
+              }
+              if (options?.ifMatch != null) {
+                if (existing == null) {
                   return yield* Effect.fail(
-                    new StorageConflict({ key, message: `Object already exists: ${key}` }),
+                    new StorageConflict({ key, message: `Object does not exist: ${key}` }),
                   );
                 }
-                if (options?.ifMatch != null) {
-                  if (existing == null) {
-                    return yield* Effect.fail(
-                      new StorageConflict({ key, message: `Object does not exist: ${key}` }),
-                    );
-                  }
-                  const existingEtag = yield* sha256Hex(existing);
-                  if (existingEtag !== options.ifMatch) {
-                    return yield* Effect.fail(
-                      new StorageConflict({ key, message: `Object ETag mismatch: ${key}` }),
-                    );
-                  }
+                const existingEtag = yield* sha256Hex(existing);
+                if (existingEtag !== options.ifMatch) {
+                  return yield* Effect.fail(
+                    new StorageConflict({ key, message: `Object ETag mismatch: ${key}` }),
+                  );
                 }
+              }
 
-                yield* fs.makeDirectory(paths.dirname(path), { recursive: true });
-                yield* fs.writeFile(path, value);
-                return { etag: yield* sha256Hex(value) };
+              yield* fs.makeDirectory(paths.dirname(path), { recursive: true });
+              yield* fs.writeFile(path, value);
+              return { etag: yield* sha256Hex(value) };
+            }).pipe(
+              Effect.catchTags({
+                SystemError: (error) =>
+                  Effect.fail(new StorageError({ message: `Could not write object: ${key}`, cause: error })),
+                BadArgument: (error) =>
+                  Effect.fail(new StorageError({ message: `Could not write object: ${key}`, cause: error })),
               }),
             ),
-            Effect.mapError((error) =>
-              error instanceof StorageError || error instanceof StorageConflict
-                ? error
-                : new StorageError({
-                    message: `Could not write object: ${key}`,
-                    cause: error,
-                  }),
-            ),
-          );
+          ),
+        );
 
       return ObjectStorage.of({
         getObject,
-
         putObject,
-
-        getText: (key) =>
-          Effect.map(getObject(key), (object) =>
-            object == null ? null : new TextDecoder().decode(object.body),
-          ),
-
-        putText: (key, value, options) =>
-          Effect.flatMap(
-            Effect.sync(() => new TextEncoder().encode(value)),
-            (bytes) => putObject(key, bytes, options),
-          ),
+        putText: (key, value, options) => putObject(key, new TextEncoder().encode(value), options),
       });
     }),
   );
@@ -183,7 +176,7 @@ export function requireSafeObjectKey(key: string): Effect.Effect<void, StorageEr
     : Effect.fail(new StorageError({ message: `Invalid object key: ${key}` }));
 }
 
-/** Checks object-key syntax shared by local, S3, and R2 storage. */
+/** Returns true for object-key syntax shared by local, S3, and R2 storage. */
 export function safeObjectKey(key: string): boolean {
   return (
     key.length > 0 &&
@@ -195,15 +188,15 @@ export function safeObjectKey(key: string): boolean {
   );
 }
 
-/** Detects local filesystem not-found errors from Effect Platform. */
-function isNotFound(error: PlatformError): boolean {
-  return error._tag === "SystemError" && error.reason === "NotFound";
-}
-
-/** Computes a local object ETag from its SHA-256 digest. */
-function sha256Hex(bytes: Uint8Array): Effect.Effect<string, StorageError> {
+/** Computes a SHA-256 digest as lowercase hex, used for ETags and content addressing. */
+export function sha256Hex(bytes: Uint8Array): Effect.Effect<string, StorageError> {
   return Effect.tryPromise({
     try: async () => bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes)))),
-    catch: (cause) => new StorageError({ message: "Could not hash object", cause }),
+    catch: (cause) => new StorageError({ message: "Could not hash bytes", cause }),
   });
+}
+
+/** Detects filesystem not-found system errors from Effect Platform. */
+function isNotFound(error: { readonly reason: string }): boolean {
+  return error.reason === "NotFound";
 }

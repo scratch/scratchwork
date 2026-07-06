@@ -1,3 +1,8 @@
+/*
+ * Filesystem-backed SiteFiles layer for the dev server: serves site paths from
+ * the local directory being developed, refusing anything that would resolve
+ * outside the site root.
+ */
 import * as FileSystem from "@effect/platform/FileSystem";
 import type { PlatformError } from "@effect/platform/Error";
 import * as HttpPlatform from "@effect/platform/HttpPlatform";
@@ -7,7 +12,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
 import type { SitePath } from "../../../shared/src/site/paths";
+import { isWithinRoot } from "../../../shared/src/util/fs";
 
+/** Builds a SiteFiles service that reads from the given site root directory. */
 export function layer(
   root: string,
 ): Layer.Layer<
@@ -23,6 +30,7 @@ export function layer(
       const paths = yield* Path.Path;
       const resolvedRoot = paths.resolve(root);
 
+      /** Resolves a site path to an absolute path, rejecting escapes from the root. */
       const resolvePath = (sitePath: SitePath): Effect.Effect<string, SiteFileError> =>
         Effect.gen(function* () {
           if (
@@ -40,10 +48,7 @@ export function layer(
           }
 
           const absolutePath = paths.resolve(resolvedRoot, sitePath);
-          if (
-            absolutePath !== resolvedRoot &&
-            !absolutePath.startsWith(resolvedRoot + paths.sep)
-          ) {
+          if (!isWithinRoot(absolutePath, resolvedRoot, paths.sep)) {
             return yield* Effect.fail(
               new SiteFileError({
                 path: sitePath,
@@ -55,6 +60,7 @@ export function layer(
           return absolutePath;
         });
 
+      /** Wraps a filesystem failure in a SiteFileError for the given site path. */
       const mapReadError = (sitePath: SitePath, error: PlatformError) =>
         new SiteFileError({
           path: sitePath,
@@ -64,6 +70,10 @@ export function layer(
             : `Could not read file: ${sitePath}`,
           cause: error,
         });
+
+      /** Converts any non-SiteFileError failure into a SiteFileError. */
+      const toSiteFileError = (sitePath: SitePath) => (error: SiteFileError | PlatformError) =>
+        error instanceof SiteFileError ? error : mapReadError(sitePath, error);
 
       return SiteFiles.of({
         exists: (sitePath) =>
@@ -84,21 +94,13 @@ export function layer(
         readText: (sitePath) =>
           resolvePath(sitePath).pipe(
             Effect.flatMap((absolutePath) => fs.readFileString(absolutePath)),
-            Effect.catchAll((error) =>
-              error instanceof SiteFileError
-                ? Effect.fail(error)
-                : Effect.fail(mapReadError(sitePath, error)),
-            ),
+            Effect.mapError(toSiteFileError(sitePath)),
           ),
 
         readBytes: (sitePath) =>
           resolvePath(sitePath).pipe(
             Effect.flatMap((absolutePath) => fs.readFile(absolutePath)),
-            Effect.catchAll((error) =>
-              error instanceof SiteFileError
-                ? Effect.fail(error)
-                : Effect.fail(mapReadError(sitePath, error)),
-            ),
+            Effect.mapError(toSiteFileError(sitePath)),
           ),
 
         fileResponse: (sitePath, options) =>
@@ -108,17 +110,14 @@ export function layer(
                 Effect.provideService(HttpPlatform.HttpPlatform, httpPlatform),
               ),
             ),
-            Effect.catchAll((error) =>
-              error instanceof SiteFileError
-                ? Effect.fail(error)
-                : Effect.fail(mapReadError(sitePath, error)),
-            ),
+            Effect.mapError(toSiteFileError(sitePath)),
           ),
       });
     }),
   );
 }
 
+/** Detects the platform error for a file that does not exist. */
 function isNotFound(error: PlatformError): boolean {
   return error._tag === "SystemError" && error.reason === "NotFound";
 }

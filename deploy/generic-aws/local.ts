@@ -3,4 +3,4 @@ import { server } from "./server-config";
 
 // Runs the generic AWS server settings locally with local file storage and an
 // in-memory database.
-await runLocalServer({ server });
+runLocalServer({ server });

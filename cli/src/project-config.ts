@@ -1,32 +1,49 @@
+/*
+ * The .scratchwork.json project config file.
+ *
+ * A publish writes this file next to the published content so later commands
+ * can omit --server/--project. Lookups walk from a starting directory toward
+ * the filesystem root and report where the file was found, letting callers
+ * decide how much of an ancestor's config to trust.
+ */
 import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
+import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import { isRecord, parseJson } from "../../shared/src/util/json";
-import { normalizeServerUrl, readAuthRecord } from "./auth";
+import { nonEmpty } from "../../shared/src/util/strings";
+import { resolveProjectByPath, type ResolvedProjectRef } from "./api";
+import { normalizeServerUrl } from "./auth";
 import { CliError } from "./errors";
 
 export const PROJECT_CONFIG_FILE = ".scratchwork.json";
 
+/** Decoded contents of a .scratchwork.json file; every field is optional. */
 export interface ProjectConfigFile {
   readonly server?: string;
-  readonly workspace?: string;
   readonly project?: string;
   readonly visibility?: string;
-  readonly routePath?: string;
   readonly url?: string;
   readonly updatedAt?: string;
 }
 
-export interface ResolvedProjectRef {
-  readonly server: string;
-  readonly workspace: string;
-  readonly project: string;
+/** A found config file together with the directory that contains it. */
+export interface ProjectConfigLookup {
+  readonly directory: string;
+  readonly config: ProjectConfigFile;
 }
 
+/**
+ * Finds the nearest .scratchwork.json at or above a directory. Lookup is
+ * best-effort: the first file found ends the search, and an unreadable or
+ * malformed one reads as no config at all — except a config still carrying
+ * workspace-era fields, which fails loudly so stale identity is never
+ * silently reinterpreted.
+ */
 export function readProjectConfig(
   startDirectory: string,
-): Effect.Effect<ProjectConfigFile | null, never, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<ProjectConfigLookup | null, CliError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;
@@ -35,15 +52,31 @@ export function readProjectConfig(
       const path = paths.join(current, PROJECT_CONFIG_FILE);
       if (yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false)))) {
         const text = yield* fs.readFileString(path).pipe(Effect.catchAll(() => Effect.succeed("")));
-        return decodeProjectConfig(parseJson(text));
+        const parsed = parseJson(text);
+        yield* rejectLegacyConfig(parsed, path);
+        const config = decodeProjectConfig(parsed);
+        return config == null ? null : { directory: current, config };
       }
       const parent = paths.dirname(current);
       if (parent === current) return null;
       current = parent;
     }
-  }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+  }).pipe(Effect.catchAll((error) => error instanceof CliError ? Effect.fail(error) : Effect.succeed(null)));
 }
 
+/** Fails with an explicit error when a config still carries workspace-era fields. */
+function rejectLegacyConfig(value: unknown, path: string): Effect.Effect<void, CliError> {
+  if (!isRecord(value)) return Effect.void;
+  const legacy = ["workspace", "routePath"].filter((key) => key in value);
+  if (legacy.length === 0) return Effect.void;
+  return Effect.fail(new CliError({
+    code: 1,
+    message: `scratchwork: ${path} contains legacy field${legacy.length > 1 ? "s" : ""} ${legacy.map((key) => `"${key}"`).join(" and ")} from the workspace era. ` +
+      `Delete the file or remove ${legacy.length > 1 ? "those fields" : "that field"}, then republish (pass --project to keep a specific name).`,
+  }));
+}
+
+/** Writes .scratchwork.json into a directory. */
 export function writeProjectConfig(
   directory: string,
   config: ProjectConfigFile,
@@ -55,32 +88,51 @@ export function writeProjectConfig(
   });
 }
 
+/** Picks the server from an explicit flag or config file and normalizes it, or fails. */
 export function resolveServer(
   explicit: string | undefined,
   config: ProjectConfigFile | null,
   command: string,
 ): Effect.Effect<string, CliError> {
-  return Effect.try({
-    try: () => {
-      const server = nonEmpty(explicit) ?? nonEmpty(config?.server);
-      if (server == null) {
-        throw new CliError({ code: 1, message: `scratchwork ${command}: server is required` });
-      }
-      return normalizeServerUrl(server);
-    },
-    catch: (cause) => cause instanceof CliError
-      ? cause
-      : new CliError({ code: 1, message: `scratchwork ${command}: invalid server` }),
+  return Effect.gen(function* () {
+    const server = nonEmpty(explicit) ?? nonEmpty(config?.server);
+    if (server == null) {
+      return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: server is required` }));
+    }
+    return yield* Effect.try({
+      try: () => normalizeServerUrl(server),
+      catch: () => new CliError({ code: 1, message: `scratchwork ${command}: invalid server` }),
+    });
   });
 }
 
+/** Resolves the server for commands that run relative to the current directory. */
+export function resolveServerFromCwd(
+  explicit: string | undefined,
+  command: string,
+): Effect.Effect<string, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    const paths = yield* Path.Path;
+    const lookup = yield* readProjectConfig(paths.resolve(process.cwd(), "."));
+    return yield* resolveServer(explicit, lookup?.config ?? null, command);
+  });
+}
+
+/**
+ * Resolves a project reference from flags plus either a published project URL
+ * or a local path with a .scratchwork.json. URL references may ask the server
+ * to map the content path back to its project.
+ */
 export function resolveProjectRef(input: {
   readonly command: string;
   readonly pathOrUrl?: string;
   readonly server?: string;
-  readonly workspace?: string;
   readonly project?: string;
-}): Effect.Effect<ResolvedProjectRef, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+}): Effect.Effect<
+  ResolvedProjectRef,
+  PlatformError | CliError,
+  FileSystem.FileSystem | HttpClient.HttpClient | Path.Path
+> {
   return Effect.gen(function* () {
     const projectUrl = parseProjectUrl(input.pathOrUrl);
     if (projectUrl != null) {
@@ -88,49 +140,30 @@ export function resolveProjectRef(input: {
         try: () => normalizeServerUrl(nonEmpty(input.server) ?? projectUrl.server),
         catch: () => new CliError({ code: 1, message: `scratchwork ${input.command}: invalid server` }),
       });
-      const workspace = nonEmpty(input.workspace);
       const project = nonEmpty(input.project);
-      if (workspace != null && project != null) return { server, workspace, project };
+      if (project != null) return { server, project };
       const resolved = yield* resolveProjectByPath(server, projectUrl.pathname, input.command);
-      return {
-        server,
-        workspace: workspace ?? resolved.workspace,
-        project: project ?? resolved.project,
-      };
+      return { server, project: resolved.project };
     }
 
     const paths = yield* Path.Path;
     const start = paths.resolve(process.cwd(), input.pathOrUrl ?? ".");
     const statPath = yield* directoryForConfig(start);
-    const projectConfig = yield* readProjectConfig(statPath);
-    const server = yield* resolveServer(input.server, projectConfig, input.command);
-    const workspace = nonEmpty(input.workspace) ?? nonEmpty(projectConfig?.workspace);
-    const project = nonEmpty(input.project) ?? nonEmpty(projectConfig?.project);
-    if (workspace == null || project == null) {
+    const lookup = yield* readProjectConfig(statPath);
+    const config = lookup?.config ?? null;
+    const server = yield* resolveServer(input.server, config, input.command);
+    const project = nonEmpty(input.project) ?? nonEmpty(config?.project);
+    if (project == null) {
       return yield* Effect.fail(new CliError({
         code: 1,
-        message: `scratchwork ${input.command}: workspace and project are required`,
+        message: `scratchwork ${input.command}: project is required`,
       }));
     }
-    return { server, workspace, project };
+    return { server, project };
   });
 }
 
-export function projectApiUrl(ref: ResolvedProjectRef, suffix = ""): string {
-  const url = new URL(`/api/projects/${encodeURIComponent(ref.workspace)}/${encodeURIComponent(ref.project)}${suffix}`, ref.server);
-  return url.toString();
-}
-
-export function authHeaders(token: string | undefined): Record<string, string> {
-  return token == null ? {} : { authorization: `Bearer ${token}` };
-}
-
-export function authTokenForServer(
-  server: string,
-): Effect.Effect<string | undefined, PlatformError, FileSystem.FileSystem | Path.Path> {
-  return readAuthRecord(server).pipe(Effect.map((record) => record?.token));
-}
-
+/** Maps a path argument to the directory whose config should be consulted. */
 function directoryForConfig(path: string): Effect.Effect<string, PlatformError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -142,6 +175,7 @@ function directoryForConfig(path: string): Effect.Effect<string, PlatformError, 
   });
 }
 
+/** Splits a project URL into its server origin and content path, or null for non-URLs. */
 function parseProjectUrl(value: string | undefined): { readonly server: string; readonly pathname: string } | null {
   if (value == null || !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) return null;
   try {
@@ -152,54 +186,15 @@ function parseProjectUrl(value: string | undefined): { readonly server: string; 
   }
 }
 
-/** Asks the server which project a published content path belongs to. Route paths depend
- * on server config (random slugs, username/project, ...), so only the server can map a
- * URL back to its workspace/project. */
-function resolveProjectByPath(
-  server: string,
-  pathname: string,
-  command: string,
-): Effect.Effect<{ readonly workspace: string; readonly project: string }, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
-  return Effect.gen(function* () {
-    const token = yield* authTokenForServer(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    const resolveUrl = new URL("/api/resolve", server);
-    resolveUrl.searchParams.set("path", pathname === "" ? "/" : pathname);
-    const body = yield* Effect.tryPromise({
-      try: async () => {
-        const response = await fetch(resolveUrl.toString(), { headers: authHeaders(token) });
-        const text = await response.text();
-        const json = parseJson(text);
-        if (!response.ok) {
-          const message = isRecord(json) && typeof json.error === "string" ? json.error : `server returned ${response.status}`;
-          throw new CliError({ code: 1, message: `scratchwork ${command}: ${message}` });
-        }
-        return json;
-      },
-      catch: (cause) => cause instanceof CliError
-        ? cause
-        : new CliError({ code: 1, message: `scratchwork ${command}: could not resolve project URL` }),
-    });
-    const project = isRecord(body) && isRecord(body.project) ? body.project : null;
-    if (project == null || typeof project.workspace !== "string" || typeof project.project !== "string") {
-      return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: invalid server response` }));
-    }
-    return { workspace: project.workspace, project: project.project };
-  });
-}
-
+/** Validates and narrows parsed JSON into a ProjectConfigFile, dropping unknown fields.
+ * Workspace-era fields never reach here — rejectLegacyConfig fails on them first. */
 function decodeProjectConfig(value: unknown): ProjectConfigFile | null {
   if (!isRecord(value)) return null;
   const config: Record<string, string> = {};
   if (typeof value.server === "string") config.server = value.server;
-  if (typeof value.workspace === "string") config.workspace = value.workspace;
   if (typeof value.project === "string") config.project = value.project;
   if (typeof value.visibility === "string") config.visibility = value.visibility;
-  if (typeof value.routePath === "string") config.routePath = value.routePath;
   if (typeof value.url === "string") config.url = value.url;
   if (typeof value.updatedAt === "string") config.updatedAt = value.updatedAt;
   return config;
-}
-
-function nonEmpty(value: string | undefined): string | undefined {
-  return value == null || value === "" ? undefined : value;
 }

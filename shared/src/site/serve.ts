@@ -1,7 +1,15 @@
+/*
+ * The shared site-serving pipeline: parse the URL, resolve it against
+ * SiteFiles (routing.ts), and turn the result into an HTTP response —
+ * applying HTML transforms, renderer resolution, content types, and
+ * cache-control policy. Consumers configure the variable parts through
+ * SiteServeConfig; everything else is identical across the CLI dev server
+ * and the deploy targets.
+ */
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
-import { contentType, defaultCacheControl } from "./content";
+import { contentType, defaultCacheControl, isMarkdownPath } from "./content";
 import { SiteFileError, SiteFiles } from "./files";
 import { applyHtmlTransforms, type HtmlTransform } from "./html";
 import {
@@ -9,12 +17,14 @@ import {
   type MarkdownRenderer,
 } from "./renderer";
 import {
+  FAVICON_SVG_PATH,
   parseRouteRequest,
   resolveRoute,
   SiteRouteError,
   type ResolvedRoute,
 } from "./routing";
 
+/** Which renderer shell answered a Markdown route, for logging/diagnostics. */
 export type RendererSource =
   | {
       readonly _tag: "Project";
@@ -27,6 +37,7 @@ export type RendererSource =
       readonly _tag: "None";
     };
 
+/** Notification that a request was served, emitted through onServeEvent. */
 export type SiteServeEvent =
   | {
       readonly _tag: "StaticHtmlServed";
@@ -43,6 +54,7 @@ export type SiteServeEvent =
       readonly rendererHtml?: string;
     };
 
+/** The consumer-supplied parts of the pipeline: transforms, fallback renderer, caching, events. */
 export interface SiteServeConfig<E = never, R = never> {
   readonly htmlTransforms?: ReadonlyArray<HtmlTransform<E, R>>;
   readonly rendererFallback: Effect.Effect<string | null, E, R>;
@@ -55,6 +67,7 @@ export interface SiteServeConfig<E = never, R = never> {
   ) => Effect.Effect<void, E, SiteFiles | R>;
 }
 
+/** Serves an incoming HTTP request by extracting its pathname and query string. */
 export function serveRequest<E, R>(
   request: HttpServerRequest.HttpServerRequest,
   config: SiteServeConfig<E, R>,
@@ -67,6 +80,10 @@ export function serveRequest<E, R>(
   return servePath(url.pathname, url.search, config);
 }
 
+/**
+ * Serves a pathname: routes it, builds the response, and maps routing-layer
+ * failures (forbidden reads, malformed paths) to 403/400 responses.
+ */
 export function servePath<E, R>(
   pathname: string,
   search: string,
@@ -98,6 +115,7 @@ export function servePath<E, R>(
   );
 }
 
+/** Turns a resolved route into its HTTP response, emitting serve events along the way. */
 function respond<E, R>(
   route: ResolvedRoute,
   pathname: string,
@@ -120,7 +138,7 @@ function respond<E, R>(
 
       case "StaticAsset": {
         const files = yield* SiteFiles;
-        if (contentType(route.path) === contentType(".md")) {
+        if (isMarkdownPath(route.path)) {
           yield* emit(config, { _tag: "RawMarkdownServed", path: route.path });
         }
         return yield* files.fileResponse(route.path, {
@@ -157,7 +175,7 @@ function respond<E, R>(
       case "DefaultFavicon":
         return HttpServerResponse.text(config.defaultFaviconSvg ?? "", {
           contentType: "image/svg+xml",
-          headers: responseHeaders("favicon.svg", "image/svg+xml", config),
+          headers: responseHeaders(FAVICON_SVG_PATH, "image/svg+xml", config),
         });
 
       case "Forbidden":
@@ -172,6 +190,7 @@ function respond<E, R>(
   });
 }
 
+/** Sends a serve event to the configured listener, if any. */
 function emit<E, R>(
   config: SiteServeConfig<E, R>,
   event: SiteServeEvent,
@@ -179,6 +198,7 @@ function emit<E, R>(
   return config.onServeEvent ? config.onServeEvent(event) : Effect.void;
 }
 
+/** Summarizes a resolved renderer as an event-friendly RendererSource. */
 function rendererSource(renderer: MarkdownRenderer | null): RendererSource {
   if (renderer == null) return { _tag: "None" };
   if (renderer._tag === "Project") {
@@ -187,6 +207,7 @@ function rendererSource(renderer: MarkdownRenderer | null): RendererSource {
   return { _tag: "Fallback" };
 }
 
+/** Reads an HTML file from SiteFiles and serves it through the transform pipeline. */
 function htmlFileResponse<E, R>(
   path: string,
   kind: "static" | "renderer",
@@ -203,6 +224,7 @@ function htmlFileResponse<E, R>(
   });
 }
 
+/** Applies the configured HTML transforms and builds the final HTML response. */
 function htmlTextResponse<E, R>(
   html: string,
   path: string,
@@ -218,6 +240,7 @@ function htmlTextResponse<E, R>(
   });
 }
 
+/** Merges consumer headers with the cache-control policy for a path. */
 function responseHeaders<E, R>(
   path: string,
   responseContentType: string,
@@ -229,6 +252,7 @@ function responseHeaders<E, R>(
   };
 }
 
+/** Picks the Cache-Control value: consumer override or the shared default policy. */
 function cacheControlFor<E, R>(
   path: string,
   config: SiteServeConfig<E, R>,
@@ -236,12 +260,14 @@ function cacheControlFor<E, R>(
   return config.cacheControl ? config.cacheControl(path) : defaultCacheControl(path);
 }
 
+/** Prepends the configured path prefix (e.g. "/myproject") to a redirect target. */
 function prefixedLocation(location: string, pathPrefix: string | undefined): string {
   if (pathPrefix == null || pathPrefix === "" || pathPrefix === "/") return location;
   const prefix = `/${pathPrefix.replace(/^\/+|\/+$/g, "")}`;
   return `${prefix}${location.startsWith("/") ? location : `/${location}`}`;
 }
 
+/** The uniform 403 response for unsafe or forbidden paths. */
 function forbiddenResponse(): HttpServerResponse.HttpServerResponse {
   return HttpServerResponse.text("Forbidden", {
     status: 403,

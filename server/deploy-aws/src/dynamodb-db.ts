@@ -31,12 +31,14 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-export interface AwsPrimitiveDbConfig {
+/** DynamoDB client and table settings read from the deploy environment. */
+export interface DynamoDbPrimitiveDbConfig {
   readonly tableName: string;
   readonly region: string;
   readonly endpoint?: string;
 }
 
+/** DynamoDB attribute names of the primitive-DB item shape. */
 const NAMESPACE = "namespace";
 const KEY = "key";
 const VALUE = "value";
@@ -44,9 +46,9 @@ const VERSION = "version";
 const UPDATED_AT = "updatedAt";
 
 /** Reads DynamoDB table and client settings from deployment environment values. */
-export function readAwsPrimitiveDbConfig(
+export function readDynamoDbPrimitiveDbConfig(
   env: Readonly<Record<string, string | undefined>>,
-): Effect.Effect<AwsPrimitiveDbConfig, PrimitiveDbError> {
+): Effect.Effect<DynamoDbPrimitiveDbConfig, PrimitiveDbError> {
   const tableName = env.SCRATCHWORK_DYNAMODB_TABLE;
   if (!tableName) {
     return Effect.fail(new PrimitiveDbError({ message: "SCRATCHWORK_DYNAMODB_TABLE is required for AWS primitive DB" }));
@@ -62,13 +64,13 @@ export function readAwsPrimitiveDbConfig(
 }
 
 /** Adapts DynamoDB to the primitive DB contract using namespace + key as the primary key. */
-export function AwsPrimitiveDbLive(
+export function DynamoDbPrimitiveDbLive(
   env: Readonly<Record<string, string | undefined>>,
 ): Layer.Layer<PrimitiveDb, PrimitiveDbError> {
   return Layer.effect(
     PrimitiveDb,
     Effect.gen(function* () {
-      const config = yield* readAwsPrimitiveDbConfig(env);
+      const config = yield* readDynamoDbPrimitiveDbConfig(env);
       const client = new DynamoDBClient({ region: config.region, endpoint: config.endpoint });
       return PrimitiveDb.of(makeDynamoDbPrimitiveDb(client, config.tableName));
     }),
@@ -191,14 +193,17 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
   return { get, put, delete: deleteRecord, list };
 }
 
+/** Builds the DynamoDB primary-key attributes for one record. */
 function keyAttributes(namespace: string, key: string): Record<string, AttributeValue> {
   return { [NAMESPACE]: { S: namespace }, [KEY]: { S: key } };
 }
 
+/** Builds the full DynamoDB item for one record. */
 function itemAttributes(namespace: string, key: string, value: string, version: number, updatedAt: string): Record<string, AttributeValue> {
   return { ...keyAttributes(namespace, key), [VALUE]: { S: value }, [VERSION]: { N: String(version) }, [UPDATED_AT]: { S: updatedAt } };
 }
 
+/** Converts a DynamoDB item back into the public record shape. */
 function itemToRecord<A extends JsonValue>(item: Record<string, AttributeValue>): Effect.Effect<PrimitiveDbRecord<A>, PrimitiveDbError> {
   const namespace = item[NAMESPACE]?.S;
   const key = item[KEY]?.S;
@@ -213,17 +218,20 @@ function itemToRecord<A extends JsonValue>(item: Record<string, AttributeValue>)
   );
 }
 
+/** Maps write failures onto conflict vs generic DB errors. */
 function toDynamoDbWriteError(cause: unknown, namespace: string, key: string): PrimitiveDbError | PrimitiveDbConflict {
   return isConditionalCheckFailed(cause)
     ? new PrimitiveDbConflict({ namespace, key, message: `Record write precondition failed: ${namespace}/${key}` })
     : new PrimitiveDbError({ message: `Could not write DynamoDB record: ${namespace}/${key}`, cause });
 }
 
+/** Detects DynamoDB conditional-check failures across SDK exception shapes. */
 function isConditionalCheckFailed(cause: unknown): boolean {
   if (cause instanceof ConditionalCheckFailedException) return true;
   return (cause as { readonly name?: string }).name === "ConditionalCheckFailedException";
 }
 
+/** Returns true for a valid DynamoDB table name. */
 function safeDynamoDbTableName(name: string): boolean {
   return /^[A-Za-z0-9_.-]{3,255}$/.test(name);
 }

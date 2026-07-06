@@ -63,6 +63,15 @@ SCRATCHWORK_AUTH_ALLOWED_DOMAINS=example.com,yc.com
 SCRATCHWORK_AUTH_SESSION_SECONDS=2592000
 ```
 
+Project naming:
+
+```sh
+# true (default): publishers choose globally-unique project names (first-writer-wins).
+# false: the server assigns a random slug on first publish; the CLI saves the returned
+# name in .scratchwork.json and uses it for updates.
+SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES=true
+```
+
 CLI users authenticate once per server:
 
 ```sh
@@ -92,7 +101,8 @@ AWS_REGION=us-east-1
 SCRATCHWORK_AWS_FUNCTION_NAME=scratchwork-server
 SCRATCHWORK_AWS_ROLE_NAME=scratchwork-server-lambda-role
 SCRATCHWORK_S3_BUCKET=my-existing-bucket
-SCRATCHWORK_PUBLIC_URL=https://your-host.example
+SCRATCHWORK_APP_URL=https://your-host.example
+SCRATCHWORK_CONTENT_URL=https://your-host.example
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
@@ -113,7 +123,8 @@ Optional environment variables:
 ```sh
 SCRATCHWORK_CLOUDFLARE_WORKER_NAME=scratchwork-server
 SCRATCHWORK_R2_BUCKET=scratchwork-sites
-SCRATCHWORK_PUBLIC_URL=https://your-worker.example
+SCRATCHWORK_APP_URL=https://your-worker.example
+SCRATCHWORK_CONTENT_URL=https://your-worker.example
 SCRATCHWORK_CLOUDFLARE_SKIP_BUCKET_CREATE=1
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
@@ -122,4 +133,4 @@ SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
 
 Cloudflare deploy writes non-secret auth values into the generated Wrangler config and uploads `SCRATCHWORK_GOOGLE_CLIENT_SECRET` plus `SCRATCHWORK_SESSION_SECRET` with `wrangler secret put`. AWS deploy sends `SCRATCHWORK_*` values to Lambda environment variables.
 
-Set `SCRATCHWORK_PUBLIC_URL=https://your-host.example` behind a custom domain or proxy so publish responses return the public URL.
+Set `SCRATCHWORK_APP_URL` and `SCRATCHWORK_CONTENT_URL` (or the `appDomain`/`contentDomain` config values) behind a custom domain or proxy so publish responses return the public URL. Use the same value for both on a single-host server.

@@ -15,7 +15,9 @@ window.SCRATCHWORK.components = window.SCRATCHWORK.components || {};
 
 /* ---------- Page chrome ----------
  * Wraps the rendered markdown, which lives inside `.scratchwork-prose` (styled by
- * the theme above). Edit freely — add a header or footer, rebrand, etc. */
+ * the theme above). Edit freely — add a header or footer, rebrand, etc.
+ * Props: `children` (the rendered markdown) and `author` (the frontmatter
+ * author, if any — handy for a footer credit). */
 window.SCRATCHWORK.layout = ({ children }) => html`
   <div className="scratchwork-page">
     <main className="scratchwork-prose">${children}</main>

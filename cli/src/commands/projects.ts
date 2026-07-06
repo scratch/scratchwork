@@ -1,106 +1,181 @@
+/*
+ * Commands that operate on published projects: `me`, `projects`, `info`,
+ * `share`, `revoke`, `unpublish`, `delete`, `clone`, and `stream`. All server traffic goes
+ * through the shared api module; project references come from flags, a
+ * published URL, or a local .scratchwork.json (see project-config.ts).
+ */
 import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
+import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import { watch } from "node:fs";
+import * as Stream from "effect/Stream";
 import { base64ToBytes } from "../../../shared/src/encoding/base64";
-import { isSafeSitePath } from "../../../shared/src/site/paths";
-import { isRecord, parseJson } from "../../../shared/src/util/json";
-import { PROJECT_CONFIG_FILE, authHeaders, authTokenForServer, projectApiUrl, readProjectConfig, resolveProjectRef, resolveServer } from "../project-config";
+import { decodePublishBundle } from "../../../shared/src/publish/bundle";
+import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
+import { isRecord } from "../../../shared/src/util/json";
+import { apiErrorText, apiJson, apiRequest, projectApiUrl } from "../api";
+import { readAuthToken, serverApiUrl } from "../auth";
 import { CliError, errorMessage } from "../errors";
-import type { CloneConfig, ProjectRefConfig, ServerConfig } from "../types";
-import { runPublish } from "./publish";
+import { PROJECT_CONFIG_FILE, resolveProjectRef, resolveServerFromCwd, writeProjectConfig } from "../project-config";
+import type { CloneConfig, PathConfig, ProjectRefConfig, ServerConfig, ShareConfig } from "../types";
+import { runPublish, SKIPPED_DIRECTORIES, type PublishServices } from "./publish";
 
+/** Project metadata as returned by /api/projects. */
 interface ApiProject {
-  readonly workspace: string;
   readonly project: string;
-  readonly routePath: string;
   readonly visibility: string;
   readonly url?: string;
   readonly updatedAt: string;
 }
 
-interface BundleResponse {
-  readonly bundle: {
-    readonly files: ReadonlyArray<{
-      readonly path: string;
-      readonly contentBase64: string;
-    }>;
-  };
-}
+/** Services shared by the project management commands. */
+type ProjectServices = FileSystem.FileSystem | HttpClient.HttpClient | Path.Path;
 
+/** Runs `scratchwork me`: prints the server's view of the authenticated user. */
 export function runMe(
   config: ServerConfig,
-): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
   return Effect.gen(function* () {
-    const server = yield* serverFromCurrentDirectory(config.server, "me");
-    const token = yield* authTokenForServer(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    const body = yield* requestJson(new URL("/api/me", server).toString(), { token });
+    const server = yield* resolveServerFromCwd(config.server, "me");
+    const token = yield* readAuthToken(server);
+    const body = yield* apiJson("scratchwork me", serverApiUrl(server, "/api/me"), { token });
     yield* Console.log(JSON.stringify(body, null, 2));
   });
 }
 
+/** Runs `scratchwork projects`: lists the authenticated user's projects. */
 export function runProjects(
   config: ServerConfig,
-): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
   return Effect.gen(function* () {
-    const server = yield* serverFromCurrentDirectory(config.server, "projects");
-    const token = yield* authTokenForServer(server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    const body = yield* requestJson(new URL("/api/projects", server).toString(), { token });
+    const server = yield* resolveServerFromCwd(config.server, "projects");
+    const token = yield* readAuthToken(server);
+    const body = yield* apiJson("scratchwork projects", serverApiUrl(server, "/api/projects"), { token });
     const projects = isRecord(body) && Array.isArray(body.projects) ? body.projects as ReadonlyArray<ApiProject> : [];
     if (projects.length === 0) {
       yield* Console.log("No projects.");
       return;
     }
     yield* Console.log(projects.map((project) =>
-      `${project.workspace}/${project.project}\t${project.visibility}\t${project.url ?? project.routePath}`,
+      `${project.project}\t${project.visibility}\t${project.url ?? `/${project.project}/`}`,
     ).join("\n"));
   });
 }
 
+/** Runs `scratchwork info`: prints one project's metadata as JSON. */
 export function runInfo(
   config: ProjectRefConfig,
-): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
   return Effect.gen(function* () {
     const ref = yield* resolveProjectRef({ ...config, command: "info" });
-    const token = yield* authTokenForServer(ref.server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    const body = yield* requestJson(projectApiUrl(ref), { token });
+    const token = yield* readAuthToken(ref.server);
+    const body = yield* apiJson("scratchwork info", projectApiUrl(ref), { token });
     yield* Console.log(JSON.stringify(body, null, 2));
   });
 }
 
+/** Runs `scratchwork unpublish`: sets a project's visibility to private. */
 export function runUnpublish(
   config: ProjectRefConfig,
-): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
   return Effect.gen(function* () {
     const ref = yield* resolveProjectRef({ ...config, command: "unpublish" });
-    const token = yield* authTokenForServer(ref.server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    const body = yield* requestJson(projectApiUrl(ref, "/unpublish"), { method: "POST", token });
+    const token = yield* readAuthToken(ref.server);
+    const body = yield* apiJson("scratchwork unpublish", projectApiUrl(ref, "/unpublish"), { method: "POST", token });
     yield* Console.log(JSON.stringify(body, null, 2));
   });
 }
 
-export function runDelete(
-  config: ProjectRefConfig,
-): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+/** Runs `scratchwork share`: assigns accounts or whole domains a role on a project
+ * (read, write, or admin; sharing again with a different role moves the target). */
+export function runShare(
+  config: ShareConfig,
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
+  return runShareChange("share", { add: true, role: config.role ?? "read" }, config);
+}
+
+/** Runs `scratchwork revoke`: strips every role the targets hold on a project. */
+export function runRevoke(
+  config: ShareConfig,
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
+  return runShareChange("revoke", { add: false }, config);
+}
+
+/** Shared body of share/revoke: sort positionals into targets vs the project
+ * reference, then POST the grant delta. Targets always contain an "@" (emails and
+ * @domain groups); a published URL or local path never does, so the two can mix
+ * freely on the command line. */
+function runShareChange(
+  command: "share" | "revoke",
+  change: { readonly add: boolean; readonly role?: "read" | "write" | "admin" },
+  config: ShareConfig,
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
   return Effect.gen(function* () {
-    const ref = yield* resolveProjectRef({ ...config, command: "delete" });
-    const token = yield* authTokenForServer(ref.server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    yield* requestJson(projectApiUrl(ref), { method: "DELETE", token });
-    yield* Console.log(`Deleted ${ref.workspace}/${ref.project}`);
+    const targets = config.targets.filter((value) => value.includes("@"));
+    const refs = config.targets.filter((value) => !value.includes("@"));
+    if (targets.length === 0) {
+      return yield* Effect.fail(new CliError({
+        code: 1,
+        message: `scratchwork ${command}: pass at least one email address or @domain group (for example alice@example.com or @example.com)`,
+      }));
+    }
+    if (refs.length > 1) {
+      return yield* Effect.fail(new CliError({
+        code: 1,
+        message: `scratchwork ${command}: expected at most one project path or URL, got: ${refs.join(", ")}`,
+      }));
+    }
+    const ref = yield* resolveProjectRef({ command, pathOrUrl: refs[0], server: config.server, project: config.project });
+    const token = yield* readAuthToken(ref.server);
+    const response = yield* apiRequest(`scratchwork ${command}`, projectApiUrl(ref, "/share"), {
+      method: "POST",
+      token,
+      body: change.add ? { add: targets, role: change.role } : { remove: targets },
+    });
+    // A missing project reads "Project not found"; a bare route-level "Not found" means
+    // the server predates the /share API and would otherwise be indistinguishable noise.
+    if (response.status === 404 && apiErrorText(response) === "Not found") {
+      return yield* Effect.fail(new CliError({
+        code: 1,
+        message: `scratchwork ${command}: ${ref.server} does not support sharing yet (no /share API). Update the server to a newer Scratchwork release and try again.`,
+      }));
+    }
+    if (!response.ok) {
+      return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: ${apiErrorText(response)}` }));
+    }
+    yield* Console.log(JSON.stringify(response.json, null, 2));
   });
 }
 
+/** Runs `scratchwork delete`: removes a project from the server, releasing its name. */
+export function runDelete(
+  config: ProjectRefConfig,
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
+  return Effect.gen(function* () {
+    const ref = yield* resolveProjectRef({ ...config, command: "delete" });
+    const token = yield* readAuthToken(ref.server);
+    yield* apiJson("scratchwork delete", projectApiUrl(ref), { method: "DELETE", token });
+    yield* Console.log(`Deleted ${ref.project}`);
+  });
+}
+
+/** Runs `scratchwork clone`: downloads a project's bundle into ./<project>. */
 export function runClone(
   config: CloneConfig,
-): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
   return Effect.gen(function* () {
     const ref = yield* resolveProjectRef({ command: "clone", pathOrUrl: config.pathOrUrl });
-    const token = yield* authTokenForServer(ref.server).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
-    const body = yield* requestJson(projectApiUrl(ref, "/bundle"), { token });
-    const decoded = decodeBundleResponse(body);
-    if (decoded == null) {
+    // The project name may come from the server or a local config file; refuse
+    // anything that could escape the destination directory.
+    if (!isSafeProjectIdentifier(ref.project)) {
+      return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork clone: unsafe project name ${ref.project}` }));
+    }
+    const token = yield* readAuthToken(ref.server);
+    const body = yield* apiJson("scratchwork clone", projectApiUrl(ref, "/bundle"), { token });
+    const bundle = isRecord(body) ? decodePublishBundle(body.bundle) : null;
+    if (bundle == null) {
       return yield* Effect.fail(new CliError({ code: 1, message: "scratchwork clone: invalid server response" }));
     }
 
@@ -108,7 +183,7 @@ export function runClone(
     const paths = yield* Path.Path;
     const destination = paths.resolve(process.cwd(), ref.project);
     yield* fs.makeDirectory(destination, { recursive: true });
-    for (const file of decoded.bundle.files) {
+    for (const file of bundle.files) {
       const bytes = base64ToBytes(file.contentBase64);
       if (bytes == null) {
         return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork clone: invalid file content ${file.path}` }));
@@ -117,86 +192,46 @@ export function runClone(
       yield* fs.makeDirectory(paths.dirname(outputPath), { recursive: true });
       yield* fs.writeFile(outputPath, bytes);
     }
-    yield* Console.log(`Cloned ${ref.workspace}/${ref.project} to ${destination}`);
+    // Publish bundles exclude the root config, so without this a clone carries no
+    // identity and a republish would ride on the (renamable) directory name — on a
+    // random-naming server, a renamed clone would silently fork a new project.
+    yield* writeProjectConfig(destination, { server: ref.server, project: ref.project });
+    yield* Console.log(`Cloned ${ref.project} to ${destination}`);
   });
 }
 
+/**
+ * Runs `scratchwork stream`: publishes once (opening the browser), then
+ * watches the directory and republishes after each debounced burst of file
+ * changes. Republishes run sequentially and a failed publish logs an error
+ * without stopping the stream.
+ */
 export function runStream(
-  config: { readonly path?: string },
-): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
+  config: PathConfig,
+): Effect.Effect<void, PlatformError | CliError, PublishServices> {
   return Effect.gen(function* () {
-    yield* resolveProjectRef({ command: "stream", pathOrUrl: config.path ?? "." });
+    yield* resolveProjectRef({ command: "stream", pathOrUrl: config.path });
     yield* runPublish({ path: config.path });
+    const fs = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;
-    const directory = paths.resolve(process.cwd(), config.path ?? ".");
+    const directory = paths.resolve(process.cwd(), config.path);
     yield* Console.log("Streaming changes. Press Ctrl-C to stop.");
-    return yield* Effect.async<void, never>((resume) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const watcher = watch(directory, { recursive: true }, (_event, filename) => {
-        if (filename === PROJECT_CONFIG_FILE || filename?.includes("node_modules")) return;
-        if (timer != null) clearTimeout(timer);
-        timer = setTimeout(() => {
-          const args = [process.argv[1] ?? "scratchwork", "publish", config.path ?? "."];
-          Bun.spawn(args, {
-            env: { ...process.env, SCRATCHWORK_NO_OPEN: "1" },
-            stdout: "inherit",
-            stderr: "inherit",
-          });
-        }, 250);
-      });
-      return Effect.sync(() => {
-        if (timer != null) clearTimeout(timer);
-        watcher.close();
-        resume(Effect.void);
-      });
-    });
+    yield* fs.watch(directory, { recursive: true }).pipe(
+      Stream.filter((event) => shouldRepublish(paths, event.path)),
+      Stream.debounce("250 millis"),
+      Stream.runForEach(() =>
+        runPublish({ path: config.path }, { openBrowser: false }).pipe(
+          Effect.catchAll((error) => Console.error(`scratchwork stream: ${errorMessage(error)}`)),
+        ),
+      ),
+    );
   });
 }
 
-function serverFromCurrentDirectory(
-  explicit: string | undefined,
-  command: string,
-): Effect.Effect<string, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
-  return Effect.gen(function* () {
-    const paths = yield* Path.Path;
-    const config = yield* readProjectConfig(paths.resolve(process.cwd(), "."));
-    return yield* resolveServer(explicit, config, command);
-  });
-}
-
-function requestJson(
-  url: string,
-  options: {
-    readonly method?: string;
-    readonly token?: string;
-  } = {},
-): Effect.Effect<unknown, CliError> {
-  return Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(url, {
-        method: options.method ?? "GET",
-        headers: authHeaders(options.token),
-      });
-      const text = await response.text();
-      const body = parseJson(text);
-      if (!response.ok) {
-        const message = isRecord(body) && typeof body.error === "string" ? body.error : text;
-        throw new CliError({ code: 1, message: `scratchwork: ${message || `server returned ${response.status}`}` });
-      }
-      return body;
-    },
-    catch: (cause) => cause instanceof CliError
-      ? cause
-      : new CliError({ code: 1, message: `scratchwork: ${errorMessage(cause)}` }),
-  });
-}
-
-function decodeBundleResponse(value: unknown): BundleResponse | null {
-  if (!isRecord(value) || !isRecord(value.bundle) || !Array.isArray(value.bundle.files)) return null;
-  for (const file of value.bundle.files) {
-    if (!isRecord(file) || typeof file.path !== "string" || typeof file.contentBase64 !== "string") return null;
-    if (!isSafeSitePath(file.path)) return null;
-  }
-  return value as unknown as BundleResponse;
+/** Filters out watch events publish would not upload anyway (config writes, deps, VCS). */
+function shouldRepublish(paths: Path.Path, pathname: string): boolean {
+  if (!pathname) return false;
+  if (pathname.split(/[\\/]/).some((segment) => SKIPPED_DIRECTORIES.has(segment))) return false;
+  return paths.basename(pathname) !== PROJECT_CONFIG_FILE;
 }
 

@@ -8,7 +8,7 @@
     ".": "./src/index.ts",
     "./dynamodb-db": "./src/dynamodb-db.ts",
     "./handler": "./src/handler.ts",
-    "./storage": "./src/storage.ts"
+    "./s3-storage": "./src/s3-storage.ts"
   },
   "scripts": {
     "build": "bun build src/handler.ts --target=node --format=esm --outfile=dist/handler.mjs",

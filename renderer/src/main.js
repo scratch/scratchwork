@@ -16,17 +16,17 @@ import React from "react";
 import * as ReactDOM from "react-dom/client";
 import htm from "htm";
 import Prism from "./highlight.js";
-import { parseFrontmatter, parseBlocks } from "./parser.js";
+import { parseFrontmatter, parseBlocks, collectLinkDefs } from "./parser.js";
 import { loadComponent, collectComponentNames } from "./components.js";
 import { renderBlocks } from "./render.js";
 
 const e = React.createElement;
 const html = htm.bind(React.createElement);
 
-// Expose for the editable region + runtime components. We keep both a legacy
-// `window.ReactDOM` (with render/createRoot/hydrate) and the modern client
-// entry that components might reach for. `window.html` is the htm tag bound to
-// React.createElement, so editable code can author JSX as html`...`.
+// Expose for the editable region + runtime components. `window.ReactDOM` is
+// the react-dom/client namespace (createRoot/hydrateRoot). `window.html` is
+// the htm tag bound to React.createElement, so editable code can author JSX
+// as html`...`.
 window.React = React;
 window.ReactDOM = ReactDOM;
 window.Prism = Prism;
@@ -60,12 +60,24 @@ function FallbackLayout({ children }) {
 let contentBase = new URL(".", document.baseURI).href;
 
 let root = null;
-let container = null;
 
+// The React root, mounted on #root (created if the page lacks one).
+function ensureRoot() {
+  if (root) return root;
+  let container = document.getElementById("root");
+  if (!container) {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  }
+  root = ReactDOM.createRoot(container);
+  return root;
+}
+
+// Apply frontmatter to the document: title, lang, and the usual
+// description/keywords/author/og:* meta tags (created if absent).
 function applyMeta(meta) {
   if (meta.title) document.title = meta.title;
   if (meta.lang) document.documentElement.lang = meta.lang;
-  if (meta.author) window.__scratchwork_author__ = meta.author;
   const setMeta = (name, content, attr = "name") => {
     if (!content) return;
     let el = document.head.querySelector(`meta[${attr}="${name}"]`);
@@ -79,6 +91,17 @@ function applyMeta(meta) {
   setMeta("og:description", meta.description, "property");
 }
 
+// After React commits, jump to the URL's #fragment heading (if any) or the top.
+function scrollAfterRender() {
+  requestAnimationFrame(() => {
+    const target = location.hash && document.getElementById(location.hash.slice(1));
+    if (target) target.scrollIntoView();
+    else window.scrollTo(0, 0);
+  });
+}
+
+// Fetch the markdown the current URL maps to, parse it, resolve its
+// components, and render it into the page layout.
 async function renderPage() {
   // Fetch the first markdown candidate the current URL maps to. The shell is
   // reached for an extensionless route; the actual file is <route>.md or
@@ -97,8 +120,10 @@ async function renderPage() {
       /* try the next candidate */
     }
   }
+  const Layout = window.SCRATCHWORK.layout || FallbackLayout;
   if (!res) {
     console.error(`[scratchwork] no markdown for ${location.pathname}`);
+    ensureRoot().render(e(Layout, {}, e("p", { key: "nf" }, `No markdown found for ${location.pathname}.`)));
     return;
   }
   // Content + referenced components resolve against the markdown's own directory.
@@ -111,7 +136,7 @@ async function renderPage() {
   // editable region (window.SCRATCHWORK.components) if present, otherwise lazy-load
   // it from ./components/<Name>.js.
   const names = collectComponentNames(body);
-  const inline = window.SCRATCHWORK.components || {};
+  const inline = window.SCRATCHWORK.components;
   const components = {};
   await Promise.all(names.map(async (n) => {
     if (inline[n]) { components[n] = inline[n]; return; }
@@ -119,22 +144,12 @@ async function renderPage() {
     if (C) components[n] = C;
   }));
 
-  const ctx = { components };
   const blocks = parseBlocks(body);
+  const ctx = { components, baseUrl: contentBase, linkDefs: collectLinkDefs(blocks) };
   const content = renderBlocks(blocks, ctx);
 
-  if (!container) {
-    container = document.getElementById("root");
-    if (!container) {
-      container = document.createElement("div");
-      document.body.appendChild(container);
-    }
-    root = ReactDOM.createRoot(container);
-  }
-
-  const Layout = window.SCRATCHWORK.layout || FallbackLayout;
-  root.render(e(Layout, { author: meta.author }, ...content));
-  window.scrollTo(0, 0);
+  ensureRoot().render(e(Layout, { author: meta.author }, ...content));
+  scrollAfterRender();
 }
 
 // From the current URL path, the ordered absolute .md candidates to try. The
@@ -150,19 +165,23 @@ function mdCandidates(pathname) {
   return [p + ".md", p + "/index.md"];
 }
 
+// Intercept plain left-clicks on relative .md links and route them in-page
+// (pushState + re-render) instead of navigating to the raw markdown file.
+// Modified clicks (new tab), external URLs, #fragments, and non-.md links
+// keep the browser's default behavior.
 document.addEventListener("click", (ev) => {
+  if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
   const a = ev.target.closest("a");
-  if (!a) return;
+  if (!a || (a.target && a.target !== "_self")) return;
   const href = a.getAttribute("href");
   if (!href || /^https?:\/\//.test(href) || href.startsWith("#")) return;
-  if (href.endsWith(".md")) {
-    ev.preventDefault();
-    // Resolve the link against the current markdown's directory, then route to
-    // the extensionless path so the shell can re-resolve it on the new URL.
-    const abs = new URL(href, contentBase);
-    history.pushState(null, "", abs.pathname.replace(/\.md$/, "") + abs.search + abs.hash);
-    renderPage();
-  }
+  // Resolve the link against the current markdown's directory; ?query and
+  // #fragment ride along ("guide.md#setup" routes to "/guide#setup").
+  const abs = new URL(href, contentBase);
+  if (!abs.pathname.endsWith(".md")) return;
+  ev.preventDefault();
+  history.pushState(null, "", abs.pathname.replace(/\.md$/, "") + abs.search + abs.hash);
+  renderPage();
 });
 
 window.addEventListener("popstate", () => renderPage());

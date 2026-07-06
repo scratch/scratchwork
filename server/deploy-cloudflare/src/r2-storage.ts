@@ -2,6 +2,7 @@ import { ObjectStorage, StorageConflict, StorageError, requireSafeObjectKey, typ
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+/** The subset of Cloudflare's R2 bucket binding the adapter uses. */
 export interface R2BucketBinding {
   readonly get: (key: string) => Promise<R2ObjectBodyBinding | null>;
   readonly put: (
@@ -14,6 +15,7 @@ export interface R2BucketBinding {
   ) => Promise<R2ObjectBinding | null>;
 }
 
+/** An R2 object with a readable body. */
 interface R2ObjectBodyBinding {
   readonly etag?: string;
   readonly httpEtag?: string;
@@ -22,6 +24,7 @@ interface R2ObjectBodyBinding {
   readonly text: () => Promise<string>;
 }
 
+/** R2 write-result metadata. */
 interface R2ObjectBinding {
   readonly etag?: string;
   readonly httpEtag?: string;
@@ -52,37 +55,40 @@ export function R2ObjectStorageLive(bucket: R2BucketBinding): Layer.Layer<Object
   const putObject: ObjectStorageShape["putObject"] = (key, value, options) =>
     requireSafeObjectKey(key).pipe(
       Effect.zipRight(
-        Effect.tryPromise({
-          try: async () => {
-            if (options?.ifNoneMatch === "*" || options?.ifMatch != null) {
-              const existing = await bucket.get(key);
-              if (options.ifNoneMatch === "*" && existing != null) {
-                throw new StorageConflict({ key, message: `Object already exists: ${key}` });
-              }
-              if (options.ifMatch != null && (existing == null || existing.etag !== options.ifMatch)) {
-                throw new StorageConflict({ key, message: `Object ETag mismatch: ${key}` });
-              }
-            }
-            const result = await bucket.put(key, value, {
-              httpMetadata: {
-                contentType: options?.contentType,
-                cacheControl: options?.cacheControl,
-              },
-              onlyIf: options?.ifMatch != null
-                ? { etagMatches: options.ifMatch }
-                : options?.ifNoneMatch === "*"
-                  ? { etagDoesNotMatch: "*" }
-                  : undefined,
+        Effect.gen(function* () {
+          // R2's onlyIf preconditions are advisory in some runtimes, so check explicitly
+          // first; the onlyIf clause below keeps the write itself conditional too.
+          if (options?.ifNoneMatch === "*" || options?.ifMatch != null) {
+            const existing = yield* Effect.tryPromise({
+              try: () => bucket.get(key),
+              catch: (cause) => new StorageError({ message: `Could not write object: ${key}`, cause }),
             });
-            if (result == null) {
-              throw new StorageConflict({ key, message: `Object write precondition failed: ${key}` });
+            if (options.ifNoneMatch === "*" && existing != null) {
+              return yield* Effect.fail(new StorageConflict({ key, message: `Object already exists: ${key}` }));
             }
-            return { etag: result.etag ?? result.httpEtag };
-          },
-          catch: (cause) =>
-            cause instanceof StorageConflict
-              ? cause
-              : new StorageError({ message: `Could not write object: ${key}`, cause }),
+            if (options.ifMatch != null && (existing == null || existing.etag !== options.ifMatch)) {
+              return yield* Effect.fail(new StorageConflict({ key, message: `Object ETag mismatch: ${key}` }));
+            }
+          }
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              bucket.put(key, value, {
+                httpMetadata: {
+                  contentType: options?.contentType,
+                  cacheControl: options?.cacheControl,
+                },
+                onlyIf: options?.ifMatch != null
+                  ? { etagMatches: options.ifMatch }
+                  : options?.ifNoneMatch === "*"
+                    ? { etagDoesNotMatch: "*" }
+                    : undefined,
+              }),
+            catch: (cause) => new StorageError({ message: `Could not write object: ${key}`, cause }),
+          });
+          if (result == null) {
+            return yield* Effect.fail(new StorageConflict({ key, message: `Object write precondition failed: ${key}` }));
+          }
+          return { etag: result.etag ?? result.httpEtag };
         }),
       ),
     );
@@ -92,7 +98,6 @@ export function R2ObjectStorageLive(bucket: R2BucketBinding): Layer.Layer<Object
     ObjectStorage.of({
       getObject,
       putObject,
-      getText: (key) => getObject(key).pipe(Effect.map((object) => object == null ? null : new TextDecoder().decode(object.body))),
       putText: (key, value, options) => putObject(key, new TextEncoder().encode(value), options),
     }),
   );
