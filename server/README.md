@@ -21,10 +21,10 @@ By default the server listens on `43118` and stores published bundles under `.sc
 
 ## Google OAuth
 
-Every server requires OAuth — auth cannot be disabled. Configure Google OAuth credentials (including for local development):
+Every server requires auth — it cannot be disabled. The default mode is built-in Google OAuth; servers running behind Cloudflare Access can use that instead (see below). Configure Google OAuth credentials (including for local development):
 
 ```sh
-SCRATCHWORK_AUTH=oauth  # optional; "oauth" is the only supported mode
+SCRATCHWORK_AUTH=oauth  # optional; "oauth" is the default mode
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
@@ -87,6 +87,29 @@ CLI users authenticate once per server:
 scratchwork login --server https://your-scratchwork-server.example
 scratchwork publish index.html
 ```
+
+## Cloudflare Access
+
+When the server's domains are served through Cloudflare with a [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) application in front of them, the server can delegate authentication to Access instead of running OAuth itself:
+
+```sh
+SCRATCHWORK_AUTH=cloudflare-access
+SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN=myteam   # or myteam.cloudflareaccess.com
+SCRATCHWORK_CF_ACCESS_AUD=...              # the Access application's Audience (AUD) tag
+SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
+```
+
+Both values come from the Cloudflare Zero Trust dashboard (the AUD tag is on the Access application's overview page). No Google credentials are needed. `SCRATCHWORK_SESSION_SECRET` is still required: it signs the CLI bearer tokens and the private-content handoff tokens.
+
+Cloudflare authenticates every user at the edge and injects a signed JWT into each request (`Cf-Access-Jwt-Assertion`); the server verifies it against the team's public keys and the AUD tag, and uses the asserted email as the user identity. `SCRATCHWORK_ALLOWED_USERS` still applies on top of the Access policy. Browser login is transparent (there is no `/auth/callback` round-trip), and `/auth/logout` redirects to Cloudflare's `/cdn-cgi/access/logout`.
+
+Things to know when setting up the Access application:
+
+- Cover the app domain (and any private content domains) with the Access application. Do **not** put a domain that serves public projects behind Access, or anonymous visitors will be blocked at the edge before the server can serve them.
+- `scratchwork login` works unchanged: the browser passes Access, and the server converts the asserted identity into the CLI's bearer token. The login redirect also relays the browser's verified Access JWT; the CLI stores it and sends it back as a `cf-access-token` header on every API request, which Cloudflare's edge accepts as an Access credential — so CLI requests pass the edge with no extra Access configuration.
+- The relayed JWT expires with the Access application's **session duration** (default 24 hours) — much shorter than the CLI's bearer token. When it expires, CLI commands fail with a prompt to run `scratchwork login` again; configure a longer session duration on the Access application to keep re-logins rare.
+- For CI and headless automation, create an Access [service token](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) and set `SCRATCHWORK_CF_ACCESS_CLIENT_ID` and `SCRATCHWORK_CF_ACCESS_CLIENT_SECRET` in the environment; the CLI attaches them as `CF-Access-Client-Id`/`CF-Access-Client-Secret` headers so requests pass the edge. Service tokens only satisfy the edge — the server still identifies the user by the bearer token, so the machine must have a stored login.
+- Older CLIs that predate the token relay cannot pass the edge on API calls. For those, either add an Access bypass policy for `/api/*` (safe: the server still requires its own bearer token there), or have CLI users authenticate to Access themselves (e.g. with `cloudflared`) — the server accepts a valid `Cf-Access-Jwt-Assertion` (or `cf-access-token`) header on API calls.
 
 ## AWS
 

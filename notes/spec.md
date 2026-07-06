@@ -74,9 +74,20 @@ export const server = {
   homepageDomains: ["example.com", "www.example.com"],
   homepageProject: "home",
 
-  // Authentication method. "oauth" is the only supported option; auth cannot be disabled.
-  // Every server requires OAuth credentials, and every project has an owner.
+  // Authentication method: "oauth" (built-in Google OAuth, the default) or
+  // "cloudflare-access" (the server runs behind a Cloudflare Access application that
+  // authenticates users at the edge). Auth cannot be disabled; every project has an owner.
   auth: "oauth",
+
+  // Cloudflare Access settings, required when auth is "cloudflare-access": the team
+  // domain ("myteam" or "myteam.cloudflareaccess.com") and the Access application's
+  // Audience (AUD) tag, both from the Cloudflare Zero Trust dashboard. The server
+  // verifies the Cf-Access-Jwt-Assertion header Cloudflare injects — signature against
+  // the team's public keys, issuer, audience, expiry — and uses the asserted email as
+  // the user identity. sessionSecret is still required (CLI bearer tokens and the
+  // private-content handoff). Service tokens are not supported.
+  // cfAccessTeamDomain: "myteam",
+  // cfAccessAud: "...",
 
   // Optional login/API restrictions, in the standard group syntax.
   // Defaults to "public" unless a deploy target sets a tighter value.
@@ -356,9 +367,9 @@ scratchwork info [--server text] [--project text] [<path-or-url>]
 
 ### Authenticating
 
-Users authenticate their CLI using OAuth in the browser. The CLI stores the returned bearer session token in `~/.scratchwork/auth.json` and sends it to the API as a bearer token. A separate long-lived API-token/dashboard flow is out of scope for the current implementation.
+Users authenticate their CLI using the browser (`scratchwork login`). The CLI stores the returned bearer session token in `~/.scratchwork/auth.json` and sends it to the API as a bearer token. A separate long-lived API-token/dashboard flow is out of scope for the current implementation.
 
-Users authenticate to the app. domain using google oauth.
+Users authenticate to the app. domain using google oauth, or — on a `cloudflare-access` server — are authenticated by Cloudflare at the edge before requests reach the server. In that mode the browser flow has no `/auth/callback` round-trip: `/auth/login` reads the verified Access assertion directly (which also keeps the CLI loopback flow working), and API requests accept either a scratchwork bearer token or a valid Access JWT (`Cf-Access-Jwt-Assertion`, or the CLI's relayed `cf-access-token`, verified identically). During CLI login the server relays the browser's verified Access JWT to the loopback callback as `cf_token`; the CLI stores it alongside the bearer token and sends it back as a `cf-access-token` header on every API request, which Cloudflare's edge accepts as an Access credential — so CLI requests pass an Access-protected edge without extra Access configuration. For CI, `SCRATCHWORK_CF_ACCESS_CLIENT_ID`/`SCRATCHWORK_CF_ACCESS_CLIENT_SECRET` attach Access service-token headers that satisfy the edge (identity still comes from the bearer token). A request the edge blocks anyway (expired Access session) fails with a clear prompt to run `scratchwork login` again.
 
 ### Accessing a server
 
