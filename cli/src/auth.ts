@@ -18,10 +18,13 @@ import { CliError, errorMessage } from "./errors";
 const AUTH_FILE = "auth.json";
 const DEFAULT_APP_SUBDOMAIN = "app";
 
-/** One stored login: the bearer token for a server plus who/when it was issued. */
+/** One stored login: the bearer token for a server plus who/when it was issued.
+ * `cfToken` is the Cloudflare Access JWT relayed by a cloudflare-access server at
+ * login; the CLI presents it on API requests so they pass Cloudflare's edge. */
 export interface AuthRecord {
   readonly token: string;
   readonly email?: string;
+  readonly cfToken?: string;
   readonly updatedAt: string;
 }
 
@@ -36,6 +39,7 @@ export interface LoginCallback {
   readonly token: string;
   readonly email?: string;
   readonly server?: string;
+  readonly cfToken?: string;
 }
 
 /**
@@ -58,11 +62,27 @@ export function readAuthToken(
   });
 }
 
+/** Looks up the stored Cloudflare Access JWT for a server, with the same origin
+ * fallbacks as readAuthToken. Undefined for servers that did not relay one. */
+export function readCfToken(
+  server: string,
+): Effect.Effect<string | undefined, CliError, FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    const auth = yield* readAuthFile();
+    for (const candidate of candidateServers(server)) {
+      const cfToken = auth.servers[candidate]?.cfToken;
+      if (cfToken != null) return cfToken;
+    }
+    return undefined;
+  });
+}
+
 /** Saves a bearer token for a server, preserving tokens stored for other servers. */
 export function writeAuthToken(
   server: string,
   token: string,
   email: string | undefined,
+  cfToken?: string,
 ): Effect.Effect<void, PlatformError | CliError, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -76,6 +96,7 @@ export function writeAuthToken(
         [server]: {
           token,
           email,
+          cfToken,
           updatedAt: new Date().toISOString(),
         },
       },
@@ -128,6 +149,7 @@ export function decodeLoginCallback(url: URL): LoginCallback | null {
     token,
     email: nonEmpty(url.searchParams.get("email") ?? undefined),
     server: nonEmpty(url.searchParams.get("server") ?? undefined),
+    cfToken: nonEmpty(url.searchParams.get("cf_token") ?? undefined),
   };
 }
 
@@ -200,6 +222,7 @@ function isAuthFile(value: unknown): value is AuthFile {
   for (const record of Object.values(value.servers)) {
     if (!isRecord(record) || typeof record.token !== "string" || typeof record.updatedAt !== "string") return false;
     if (record.email != null && typeof record.email !== "string") return false;
+    if (record.cfToken != null && typeof record.cfToken !== "string") return false;
   }
   return true;
 }

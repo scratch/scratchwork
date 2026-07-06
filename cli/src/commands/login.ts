@@ -31,7 +31,7 @@ export function runLogin(
       try: () => normalizeServerUrl(result.server ?? server),
       catch: () => new CliError({ code: 1, message: `scratchwork login: server returned an invalid server URL: ${result.server}` }),
     });
-    yield* writeAuthToken(authenticatedServer, result.token, result.email);
+    yield* writeAuthToken(authenticatedServer, result.token, result.email, result.cfToken);
     yield* Console.log(`Authenticated ${result.email ?? "user"} for ${authenticatedServer}`);
   });
 }
