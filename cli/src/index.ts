@@ -21,8 +21,9 @@ import { DEFAULT_PORT, runDev } from "./commands/dev";
 import { runPublish } from "./commands/publish";
 import { runClone, runDelete, runInfo, runMe, runProjects, runStream, runUnpublish } from "./commands/projects";
 import { runTemplate } from "./commands/template";
+import * as ValidationError from "@effect/cli/ValidationError";
 import { CliError } from "./errors";
-import { printHelpIfRequested } from "./help";
+import { printHelpIfRequested, printUnknownCommandIfFound } from "./help";
 
 /** Declares a positional path argument with a default and help text. */
 const pathArg = (name: string, fallback: string, description: string) =>
@@ -197,24 +198,39 @@ const MainLayer = Layer.mergeAll(
  * stderr messages and process exit codes.
  */
 function runScratchworkCli(argv: ReadonlyArray<string> = process.argv): void {
-  const help = printHelpIfRequested(argv, pkg.version, scratchworkCommand);
-  if (help.handled) {
-    process.exitCode = help.exitCode;
-    return;
+  const normalizedArgv = normalizeArgv(argv);
+  const preParse = [
+    () => printHelpIfRequested(argv, pkg.version, scratchworkCommand),
+    () => printUnknownCommandIfFound(normalizedArgv, scratchworkCommand),
+  ];
+  for (const check of preParse) {
+    const result = check();
+    if (result.handled) {
+      process.exitCode = result.exitCode;
+      return;
+    }
   }
 
-  Effect.suspend(() => cli(normalizeArgv(argv))).pipe(
-    Effect.catchAll((error) =>
-      error instanceof CliError
-        ? (error.message ? Console.error(error.message) : Effect.void).pipe(
-            Effect.zipRight(
-              Effect.sync(() => {
-                process.exitCode = error.code;
-              }),
-            ),
-          )
-        : Effect.fail(error),
-    ),
+  Effect.suspend(() => cli(normalizedArgv)).pipe(
+    Effect.catchAll((error) => {
+      if (error instanceof CliError) {
+        return (error.message ? Console.error(error.message) : Effect.void).pipe(
+          Effect.zipRight(
+            Effect.sync(() => {
+              process.exitCode = error.code;
+            }),
+          ),
+        );
+      }
+      // @effect/cli already printed a readable message for parse failures;
+      // swallow the error so runMain does not also dump it as raw JSON.
+      if (ValidationError.isValidationError(error)) {
+        return Effect.sync(() => {
+          process.exitCode = 1;
+        });
+      }
+      return Effect.fail(error);
+    }),
     Effect.provide(MainLayer),
     BunRuntime.runMain,
   );

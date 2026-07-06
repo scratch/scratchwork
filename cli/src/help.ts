@@ -177,6 +177,56 @@ export function printHelpIfRequested<Name extends string, R, E, A>(
   return { handled: true, exitCode: request.noCommand ? 1 : 0 };
 }
 
+/**
+ * Detects an unrecognized subcommand in argv and, when found, prints a short
+ * error with a near-miss suggestion instead of letting @effect/cli fail with
+ * its raw parser output.
+ */
+export function printUnknownCommandIfFound<Name extends string, R, E, A>(
+  argv: ReadonlyArray<string>,
+  root: Command<Name, R, E, A>,
+): HelpResult {
+  const first = argv[2];
+  if (first == null || first.startsWith("-")) return { handled: false, exitCode: 0 };
+  const names = subcommandInfos(root).map((command) => command.name);
+  if (names.includes(first)) return { handled: false, exitCode: 0 };
+
+  console.error(`scratchwork: unknown command '${first}'`);
+  const suggestion = closestName(first, names);
+  if (suggestion != null) {
+    console.error(`Did you mean 'scratchwork ${suggestion}'?`);
+  }
+  console.error("Run 'scratchwork --help' to see available commands.");
+  return { handled: true, exitCode: 1 };
+}
+
+/** Finds the command name within edit distance 2 of the input, if any. */
+function closestName(input: string, names: ReadonlyArray<string>): string | null {
+  let best: { name: string; distance: number } | null = null;
+  for (const name of names) {
+    const distance = editDistance(input.toLowerCase(), name);
+    if (distance <= 2 && (best == null || distance < best.distance)) {
+      best = { name, distance };
+    }
+  }
+  return best?.name ?? null;
+}
+
+/** Levenshtein distance between two short strings. */
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = a[i - 1] === b[j - 1]
+        ? previous[j - 1]!
+        : 1 + Math.min(previous[j - 1]!, previous[j]!, current[j - 1]!);
+    }
+    previous = current;
+  }
+  return previous[b.length]!;
+}
+
 /** Recognizes `--help`/`-h`/`help` forms in argv, or empty argv, as help requests. */
 function helpRequest(args: ReadonlyArray<string>): { readonly command?: string; readonly noCommand?: boolean } | null {
   if (args.length === 0) return { noCommand: true };

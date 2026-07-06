@@ -98,4 +98,29 @@ describe("CLI help", () => {
     expect(result.stdout).toContain("scratchwork <command> [options]");
     expect(result.stdout).not.toContain("A user-defined piece of text");
   });
+
+  test("rejects an unknown command with a short pointer to help", async () => {
+    const result = await runCli(["frobnicate"]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("scratchwork: unknown command 'frobnicate'");
+    expect(result.stderr).toContain("Run 'scratchwork --help' to see available commands.");
+    expect(result.stderr).not.toContain("_tag");
+  });
+
+  test("suggests the closest command for a near-miss", async () => {
+    const result = await runCli(["pubish"]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Did you mean 'scratchwork publish'?");
+  });
+
+  test("reports invalid option values without raw parser output", async () => {
+    const result = await runCli(["dev", "--port", "abc"]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("'abc' is not a integer");
+    expect(result.stderr).not.toContain("_tag");
+    expect(result.stderr).not.toContain("ERROR");
+  });
 });
