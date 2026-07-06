@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { accessGroupModify } from "../src/access";
+import { accessGroupModify, normalizeAccessGroup } from "../src/access";
 
 /** Runs a modification that is expected to succeed. */
 function modify(group: string, changes: { add?: ReadonlyArray<string>; remove?: ReadonlyArray<string> }): string {
@@ -57,5 +57,14 @@ describe("accessGroupModify", () => {
 
   test("rejects an invalid stored group", () => {
     expect(modifyError("", { add: ["alice@example.com"] })).toContain("Invalid access group");
+  });
+});
+
+describe("normalizeAccessGroup", () => {
+  test("explains the expected syntax on failure", () => {
+    const message = Effect.runSync(Effect.flip(normalizeAccessGroup("gmail.com,koomen.org"))).message;
+    expect(message).toBe(
+      'Invalid access group "gmail.com,koomen.org": expected "public", "private", or a comma-separated list of email addresses and @domain groups, like "alice@example.com,@example.com"',
+    );
   });
 });

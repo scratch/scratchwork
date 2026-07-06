@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { nonEmpty } from "../../../shared/src/util/strings";
 import { isLoopbackHost } from "../../../shared/src/util/url";
-import { normalizeAccessGroup, type AccessGroup } from "./access";
+import { normalizeAccessGroup, safeDomain, type AccessGroup } from "./access";
 
 /** An environment-variable map from any platform (process.env, Worker vars, Lambda env). */
 export type EnvVars = Readonly<Record<string, string | undefined>>;
@@ -48,6 +48,11 @@ export class ServerConfigError extends Data.TaggedError("ServerConfigError")<{
   readonly message: string;
 }> {}
 
+/** Builds the uniform rejection for one env var: the value given and what is accepted. */
+function invalidValue(name: string, value: string, expected: string): ServerConfigError {
+  return new ServerConfigError({ message: `Invalid ${name} "${value}": expected ${expected}` });
+}
+
 /** Builds a ServerConfig layer from an explicit environment map. */
 export function makeServerConfigLayer(
   env: EnvVars,
@@ -60,13 +65,10 @@ export function readServerConfig(
   env: EnvVars,
 ): Effect.Effect<ServerConfigShape, ServerConfigError> {
   return Effect.gen(function* () {
-    const port = parsePort(env.PORT ?? env.SCRATCHWORK_PORT ?? "3001");
+    const portValue = env.PORT ?? env.SCRATCHWORK_PORT ?? "3001";
+    const port = parsePort(portValue);
     if (port == null) {
-      return yield* Effect.fail(
-        new ServerConfigError({
-          message: "PORT must be an integer between 1 and 65535",
-        }),
-      );
+      return yield* Effect.fail(invalidValue("PORT", portValue, 'an integer between 1 and 65535, like "3001"'));
     }
 
     return {
@@ -80,7 +82,7 @@ export function readServerConfig(
         "SCRATCHWORK_CONTENT_URL",
       ),
       maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
-      shareAllowedDomains: domainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS),
+      shareAllowedDomains: yield* readDomainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS"),
       usersCanSetProjectNames: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES, true, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES"),
       defaultVisibility: yield* readBinaryVisibility(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
       auth: yield* readAuthConfig(env),
@@ -94,16 +96,16 @@ function readPublicUrl(value: string | undefined, name: string): Effect.Effect<s
   try {
     const url = new URL(value);
     if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
-      return Effect.fail(new ServerConfigError({ message: `${name} must be an origin, such as https://example.com` }));
+      return Effect.fail(invalidValue(name, value, 'a bare origin with no path, query, or fragment, like "https://example.com"'));
     }
     // Loopback (including *.localhost, which resolves locally on modern systems)
     // may use http so local runs get real hostname-per-role URLs.
     if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
-      return Effect.fail(new ServerConfigError({ message: `${name} must use https, except loopback http for local development` }));
+      return Effect.fail(invalidValue(name, value, 'an https URL, like "https://example.com" (plain http is allowed only for loopback hosts, like "http://localhost:3001")'));
     }
     return Effect.succeed(url.origin);
   } catch {
-    return Effect.fail(new ServerConfigError({ message: `${name} must be a valid URL` }));
+    return Effect.fail(invalidValue(name, value, 'a URL, like "https://example.com"'));
   }
 }
 
@@ -116,19 +118,24 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
     const sessionSecret = env.SCRATCHWORK_SESSION_SECRET;
 
     if (authMode !== "" && authMode !== "oauth") {
-      return yield* Effect.fail(new ServerConfigError({ message: "SCRATCHWORK_AUTH must be \"oauth\" when set" }));
+      return yield* Effect.fail(invalidValue("SCRATCHWORK_AUTH", authMode, '"oauth" (the only supported mode), or leave it unset'));
     }
     if (!clientId || !clientSecret || !sessionSecret) {
+      const missing = [
+        clientId ? null : "SCRATCHWORK_GOOGLE_CLIENT_ID",
+        clientSecret ? null : "SCRATCHWORK_GOOGLE_CLIENT_SECRET",
+        sessionSecret ? null : "SCRATCHWORK_SESSION_SECRET",
+      ].filter((name) => name != null);
       return yield* Effect.fail(
         new ServerConfigError({
-          message: "OAuth is required: set SCRATCHWORK_GOOGLE_CLIENT_ID, SCRATCHWORK_GOOGLE_CLIENT_SECRET, and SCRATCHWORK_SESSION_SECRET",
+          message: `OAuth is required: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set. Create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
         }),
       );
     }
     if (new TextEncoder().encode(sessionSecret).byteLength < 32) {
       return yield* Effect.fail(
         new ServerConfigError({
-          message: "SCRATCHWORK_SESSION_SECRET must be at least 32 bytes",
+          message: 'SCRATCHWORK_SESSION_SECRET must be at least 32 bytes: generate one with "openssl rand -hex 32"',
         }),
       );
     }
@@ -142,7 +149,11 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
         "public",
         "SCRATCHWORK_ALLOWED_USERS",
       ),
-      sessionTtlSeconds: parsePositiveInteger(env.SCRATCHWORK_AUTH_SESSION_SECONDS) ?? 60 * 60 * 24 * 30,
+      sessionTtlSeconds: yield* readPositiveInteger(
+        env.SCRATCHWORK_AUTH_SESSION_SECONDS,
+        60 * 60 * 24 * 30,
+        "SCRATCHWORK_AUTH_SESSION_SECONDS",
+      ),
     } as const;
   });
 }
@@ -157,7 +168,7 @@ function readBinaryVisibility(
 ): Effect.Effect<AccessGroup, ServerConfigError> {
   const visibility = value == null || value === "" ? fallback : value.trim().toLowerCase();
   if (visibility !== "public" && visibility !== "private") {
-    return Effect.fail(new ServerConfigError({ message: `${name} must be "public" or "private"` }));
+    return Effect.fail(invalidValue(name, value ?? "", '"public" or "private" (per-account access is granted through share, not a visibility value)'));
   }
   return Effect.succeed(visibility);
 }
@@ -179,7 +190,7 @@ function readBoolean(value: string | undefined, fallback: boolean, name: string)
   const normalized = value.trim().toLowerCase();
   if (normalized === "true") return Effect.succeed(true);
   if (normalized === "false") return Effect.succeed(false);
-  return Effect.fail(new ServerConfigError({ message: `${name} must be true or false` }));
+  return Effect.fail(invalidValue(name, value, '"true" or "false"'));
 }
 
 /** Expands a bare domain env value into an https origin. */
@@ -203,16 +214,21 @@ function parsePort(value: string): number | null {
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
 }
 
-/** Parses an optional positive integer environment value. */
-function parsePositiveInteger(value: string | undefined): number | null {
-  if (value == null || value === "") return null;
+/** Parses one positive-integer environment value with a fallback. */
+function readPositiveInteger(value: string | undefined, fallback: number, name: string): Effect.Effect<number, ServerConfigError> {
+  if (value == null || value === "") return Effect.succeed(fallback);
   const number = Number(value);
-  return Number.isInteger(number) && number > 0 ? number : null;
+  if (Number.isInteger(number) && number > 0) return Effect.succeed(number);
+  return Effect.fail(invalidValue(name, value, 'a positive integer number of seconds, like "86400"'));
 }
 
-/** Converts a comma-separated allow-list to a lowercase set. */
-function domainSet(value: string | undefined): ReadonlySet<string> {
-  return new Set(csvItems(value).map((domain) => domain.replace(/^@/, "").toLowerCase()));
+/** Parses a comma-separated domain allow-list environment value into a lowercase set. */
+function readDomainSet(value: string | undefined, name: string): Effect.Effect<ReadonlySet<string>, ServerConfigError> {
+  const domains = csvItems(value).map((domain) => domain.replace(/^@/, ""));
+  if (domains.some((domain) => !safeDomain(domain))) {
+    return Effect.fail(invalidValue(name, value ?? "", 'a comma-separated list of domains, like "example.com,corp.example.com"'));
+  }
+  return Effect.succeed(new Set(domains));
 }
 
 /** Splits a comma-separated env value into trimmed lowercase items. */

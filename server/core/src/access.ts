@@ -25,7 +25,7 @@ type GroupTerm =
 export function normalizeAccessGroup(group: string): Effect.Effect<AccessGroup, AccessGroupError> {
   const terms = parseAccessGroup(group);
   return terms == null
-    ? Effect.fail(new AccessGroupError({ message: `Invalid access group: ${group}` }))
+    ? Effect.fail(new AccessGroupError({ message: explainInvalidAccessGroup(group) }))
     : Effect.succeed(serializeTerms(terms));
 }
 
@@ -85,7 +85,7 @@ export function accessGroupModify(
 ): Effect.Effect<AccessGroup, AccessGroupError> {
   const current = parseAccessGroup(group);
   if (current == null) {
-    return Effect.fail(new AccessGroupError({ message: `Invalid access group: ${group}` }));
+    return Effect.fail(new AccessGroupError({ message: explainInvalidAccessGroup(group) }));
   }
 
   const additions = grantTerms(changes.add);
@@ -149,6 +149,11 @@ export function accessGroupUsesOnlyDomains(group: AccessGroup, domains: Readonly
     if (domain == null || !domains.has(domain)) return false;
   }
   return true;
+}
+
+/** The error message for an unparsable access expression: what was given, what is accepted. */
+function explainInvalidAccessGroup(group: string): string {
+  return `Invalid access group "${group}": expected "public", "private", or a comma-separated list of email addresses and @domain groups, like "alice@example.com,@example.com"`;
 }
 
 /** Parses a comma-separated access expression into validated terms, or null when invalid. */
@@ -235,6 +240,6 @@ function safeEmail(value: string): boolean {
 }
 
 /** Returns true for a plausible lowercase DNS domain. */
-function safeDomain(value: string): boolean {
+export function safeDomain(value: string): boolean {
   return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(value);
 }

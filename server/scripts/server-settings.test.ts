@@ -49,9 +49,9 @@ describe("validateDeploymentConfig", () => {
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "gmail.com,koomen.org" }, "Test"))
       .toThrow("Invalid access group");
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "@example.com" }, "Test"))
-      .toThrow('must be "public" or "private"');
+      .toThrow('expected "public" or "private"');
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_APP_URL: "not a url" }, "Test"))
-      .toThrow("valid URL");
+      .toThrow('expected a URL, like "https://example.com"');
   });
 
   test("still enforces the OAuth requirements", () => {

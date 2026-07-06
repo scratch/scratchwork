@@ -78,10 +78,14 @@ export function serverConfigEnv(config: ScratchworkServerConfig, resolved: Resol
 export function validateDeploymentAuth(env: DeployEnv, platform: string): void {
   const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
   if (authMode !== "" && authMode !== "oauth") {
-    throw new Error('SCRATCHWORK_AUTH must be "oauth" when set');
+    throw new Error(`Invalid SCRATCHWORK_AUTH "${env.SCRATCHWORK_AUTH}": expected "oauth" (the only supported mode), or leave it unset`);
   }
   for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
-    if (!env[key]) throw new Error(`${key} is required: ${platform} deploys always use OAuth`);
+    if (!env[key]) {
+      throw new Error(
+        `${key} is required: ${platform} deploys always use OAuth. Create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
+      );
+    }
   }
 }
 

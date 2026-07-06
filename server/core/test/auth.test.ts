@@ -115,7 +115,7 @@ describe("readServerConfig", () => {
           SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
         }),
       ),
-    ).rejects.toThrow('SCRATCHWORK_AUTH must be "oauth" when set');
+    ).rejects.toThrow('Invalid SCRATCHWORK_AUTH "google"');
   });
 
   test("fails without OAuth credentials", async () => {
@@ -157,7 +157,7 @@ describe("readServerConfig", () => {
         SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
         SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES: "yes",
       })),
-    ).rejects.toThrow("SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES must be true or false");
+    ).rejects.toThrow('Invalid SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES "yes": expected "true" or "false"');
   });
 });
 
