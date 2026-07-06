@@ -1,6 +1,6 @@
 /*
  * Commands that operate on published projects: `me`, `projects`, `info`,
- * `unpublish`, `delete`, `clone`, and `stream`. All server traffic goes
+ * `share`, `revoke`, `unpublish`, `delete`, `clone`, and `stream`. All server traffic goes
  * through the shared api module; project references come from flags, a
  * published URL, or a local .scratchwork.json (see project-config.ts).
  */
@@ -15,11 +15,11 @@ import { base64ToBytes } from "../../../shared/src/encoding/base64";
 import { decodePublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
 import { isRecord } from "../../../shared/src/util/json";
-import { apiJson, projectApiUrl } from "../api";
+import { apiErrorText, apiJson, apiRequest, projectApiUrl } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
 import { CliError, errorMessage } from "../errors";
 import { PROJECT_CONFIG_FILE, resolveProjectRef, resolveServerFromCwd, writeProjectConfig } from "../project-config";
-import type { CloneConfig, PathConfig, ProjectRefConfig, ServerConfig } from "../types";
+import type { CloneConfig, PathConfig, ProjectRefConfig, ServerConfig, ShareConfig } from "../types";
 import { runPublish, SKIPPED_DIRECTORIES, type PublishServices } from "./publish";
 
 /** Project metadata as returned by /api/projects. */
@@ -85,6 +85,67 @@ export function runUnpublish(
     const token = yield* readAuthToken(ref.server);
     const body = yield* apiJson("scratchwork unpublish", projectApiUrl(ref, "/unpublish"), { method: "POST", token });
     yield* Console.log(JSON.stringify(body, null, 2));
+  });
+}
+
+/** Runs `scratchwork share`: assigns accounts or whole domains a role on a project
+ * (read, write, or admin; sharing again with a different role moves the target). */
+export function runShare(
+  config: ShareConfig,
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
+  return runShareChange("share", { add: true, role: config.role ?? "read" }, config);
+}
+
+/** Runs `scratchwork revoke`: strips every role the targets hold on a project. */
+export function runRevoke(
+  config: ShareConfig,
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
+  return runShareChange("revoke", { add: false }, config);
+}
+
+/** Shared body of share/revoke: sort positionals into targets vs the project
+ * reference, then POST the grant delta. Targets always contain an "@" (emails and
+ * @domain groups); a published URL or local path never does, so the two can mix
+ * freely on the command line. */
+function runShareChange(
+  command: "share" | "revoke",
+  change: { readonly add: boolean; readonly role?: "read" | "write" | "admin" },
+  config: ShareConfig,
+): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
+  return Effect.gen(function* () {
+    const targets = config.targets.filter((value) => value.includes("@"));
+    const refs = config.targets.filter((value) => !value.includes("@"));
+    if (targets.length === 0) {
+      return yield* Effect.fail(new CliError({
+        code: 1,
+        message: `scratchwork ${command}: pass at least one email address or @domain group (for example alice@example.com or @example.com)`,
+      }));
+    }
+    if (refs.length > 1) {
+      return yield* Effect.fail(new CliError({
+        code: 1,
+        message: `scratchwork ${command}: expected at most one project path or URL, got: ${refs.join(", ")}`,
+      }));
+    }
+    const ref = yield* resolveProjectRef({ command, pathOrUrl: refs[0], server: config.server, project: config.project });
+    const token = yield* readAuthToken(ref.server);
+    const response = yield* apiRequest(`scratchwork ${command}`, projectApiUrl(ref, "/share"), {
+      method: "POST",
+      token,
+      body: change.add ? { add: targets, role: change.role } : { remove: targets },
+    });
+    // A missing project reads "Project not found"; a bare route-level "Not found" means
+    // the server predates the /share API and would otherwise be indistinguishable noise.
+    if (response.status === 404 && apiErrorText(response) === "Not found") {
+      return yield* Effect.fail(new CliError({
+        code: 1,
+        message: `scratchwork ${command}: ${ref.server} does not support sharing yet (no /share API). Update the server to a newer Scratchwork release and try again.`,
+      }));
+    }
+    if (!response.ok) {
+      return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: ${apiErrorText(response)}` }));
+    }
+    yield* Console.log(JSON.stringify(response.json, null, 2));
   });
 }
 

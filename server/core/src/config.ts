@@ -82,7 +82,7 @@ export function readServerConfig(
       maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
       shareAllowedDomains: domainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS),
       usersCanSetProjectNames: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES, true, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES"),
-      defaultVisibility: yield* readAccessGroup(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
+      defaultVisibility: yield* readBinaryVisibility(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
       auth: yield* readAuthConfig(env),
     };
   });
@@ -145,6 +145,21 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
       sessionTtlSeconds: parsePositiveInteger(env.SCRATCHWORK_AUTH_SESSION_SECONDS) ?? 60 * 60 * 24 * 30,
     } as const;
   });
+}
+
+/** Parses a visibility-toggle environment value: project visibility is only ever public
+ * or private (per-account access is a grant list managed through share, not a visibility
+ * value). */
+function readBinaryVisibility(
+  value: string | undefined,
+  fallback: "public" | "private",
+  name: string,
+): Effect.Effect<AccessGroup, ServerConfigError> {
+  const visibility = value == null || value === "" ? fallback : value.trim().toLowerCase();
+  if (visibility !== "public" && visibility !== "private") {
+    return Effect.fail(new ServerConfigError({ message: `${name} must be "public" or "private"` }));
+  }
+  return Effect.succeed(visibility);
 }
 
 /** Parses one access-group environment value with a fallback expression. */

@@ -130,6 +130,14 @@ function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishR
       : yield* normalizeAccessGroup(raw.visibility).pipe(
         Effect.mapError((cause) => new HttpError({ status: 400, message: cause.message })),
       );
+    // Visibility is the public/private toggle; per-account and per-domain access is a
+    // separate grant list managed through the share API, not a publish-time setting.
+    if (visibility != null && visibility !== "public" && visibility !== "private") {
+      return yield* Effect.fail(new HttpError({
+        status: 400,
+        message: 'visibility must be "public" or "private"; grant per-account access with scratchwork share',
+      }));
+    }
 
     return {
       bundle: raw.bundle,

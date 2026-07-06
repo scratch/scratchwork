@@ -13,7 +13,7 @@ import {
   optional,
   resolveServerConfig,
   serverConfigEnv,
-  validateDeploymentAuth,
+  validateDeploymentConfig,
   type DeployServerOptions,
   type ScratchworkServerConfig,
 } from "../../scripts/server-settings";
@@ -104,7 +104,7 @@ export async function deployServer(
   };
 
   await mkdir(dist, { recursive: true });
-  validateDeploymentAuth(env, "AWS");
+  validateDeploymentConfig(env, "AWS");
   await run("bun", ["run", "build"], { cwd: root });
   await rm(zipPath, { force: true });
   await run("zip", ["-j", zipPath, handlerPath], { cwd: root });

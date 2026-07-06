@@ -32,11 +32,18 @@ const SiteFileObjectSchema = Schema.Struct({
   contentType: Schema.String,
 });
 
-/** Validates a stored project pointer. */
+/** Validates a stored project pointer. `visibility` is the public/private toggle; the
+ * three access groups (`readers`, `writers`, `admins`) grade per-account roles — each
+ * level implies the ones below, and the owner holds every role. The grant groups default
+ * to "private" so records written before roles existed decode unchanged; records that
+ * still carry read grants inside `visibility` are migrated at load (see site-store). */
 const SiteRecordSchema = Schema.Struct({
   version: Schema.Literal(4),
   project: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid project")),
   visibility: Schema.String,
+  readers: Schema.optionalWith(Schema.String, { default: () => "private" }),
+  writers: Schema.optionalWith(Schema.String, { default: () => "private" }),
+  admins: Schema.optionalWith(Schema.String, { default: () => "private" }),
   owner: SiteOwnerSchema,
   createdAt: Schema.String,
   updatedAt: Schema.String,

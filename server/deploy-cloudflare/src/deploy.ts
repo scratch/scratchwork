@@ -14,7 +14,7 @@ import {
   optional,
   resolveServerConfig,
   serverConfigEnv,
-  validateDeploymentAuth,
+  validateDeploymentConfig,
   type DeployServerOptions,
   type ResolvedScratchworkServerConfig,
   type ScratchworkServerConfig,
@@ -125,7 +125,7 @@ export async function deployServer(
   const { run } = createRunner(commandEnv);
 
   await mkdir(dist, { recursive: true });
-  validateDeploymentAuth(env, "Cloudflare");
+  validateDeploymentConfig(env, "Cloudflare");
   await run("bun", ["build", "src/worker.ts", "--target=browser", "--format=esm", `--outfile=${workerPath}`], { cwd: root });
   const routes = cloudflareRoutes(resolvedDeploy);
   await ensureBucket(resolvedDeploy, run);

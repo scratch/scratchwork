@@ -16,17 +16,32 @@ const MainLayer = Layer.provideMerge(
   Layer.mergeAll(S3ObjectStorageLive(env), DynamoDbPrimitiveDbLive(env), makeServerConfigLayer(env)),
 );
 
-/** The core app as a Web fetch handler with the layers provided. */
-const web = HttpApp.toWebHandlerLayer(app, MainLayer);
+/** The core app as a Web fetch handler, built lazily inside the request guard so even a
+ * handler-construction failure answers as a 500 instead of killing the invocation. */
+let web: { readonly handler: (request: Request) => Promise<Response> } | null = null;
 
-/** Handles one API Gateway v2 event with the shared server app. */
+/** Handles one API Gateway v2 event with the shared server app. No failure may escape:
+ * anything the app's own error handling did not catch — most importantly a service layer
+ * that fails to build, e.g. malformed SCRATCHWORK_* config — is logged for CloudWatch
+ * and answered with a plain 500. */
 export async function handler(
   event: APIGatewayProxyEventV2,
   _context: LambdaContext,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const request = eventToRequest(event);
-  const response = await web.handler(request);
-  return responseToResult(response);
+  try {
+    web ??= HttpApp.toWebHandlerLayer(app, MainLayer);
+    const request = eventToRequest(event);
+    const response = await web.handler(request);
+    return responseToResult(response);
+  } catch (error) {
+    console.error("scratchwork handler: unhandled error", error);
+    return {
+      statusCode: 500,
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ error: "Internal server error" }),
+      isBase64Encoded: false,
+    };
+  }
 }
 
 /** Converts an API Gateway v2 event into a standard Web Request. */

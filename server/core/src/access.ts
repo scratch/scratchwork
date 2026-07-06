@@ -72,6 +72,71 @@ export function isReservedSlug(value: string): boolean {
   return RESERVED_ROUTE_SLUGS.has(value.toLowerCase());
 }
 
+/** Applies share/revoke deltas to an access group: adds and removes individual email and
+ * @domain grants. Targets must be single email/@domain terms — never `public` or
+ * `private`, which are set through publish/unpublish. `public` has no grant list, so
+ * grants cannot be added to it, while removals against it are no-ops (there is no grant
+ * to remove; the caller's warning machinery reports the retained access). Removals match
+ * exact terms only; an email left covered by a remaining domain grant is the caller's to
+ * detect (see accessGroupMatches). Removing the last grant yields `private`. */
+export function accessGroupModify(
+  group: AccessGroup,
+  changes: { readonly add: ReadonlyArray<string>; readonly remove: ReadonlyArray<string> },
+): Effect.Effect<AccessGroup, AccessGroupError> {
+  const current = parseAccessGroup(group);
+  if (current == null) {
+    return Effect.fail(new AccessGroupError({ message: `Invalid access group: ${group}` }));
+  }
+
+  const additions = grantTerms(changes.add);
+  const removals = grantTerms(changes.remove);
+  if (additions instanceof AccessGroupError) return Effect.fail(additions);
+  if (removals instanceof AccessGroupError) return Effect.fail(removals);
+
+  if (current.some((term) => term._tag === "Public")) {
+    if (additions.length > 0) {
+      return Effect.fail(new AccessGroupError({
+        message: 'Visibility is "public", which has no per-account grants to edit. Set an explicit visibility first (scratchwork publish --visibility or unpublish).',
+      }));
+    }
+    return Effect.succeed("public");
+  }
+
+  const removedKeys = new Set(removals.map((term) => serializeTerms([term])));
+  const terms = dedupeTerms([
+    ...current.filter((term) => term._tag !== "Private" && !removedKeys.has(serializeTerms([term]))),
+    ...additions,
+  ]);
+  return Effect.succeed(terms.length === 0 ? "private" : serializeTerms(terms));
+}
+
+/** Lists a grant group's individual email/@domain terms for API responses. `private`
+ * (no grants) and `public` (no grant list) yield an empty list; an unparsable group
+ * also yields [] rather than leaking a malformed stored value. */
+export function accessGroupTerms(group: AccessGroup): ReadonlyArray<string> {
+  const terms = parseAccessGroup(group);
+  if (terms == null) return [];
+  return terms
+    .filter((term) => term._tag === "Email" || term._tag === "Domain")
+    .map((term) => serializeTerms([term]));
+}
+
+/** Parses share/revoke targets, each of which must be one email or @domain term. */
+function grantTerms(targets: ReadonlyArray<string>): ReadonlyArray<GroupTerm> | AccessGroupError {
+  const terms: Array<GroupTerm> = [];
+  for (const target of targets) {
+    const parsed = parseAccessGroup(target);
+    const term = parsed != null && parsed.length === 1 ? parsed[0] : null;
+    if (term == null || (term._tag !== "Email" && term._tag !== "Domain")) {
+      return new AccessGroupError({
+        message: `Invalid share target: ${target} (expected an email address or an @domain group like @example.com)`,
+      });
+    }
+    terms.push(term);
+  }
+  return terms;
+}
+
 /** Checks that every explicit email/domain share target sits within an allowed domain list. */
 export function accessGroupUsesOnlyDomains(group: AccessGroup, domains: ReadonlySet<string>): boolean {
   if (domains.size === 0) return true;

@@ -19,10 +19,22 @@ interface ExecutionContextBinding {
 /** One handler per environment-binding object, so layers build once per isolate. */
 const handlers = new WeakMap<CloudflareEnv, (request: Request) => Promise<Response>>();
 
-/** The Worker entry point. */
+/** The Worker entry point. No failure may escape fetch: an exception that leaves the
+ * Worker renders Cloudflare's opaque 1101 error page for every request, so anything the
+ * app's own error handling did not catch — most importantly a service layer that fails
+ * to build, e.g. malformed SCRATCHWORK_* config — is logged for Workers Logs and
+ * answered with a plain 500. */
 export default {
-  fetch(request: Request, env: CloudflareEnv, _context: ExecutionContextBinding): Promise<Response> {
-    return handlerFor(env)(request);
+  async fetch(request: Request, env: CloudflareEnv, _context: ExecutionContextBinding): Promise<Response> {
+    try {
+      return await handlerFor(env)(request);
+    } catch (error) {
+      console.error("scratchwork worker: unhandled error", error);
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+    }
   },
 };
 

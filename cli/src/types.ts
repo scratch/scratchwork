@@ -46,6 +46,16 @@ export interface ProjectRefConfig {
   readonly project?: string;
 }
 
+/** `scratchwork share` / `scratchwork revoke` options. Positional args mix grant
+ * targets (emails, @domain groups) with an optional project path or URL. `role` is the
+ * permission level share assigns (revoke always strips every role). */
+export interface ShareConfig {
+  readonly targets: ReadonlyArray<string>;
+  readonly server?: string;
+  readonly project?: string;
+  readonly role?: "read" | "write" | "admin";
+}
+
 /** `scratchwork clone` options. */
 export interface CloneConfig {
   readonly pathOrUrl: string;

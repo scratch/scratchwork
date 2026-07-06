@@ -63,9 +63,13 @@ export {
   SiteStoreError,
   SiteStoreLive,
   canReadProject,
-  canWriteProject,
+  isProjectOwner,
+  projectRole,
+  roleAtLeast,
   type LoadedSite,
+  type ProjectRole,
   type PublishResult,
+  type ShareRole,
   type SiteStoreShape,
 } from "./site-store";
 

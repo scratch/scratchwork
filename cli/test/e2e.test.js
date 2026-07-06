@@ -627,6 +627,8 @@ describe("scratchwork --help", () => {
       expect(stdout).toContain("me");
       expect(stdout).toContain("projects");
       expect(stdout).toContain("publish");
+      expect(stdout).toContain("revoke");
+      expect(stdout).toContain("share");
       expect(stdout).toContain("stream");
       expect(stdout).toContain("template");
       expect(stdout).toContain("unpublish");
@@ -634,7 +636,6 @@ describe("scratchwork --help", () => {
       expect(stdout).not.toContain("logout");
       expect(stdout).not.toContain("whoami");
       expect(stdout).not.toContain("tokens");
-      expect(stdout).not.toContain("share");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -722,11 +723,12 @@ describe("scratchwork publish", () => {
 });
 
 describe("scratchwork project commands", () => {
-  test("lists, inspects, unpublishes, deletes, and clones projects", async () => {
+  test("lists, inspects, shares, revokes, unpublishes, deletes, and clones projects", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-project-cmds-"));
     const port = nextPort++;
     const serverUrl = `http://localhost:${port}`;
     const seen = [];
+    const shareBodies = [];
     const project = {
       project: "site",
       visibility: "public",
@@ -747,6 +749,15 @@ describe("scratchwork project commands", () => {
         if (url.pathname === "/api/projects/site/unpublish" && request.method === "POST") {
           return Response.json({ project: { ...project, visibility: "private" } });
         }
+        if (url.pathname === "/api/projects/site/share" && request.method === "POST") {
+          const body = await request.json();
+          shareBodies.push(body);
+          const read = body.add != null ? ["alice@example.com", "@example.com"] : ["@example.com"];
+          return Response.json({
+            project: { ...project, permissions: { read, write: [], admin: [] } },
+            warnings: [],
+          });
+        }
         if (url.pathname === "/api/projects/site" && request.method === "DELETE") return Response.json({ ok: true });
         if (url.pathname === "/api/projects/site/bundle") {
           return Response.json({
@@ -764,6 +775,24 @@ describe("scratchwork project commands", () => {
       expect((await runCli(["projects", "--server", serverUrl], dir)).stdout).toContain(`site\tpublic\t${serverUrl}/site/`);
       expect((await runCli(["info", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"project": "site"');
       expect((await runCli(["unpublish", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["share", "alice@example.com", "@example.com", "--server", serverUrl, "--project", "site"], dir)).stdout)
+        .toContain('"alice@example.com"');
+      expect((await runCli(["share", "--role", "write", "bob@example.com", "--server", serverUrl, "--project", "site"], dir)).code)
+        .toBe(0);
+      // Targets and the project URL mix as positionals; anything with an "@" is a target.
+      const revoked = (await runCli(["revoke", "alice@example.com", `${serverUrl}/site/`], dir)).stdout;
+      expect(revoked).toContain('"@example.com"');
+      expect(revoked).not.toContain('"alice@example.com"');
+      expect(shareBodies).toEqual([
+        { add: ["alice@example.com", "@example.com"], role: "read" },
+        { add: ["bob@example.com"], role: "write" },
+        { remove: ["alice@example.com"] },
+      ]);
+      const badRole = await runCli(["share", "--role", "owner", "alice@example.com", "--server", serverUrl, "--project", "site"], dir);
+      expect(badRole.code).toBe(1);
+      const noTargets = await runCli(["share", "--server", serverUrl, "--project", "site"], dir);
+      expect(noTargets.code).toBe(1);
+      expect(noTargets.stderr).toContain("pass at least one email address or @domain group");
       expect((await runCli(["delete", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain("Deleted site");
       expect((await runCli(["info", `${serverUrl}/site/`], dir)).stdout).toContain('"project": "site"');
       expect((await runCli(["unpublish", `${serverUrl}/site/`], dir)).stdout).toContain('"visibility": "private"');
@@ -779,8 +808,61 @@ describe("scratchwork project commands", () => {
       expect(seen).toContain("GET /api/projects");
       expect(seen).toContain("GET /api/resolve");
       expect(seen).toContain("POST /api/projects/site/unpublish");
+      expect(seen).toContain("POST /api/projects/site/share");
       expect(seen).toContain("DELETE /api/projects/site");
       expect(seen).toContain("GET /api/projects/site/bundle");
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("share against a server without the /share API explains the version gap", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-share-old-server-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+
+    // An old server: /share is an unknown route (bare "Not found"), unlike a
+    // missing project ("Project not found").
+    const server = Bun.serve({
+      port,
+      async fetch() {
+        return Response.json({ error: "Not found" }, { status: 404 });
+      },
+    });
+
+    try {
+      const { code, stderr } = await runCli(["share", "alice@example.com", "--server", serverUrl, "--project", "site"], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("does not support sharing yet");
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("HTML error pages are summarized, never dumped into the terminal", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-html-error-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+
+    // A crashing edge (Cloudflare, a proxy) answers with a full HTML page.
+    const server = Bun.serve({
+      port,
+      async fetch() {
+        return new Response(
+          "<!DOCTYPE html>\n<html><head><title>Worker threw exception | Cloudflare</title></head><body><div>lots of markup</div></body></html>",
+          { status: 500, headers: { "content-type": "text/html" } },
+        );
+      },
+    });
+
+    try {
+      const { code, stderr } = await runCli(["info", "--server", serverUrl, "--project", "site"], dir);
+      expect(code).toBe(1);
+      expect(stderr).toContain("server returned 500: Worker threw exception | Cloudflare");
+      expect(stderr).not.toContain("<!DOCTYPE");
+      expect(stderr).not.toContain("<div>");
     } finally {
       server.stop(true);
       rmSync(dir, { recursive: true, force: true });

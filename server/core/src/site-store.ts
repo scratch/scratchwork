@@ -15,6 +15,7 @@ import { contentType } from "../../../shared/src/site/content";
 import {
   accessGroupIsSubset,
   accessGroupMatches,
+  accessGroupModify,
   accessGroupUsesOnlyDomains,
   isReservedSlug,
   isSafeProjectIdentifier,
@@ -68,6 +69,29 @@ export interface PublishResult {
   readonly openPath: string;
 }
 
+/** A user's effective permission level on one project, from least to greatest. Each
+ * level implies the ones below it; `owner` is fixed at creation and cannot be granted. */
+export type ProjectRole = "none" | "read" | "write" | "admin" | "owner";
+
+/** The roles a share grant can assign (ownership is not grantable). */
+export type ShareRole = "read" | "write" | "admin";
+
+/** Requested grant changes for one share call; targets are emails or @domain groups.
+ * `add` assigns the role (moving targets already holding another role), `remove` strips
+ * every role. */
+export interface ShareChanges {
+  readonly role: ShareRole;
+  readonly add: ReadonlyArray<string>;
+  readonly remove: ReadonlyArray<string>;
+}
+
+/** What share returns: the updated pointer plus advisory warnings (grants that were
+ * revoked but leave the account with access anyway). */
+export interface ShareResult {
+  readonly record: SiteRecord;
+  readonly warnings: ReadonlyArray<string>;
+}
+
 /** Site-store failure; `status` becomes the HTTP response status. */
 export class SiteStoreError extends Data.TaggedError("SiteStoreError")<{
   readonly status: number;
@@ -91,7 +115,15 @@ export interface SiteStoreShape {
   readonly unpublish: (
     project: string,
     user: AuthUser,
+    config: ServerConfigShape,
   ) => Effect.Effect<SiteRecord, SiteStoreError | StorageError>;
+  /** Grants and revokes individual email/@domain access on a project's visibility. */
+  readonly share: (
+    project: string,
+    user: AuthUser,
+    changes: ShareChanges,
+    config: ServerConfigShape,
+  ) => Effect.Effect<ShareResult, SiteStoreError | StorageError>;
   /** Deletes the project pointer and owner index; immutable blobs are retained. */
   readonly deleteProject: (
     project: string,
@@ -122,7 +154,8 @@ function makeSiteStore(storage: ObjectStorageShape, db: PrimitiveDbShape): SiteS
     publish: (request, user, config) => publishProject(storage, db, request, user, config),
     loadProject: (project) => loadPublishedSite(storage, db, project),
     listProjects: (user) => listProjects(db, user),
-    unpublish: (project, user) => unpublishProject(db, project, user),
+    unpublish: (project, user, config) => unpublishProject(db, project, user, config),
+    share: (project, user, changes, config) => updateProjectSharing(db, project, user, changes, config),
     deleteProject: (project, user) => deleteProject(db, project, user),
     bundle: (project) => projectBundle(storage, db, project),
   });
@@ -153,10 +186,10 @@ function publishProject(
     yield* validateVisibility(visibility, config);
 
     if (loaded != null && requested != null) {
-      if (!canWriteProject(loaded.value, user)) {
+      if (!roleAtLeast(projectRole(loaded.value, user, config), "write")) {
         return yield* Effect.fail(projectNameTaken(requested));
       }
-      return yield* updateProject(storage, db, request, user, loaded, visibility);
+      return yield* updateProject(storage, db, request, user, loaded, visibility, config);
     }
 
     if (config.usersCanSetProjectNames) {
@@ -219,6 +252,9 @@ function writeNewProject(
     const record = siteRecord({
       project,
       visibility,
+      readers: "private",
+      writers: "private",
+      admins: "private",
       user,
       createdAt: now,
       updatedAt: now,
@@ -237,7 +273,8 @@ function writeNewProject(
   });
 }
 
-/** Writes a new immutable revision and flips an existing project pointer. */
+/** Writes a new immutable revision and flips an existing project pointer. Writers may
+ * publish content; changing visibility along the way stays an admin action. */
 function updateProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
@@ -245,10 +282,15 @@ function updateProject(
   user: AuthUser,
   loaded: LoadedDbRecord<SiteRecord>,
   visibility: AccessGroup,
+  config: ServerConfigShape,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
-    if (!canWriteProject(loaded.value, user)) {
-      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can publish updates" }));
+    const role = projectRole(loaded.value, user, config);
+    if (!roleAtLeast(role, "write")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Publishing updates requires write access to this project" }));
+    }
+    if (visibility !== loaded.value.visibility && !roleAtLeast(role, "admin")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Changing project visibility requires admin access" }));
     }
 
     const now = new Date().toISOString();
@@ -256,6 +298,9 @@ function updateProject(
     const record = siteRecord({
       project: loaded.value.project,
       visibility,
+      readers: loaded.value.readers,
+      writers: loaded.value.writers,
+      admins: loaded.value.admins,
       user: loaded.value.owner,
       createdAt: loaded.value.createdAt,
       updatedAt: now,
@@ -317,21 +362,99 @@ function listProjects(
   });
 }
 
-/** Sets project visibility to private, preserving all content and owner metadata. */
+/** Resets a project to owner-only, preserving all content and owner metadata: visibility
+ * becomes private and every grant is cleared. Fine-grained changes go through share. */
 function unpublishProject(
   db: PrimitiveDbShape,
   project: string,
   user: AuthUser,
+  config: ServerConfigShape,
 ): Effect.Effect<SiteRecord, SiteStoreError> {
   return Effect.gen(function* () {
     const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return yield* Effect.fail(new SiteStoreError({ status: 404, message: "Project not found" }));
-    if (!canWriteProject(loaded.value, user)) {
-      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can unpublish this project" }));
+    if (!roleAtLeast(projectRole(loaded.value, user, config), "admin")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Unpublishing requires admin access to this project" }));
     }
-    const next = { ...loaded.value, visibility: "private", updatedAt: new Date().toISOString() } satisfies SiteRecord;
+    const next = {
+      ...loaded.value,
+      visibility: "private",
+      readers: "private",
+      writers: "private",
+      admins: "private",
+      updatedAt: new Date().toISOString(),
+    } satisfies SiteRecord;
     return (yield* putProjectRecord(db, next, { ifMatch: loaded.version })).value;
   });
+}
+
+/** Applies grant/revoke deltas to a project's role groups. `add` assigns the requested
+ * role — a target holding a different role is moved, never duplicated — and `remove`
+ * strips every role. Grants are validated against server sharing policy; pure revokes are
+ * not — the result is strictly narrower than what the policy already admitted, and a
+ * later policy tightening must never block revocation. */
+function updateProjectSharing(
+  db: PrimitiveDbShape,
+  project: string,
+  user: AuthUser,
+  changes: ShareChanges,
+  config: ServerConfigShape,
+): Effect.Effect<ShareResult, SiteStoreError> {
+  return Effect.gen(function* () {
+    const loaded = yield* loadSiteRecord(db, project);
+    if (loaded == null) return yield* Effect.fail(new SiteStoreError({ status: 404, message: "Project not found" }));
+    if (!roleAtLeast(projectRole(loaded.value, user, config), "admin")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Changing project sharing requires admin access" }));
+    }
+
+    const groups = { read: loaded.value.readers, write: loaded.value.writers, admin: loaded.value.admins };
+    const modified = {} as Record<ShareRole, AccessGroup>;
+    for (const role of ["read", "write", "admin"] as const) {
+      // Targets are added to the requested role's group and removed everywhere else.
+      modified[role] = yield* accessGroupModify(groups[role], {
+        add: role === changes.role ? changes.add : [],
+        remove: role === changes.role ? changes.remove : [...changes.remove, ...changes.add],
+      }).pipe(Effect.mapError((error) => new SiteStoreError({ status: 400, message: error.message })));
+    }
+    if (changes.add.length > 0) yield* validateVisibility(modified[changes.role], config);
+
+    const next = {
+      ...loaded.value,
+      readers: modified.read,
+      writers: modified.write,
+      admins: modified.admin,
+      updatedAt: new Date().toISOString(),
+    } satisfies SiteRecord;
+    const written = yield* putProjectRecord(db, next, { ifMatch: loaded.version });
+    return { record: written.value, warnings: revokeWarnings(written.value, changes.remove, config) };
+  });
+}
+
+/** Flags revoked emails that still have access: the owner (always readable to them), an
+ * address a remaining grant covers, or public visibility — so a revoke never looks more
+ * effective than it is. */
+function revokeWarnings(
+  record: SiteRecord,
+  removed: ReadonlyArray<string>,
+  config: ServerConfigShape,
+): ReadonlyArray<string> {
+  const warnings: Array<string> = [];
+  for (const target of removed) {
+    const email = target.trim().toLowerCase();
+    if (!email.includes("@") || email.startsWith("@")) continue;
+    if (email === record.owner.email) {
+      warnings.push(`${email} owns this project and always has access`);
+      continue;
+    }
+    const remaining = projectRole(record, { id: "", email }, config);
+    if (remaining === "none") continue;
+    const viaGrant = [record.readers, record.writers, record.admins].some((group) =>
+      accessGroupIsSubset(group, config.maxVisibility) && accessGroupMatches(group, { email }));
+    warnings.push(viaGrant
+      ? `${email} still has ${remaining} access through remaining grants`
+      : `${email} still has read access because the project is public`);
+  }
+  return warnings;
 }
 
 /** Deletes the mutable project record and owner index, releasing the name. Immutable
@@ -344,7 +467,7 @@ function deleteProject(
   return Effect.gen(function* () {
     const loaded = yield* loadSiteRecord(db, project);
     if (loaded == null) return;
-    if (!canWriteProject(loaded.value, user)) {
+    if (!isProjectOwner(loaded.value, user)) {
       return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can delete this project" }));
     }
     yield* db.delete(PROJECTS_NAMESPACE, project, { ifMatch: loaded.version }).pipe(Effect.mapError(dbError));
@@ -426,17 +549,36 @@ function buildRevision(
   });
 }
 
-/** Returns true when the user may read a project under server policy. The owner can always
- * read their own project, even when a later maxVisibility tightening exceeds the stored
- * visibility — the ceiling gates other readers, not ownership. */
+/** Role precedence, least to greatest. */
+const ROLE_ORDER: Record<ProjectRole, number> = { none: 0, read: 1, write: 2, admin: 3, owner: 4 };
+
+/** Returns true when `role` grants at least `minimum`'s permissions. */
+export function roleAtLeast(role: ProjectRole, minimum: ProjectRole): boolean {
+  return ROLE_ORDER[role] >= ROLE_ORDER[minimum];
+}
+
+/** Resolves a user's effective role on a project under server policy. The owner always
+ * holds every role, even when a later maxVisibility tightening exceeds the stored groups —
+ * the ceiling gates other principals, not ownership. Each granted group (and public
+ * visibility itself) is honored only while it sits within maxVisibility, so tightening
+ * the ceiling locks a project down without touching its records. */
+export function projectRole(record: SiteRecord, user: AuthUser | null, config: ServerConfigShape): ProjectRole {
+  if (user != null && isProjectOwner(record, user)) return "owner";
+  const admits = (group: AccessGroup) =>
+    accessGroupIsSubset(group, config.maxVisibility) && accessGroupMatches(group, user);
+  if (user != null && admits(record.admins)) return "admin";
+  if (user != null && admits(record.writers)) return "write";
+  if (admits(record.readers) || admits(record.visibility)) return "read";
+  return "none";
+}
+
+/** Returns true when the user may read a project under server policy. */
 export function canReadProject(record: SiteRecord, user: AuthUser | null, config: ServerConfigShape): boolean {
-  if (user != null && canWriteProject(record, user)) return true;
-  if (!accessGroupIsSubset(record.visibility, config.maxVisibility)) return false;
-  return accessGroupMatches(record.visibility, user);
+  return roleAtLeast(projectRole(record, user, config), "read");
 }
 
 /** Returns true when the user owns the project. */
-export function canWriteProject(record: SiteRecord, user: AuthUser): boolean {
+export function isProjectOwner(record: SiteRecord, user: AuthUser): boolean {
   return record.owner.id === user.id || record.owner.email.toLowerCase() === user.email.toLowerCase();
 }
 
@@ -453,6 +595,9 @@ function projectNameTaken(project: string): SiteStoreError {
 function siteRecord(input: {
   readonly project: string;
   readonly visibility: AccessGroup;
+  readonly readers: AccessGroup;
+  readonly writers: AccessGroup;
+  readonly admins: AccessGroup;
   readonly user: AuthUser | SiteOwner;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -462,6 +607,9 @@ function siteRecord(input: {
     version: 4,
     project: input.project,
     visibility: input.visibility,
+    readers: input.readers,
+    writers: input.writers,
+    admins: input.admins,
     owner: ownerFromUser(input.user),
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
@@ -501,7 +649,18 @@ function loadSiteRecord(
   return db.get<JsonValue>(PROJECTS_NAMESPACE, project).pipe(
     Effect.mapError(dbError),
     Effect.flatMap((record) => record == null ? Effect.succeed(null) : decodeDbRecord(record, SiteRecordSchema)),
+    Effect.map((loaded) => loaded == null ? null : { ...loaded, value: migrateSiteRecord(loaded.value) }),
   );
+}
+
+/** Records written before the visibility/grants split stored read grants inside
+ * `visibility` (for example "alice@x.com,@x.com"). Migrate at read time: the grant list
+ * moves to `readers` and visibility becomes the plain private toggle. Every mutation
+ * flows through loadSiteRecord, so the first write after migration persists the new
+ * shape. */
+export function migrateSiteRecord(record: SiteRecord): SiteRecord {
+  if (record.visibility === "public" || record.visibility === "private") return record;
+  return { ...record, visibility: "private", readers: record.visibility };
 }
 
 /** Writes the project pointer under the given precondition and decodes the result. */

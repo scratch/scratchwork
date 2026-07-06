@@ -10,12 +10,12 @@ describe("decodePublishRequest", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "//docs///",
       project: "site_docs",
-      visibility: "Founder@Example.com,@YC.com",
+      visibility: "Public",
     }));
 
     expect(request.openPath).toBe("/docs/");
     expect(request.project).toBe("site_docs");
-    expect(request.visibility).toBe("founder@example.com,@yc.com");
+    expect(request.visibility).toBe("public");
     expect(request.totalBytes).toBe(5);
   });
 
@@ -71,6 +71,13 @@ describe("decodePublishRequest", () => {
       project: "site",
       visibility: "public,@example.com",
     }))).rejects.toThrow("Invalid access group");
+
+    // Grant lists are managed through share, not the visibility toggle.
+    await expect(Effect.runPromise(decodePublishRequest({
+      bundle: bundle({ "index.html": "hello" }),
+      project: "site",
+      visibility: "alice@example.com,@example.com",
+    }))).rejects.toThrow("scratchwork share");
   });
 
   test("rejects the retired workspace field as an excess property", async () => {

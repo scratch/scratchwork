@@ -14,16 +14,17 @@ import { servePath } from "../../../shared/src/site/serve";
 import { isLoopbackHost } from "../../../shared/src/util/url";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
-import { isSafeProjectIdentifier } from "./access";
+import { accessGroupTerms, isSafeProjectIdentifier } from "./access";
 import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth";
 import { ServerConfig, type ServerConfigShape } from "./config";
 import { projectAccessCookie, projectAccessCookieValues } from "./cookies";
 import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages";
 import { HttpError, jsonResponse, securityHeaders } from "./http";
 import { readPublishRequest } from "./publish-request";
+import { readShareRequest } from "./share-request";
 import { projectForRequest, routeRest } from "./routes";
 import { type SiteRecord } from "./site-records";
-import { canReadProject, SiteStore, SiteStoreError, type LoadedSite } from "./site-store";
+import { canReadProject, projectRole, roleAtLeast, SiteStore, SiteStoreError, type LoadedSite, type ProjectRole } from "./site-store";
 import { StorageError } from "./storage";
 
 const NO_STORE = "no-store, must-revalidate";
@@ -116,6 +117,7 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
       if (request.method === "GET" && projectApi.action == null) return yield* projectInfo(request, projectApi.project);
       if (request.method === "GET" && projectApi.action === "bundle") return yield* projectBundle(request, projectApi.project);
       if (request.method === "POST" && projectApi.action === "unpublish") return yield* unpublishProject(request, projectApi.project);
+      if (request.method === "POST" && projectApi.action === "share") return yield* shareProject(request, projectApi.project);
       if (request.method === "DELETE" && projectApi.action == null) return yield* deleteProject(request, projectApi.project);
       return yield* Effect.fail(new HttpError({ status: 405, message: "Method not allowed" }));
     }
@@ -135,15 +137,15 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
 /** Parses /api/projects/:project(/:action) paths; null when it is not one. The decoded
  * project segment is validated here so malformed names become a 404 instead of reaching
  * the store as backend keys. */
-function projectApiPath(pathname: string): { readonly project: string; readonly action?: "unpublish" | "bundle" } | null {
+function projectApiPath(pathname: string): { readonly project: string; readonly action?: "unpublish" | "bundle" | "share" } | null {
   const match = /^\/api\/projects\/([^/]+)(?:\/([^/]+))?$/.exec(pathname);
   if (match == null) return null;
   const action = match[2];
-  if (action != null && action !== "unpublish" && action !== "bundle") return null;
+  if (action != null && action !== "unpublish" && action !== "bundle" && action !== "share") return null;
   try {
     const project = decodeURIComponent(match[1]);
     if (!isSafeProjectIdentifier(project)) return null;
-    return { project, action: action as "unpublish" | "bundle" | undefined };
+    return { project, action: action as "unpublish" | "bundle" | "share" | undefined };
   } catch {
     return null;
   }
@@ -178,7 +180,9 @@ function listProjects(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const siteStore = yield* SiteStore;
     const projects = yield* siteStore.listProjects(user);
     const contentBase = contentBaseUrl(request, config);
-    return jsonResponse({ projects: projects.map((project) => projectSummary(project, contentBase)) }, 200);
+    return jsonResponse({
+      projects: projects.map((project) => projectSummary(project, contentBase, projectRole(project, user, config))),
+    }, 200);
   });
 }
 
@@ -195,7 +199,9 @@ function resolveProjectPath(request: HttpServerRequest.HttpServerRequest, url: U
     const auth = yield* Auth;
     const user = yield* auth.requireApiUser(request);
     const site = yield* requireReadableSite(yield* loadSiteForPath(path), user, config);
-    return jsonResponse({ project: projectSummary(site.record, contentBaseUrl(request, config)) }, 200);
+    return jsonResponse({
+      project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config)),
+    }, 200);
   });
 }
 
@@ -207,7 +213,9 @@ function projectInfo(request: HttpServerRequest.HttpServerRequest, project: stri
     const user = yield* auth.requireApiUser(request);
     const siteStore = yield* SiteStore;
     const site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
-    return jsonResponse({ project: projectSummary(site.record, contentBaseUrl(request, config)) }, 200);
+    return jsonResponse({
+      project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config)),
+    }, 200);
   });
 }
 
@@ -233,8 +241,27 @@ function unpublishProject(request: HttpServerRequest.HttpServerRequest, project:
     const auth = yield* Auth;
     const user = yield* auth.requireApiUser(request);
     const siteStore = yield* SiteStore;
-    const record = yield* siteStore.unpublish(project, user);
-    return jsonResponse({ project: projectSummary(record, contentBaseUrl(request, config)) }, 200);
+    const record = yield* siteStore.unpublish(project, user, config);
+    return jsonResponse({
+      project: projectSummary(record, contentBaseUrl(request, config), projectRole(record, user, config)),
+    }, 200);
+  });
+}
+
+/** Grants or revokes email/@domain access by editing the project's visibility group. */
+function shareProject(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    yield* rejectCrossOriginApiRequest(request, appBaseUrl(request, config));
+    const auth = yield* Auth;
+    const user = yield* auth.requireApiUser(request);
+    const changes = yield* readShareRequest(request);
+    const siteStore = yield* SiteStore;
+    const result = yield* siteStore.share(project, user, changes, config);
+    return jsonResponse({
+      project: projectSummary(result.record, contentBaseUrl(request, config), projectRole(result.record, user, config)),
+      warnings: result.warnings,
+    }, 200);
   });
 }
 
@@ -281,11 +308,24 @@ function rejectCrossOriginApiRequest(
   return Effect.void;
 }
 
-/** Shapes one project record for API responses. */
-function projectSummary(record: SiteRecord, contentBase: string): Record<string, unknown> {
+/** Shapes one project record for API responses. `visibility` is the public/private
+ * toggle; `permissions` lists the per-role grants and names other users' emails, so it
+ * is shown only to admins and the owner (the caller's role decides, never appears in
+ * the payload). */
+function projectSummary(record: SiteRecord, contentBase: string, callerRole: ProjectRole): Record<string, unknown> {
+  const permissions = roleAtLeast(callerRole, "admin")
+    ? {
+        permissions: {
+          read: accessGroupTerms(record.readers),
+          write: accessGroupTerms(record.writers),
+          admin: accessGroupTerms(record.admins),
+        },
+      }
+    : {};
   return {
     project: record.project,
     visibility: record.visibility,
+    ...permissions,
     url: `${contentBase}/${encodeURIComponent(record.project)}/`,
     owner: record.owner,
     createdAt: record.createdAt,

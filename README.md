@@ -87,6 +87,14 @@ scratchwork publish index.html
 
 The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `project`, `visibility`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
 
+Share a published project with specific accounts or a whole domain — as readers, writers (can publish updates), or admins (can also manage sharing) — or take access away again:
+
+```sh
+scratchwork share alice@example.com @example.com
+scratchwork share --role write bob@example.com
+scratchwork revoke alice@example.com
+```
+
 Deployments live as projects under `deploy/`, one per domain, each deployable with one command:
 
 ```sh

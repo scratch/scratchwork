@@ -7,7 +7,7 @@ export const server = {
   auth: "oauth",
   authSessionSeconds: 2_592_000,
   allowedUsers: "public",
-  maxVisibility: "public",
+  maxVisibility: "@gmail.com,@koomen.org",
   usersCanSetProjectNames: true,
   defaultVisibility: "private",
 } satisfies ScratchworkServerConfig;

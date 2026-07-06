@@ -5,19 +5,23 @@ import type { ServerConfigShape } from "../src/config";
 import { PrimitiveDb, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../src/db";
 import type { PublishRequest } from "../src/publish-request";
 import { projectForRequest, routeRest } from "../src/routes";
-import type { SiteRecord } from "../src/site-records";
-import { SiteStore, SiteStoreLive, SiteStoreError, canReadProject } from "../src/site-store";
+import * as Schema from "effect/Schema";
+import { SiteRecordSchema, type SiteRecord } from "../src/site-records";
+import { SiteStore, SiteStoreLive, SiteStoreError, canReadProject, migrateSiteRecord, projectRole } from "../src/site-store";
 import { bundle, memoryStorageLayer } from "./helpers";
 
 const owner = { id: "user-1", email: "founder@example.com" };
 const reader = { id: "user-2", email: "reader@example.com" };
 
-/** Builds a SiteRecord fixture with the given visibility. */
-function record(visibility: string): SiteRecord {
+/** Builds a SiteRecord fixture with the given visibility and optional grant groups. */
+function record(visibility: string, groups: { readers?: string; writers?: string; admins?: string } = {}): SiteRecord {
   return {
     version: 4,
     project: "site",
     visibility,
+    readers: groups.readers ?? "private",
+    writers: groups.writers ?? "private",
+    admins: groups.admins ?? "private",
     owner,
     createdAt: "2026-06-29T00:00:00.000Z",
     updatedAt: "2026-06-29T00:00:00.000Z",
@@ -88,6 +92,69 @@ describe("canReadProject", () => {
     expect(canReadProject(record("public"), reader, config("public"))).toBe(true);
     expect(canReadProject(record("public"), null, config("public"))).toBe(true);
     expect(canReadProject(record("private"), reader, config("public"))).toBe(false);
+  });
+});
+
+describe("projectRole", () => {
+  test("grades owner, admin, write, read, and none", () => {
+    const shared = record("private", { readers: "reader@example.com", writers: "writer@example.com", admins: "admin@example.com" });
+    const serverConfig = config("public");
+    expect(projectRole(shared, owner, serverConfig)).toBe("owner");
+    expect(projectRole(shared, { id: "u-a", email: "admin@example.com" }, serverConfig)).toBe("admin");
+    expect(projectRole(shared, { id: "u-w", email: "writer@example.com" }, serverConfig)).toBe("write");
+    expect(projectRole(shared, reader, serverConfig)).toBe("read");
+    expect(projectRole(shared, { id: "u-x", email: "stranger@example.com" }, serverConfig)).toBe("none");
+    expect(projectRole(shared, null, serverConfig)).toBe("none");
+  });
+
+  test("public visibility confers read on everyone, including anonymous viewers", () => {
+    const open = record("public");
+    expect(projectRole(open, reader, config("public"))).toBe("read");
+    expect(projectRole(open, null, config("public"))).toBe("read");
+  });
+
+  test("domain grants confer write and admin", () => {
+    const shared = record("private", { writers: "@team.example.com", admins: "@ops.example.com" });
+    expect(projectRole(shared, { id: "u-1", email: "dev@team.example.com" }, config("public"))).toBe("write");
+    expect(projectRole(shared, { id: "u-2", email: "sre@ops.example.com" }, config("public"))).toBe("admin");
+  });
+
+  test("the maxVisibility ceiling gates every granted role, never the owner", () => {
+    const shared = record("public", { writers: "writer@example.com", admins: "admin@example.com" });
+    const tightened = config("@allowed.example.com");
+    expect(projectRole(shared, owner, tightened)).toBe("owner");
+    expect(projectRole(shared, { id: "u-a", email: "admin@example.com" }, tightened)).toBe("none");
+    expect(projectRole(shared, { id: "u-w", email: "writer@example.com" }, tightened)).toBe("none");
+    expect(projectRole(shared, reader, tightened)).toBe("none");
+  });
+});
+
+describe("legacy record migration", () => {
+  test("records written before roles decode with private grant groups", () => {
+    const decoded = Schema.decodeUnknownSync(SiteRecordSchema)({
+      version: 4,
+      project: "site",
+      visibility: "public",
+      owner,
+      createdAt: "2026-06-29T00:00:00.000Z",
+      updatedAt: "2026-06-29T00:00:00.000Z",
+      currentRevisionId: "rev-1",
+      currentOpenPath: "/",
+      fileCount: 1,
+      totalBytes: 10,
+    });
+    expect(decoded.readers).toBe("private");
+    expect(decoded.writers).toBe("private");
+    expect(decoded.admins).toBe("private");
+  });
+
+  test("a legacy group visibility migrates into the readers grant list", () => {
+    const legacy = migrateSiteRecord(record("alice@example.com,@example.com"));
+    expect(legacy.visibility).toBe("private");
+    expect(legacy.readers).toBe("alice@example.com,@example.com");
+    // Binary visibilities pass through untouched.
+    expect(migrateSiteRecord(record("public"))).toEqual(record("public"));
+    expect(migrateSiteRecord(record("private"))).toEqual(record("private"));
   });
 });
 

@@ -19,7 +19,7 @@ import { runExample } from "./commands/example";
 import { runLogin } from "./commands/login";
 import { DEFAULT_PORT, runDev } from "./commands/dev";
 import { runPublish } from "./commands/publish";
-import { runClone, runDelete, runInfo, runMe, runProjects, runStream, runUnpublish } from "./commands/projects";
+import { runClone, runDelete, runInfo, runMe, runProjects, runRevoke, runShare, runStream, runUnpublish } from "./commands/projects";
 import { runTemplate } from "./commands/template";
 import * as ValidationError from "@effect/cli/ValidationError";
 import { CliError } from "./errors";
@@ -80,7 +80,7 @@ const publishCommand = Command.make(
     path: pathArg("path", ".", "File or directory to publish. Default: current directory. Directories are uploaded recursively, excluding .git, node_modules, and .scratchwork-data."),
     server: textOption("server", "url", "Scratchwork app server, such as sndbx.sh or https://app.sndbx.sh. Required on first publish; later publishes read it from .scratchwork.json."),
     project: textOption("project", "name", "Project name for the published URL. Default: saved config, the directory name, or the file name without its extension. Servers in random-naming mode assign a name on first publish."),
-    visibility: textOption("visibility", "scope", "Access level: private, public, an email address, or a domain group like @example.com. Default: saved config, the project's current visibility, or the server default."),
+    visibility: textOption("visibility", "scope", "Visibility toggle: private or public. Default: saved config, the project's current visibility, or the server default. Grant per-account or per-domain access with scratchwork share."),
   },
   runPublish,
 ).pipe(Command.withDescription("Publish a static Scratchwork project to a server"));
@@ -125,6 +125,32 @@ const infoCommand = Command.make("info", projectRefOptions, runInfo).pipe(
   Command.withDescription("Show metadata for one published project"),
 );
 
+/** Args/options shared by share and revoke: grant targets mixed with the project reference. */
+const shareOptions = (verb: string) => ({
+  server: textOption("server", "url", "Scratchwork app server. May be omitted when the project reference or .scratchwork.json provides it."),
+  project: textOption("project", "name", "Project name. Overrides values from .scratchwork.json or a URL."),
+  targets: Args.text({ name: "target" }).pipe(
+    Args.repeated,
+    Args.withDescription(`Email addresses or @domain groups to ${verb}, such as alice@example.com or @example.com. One target may instead be a published project URL or a local project path (anything without an "@").`),
+  ),
+});
+
+const shareCommand = Command.make(
+  "share",
+  {
+    ...shareOptions("grant access"),
+    role: Options.choice("role", ["read", "write", "admin"]).pipe(
+      Options.withDefault("read" as const),
+      Options.withDescription("Permission level to assign: read (view the project), write (read + publish updates), or admin (write + manage sharing, visibility, and unpublish). Default: read. Sharing again with a different role moves the target; ownership stays with the project creator."),
+    ),
+  },
+  runShare,
+).pipe(Command.withDescription("Grant accounts or whole domains access to a project"));
+
+const revokeCommand = Command.make("revoke", shareOptions("revoke"), runRevoke).pipe(
+  Command.withDescription("Remove accounts' or domains' access to a project"),
+);
+
 const unpublishCommand = Command.make("unpublish", projectRefOptions, runUnpublish).pipe(
   Command.withDescription("Make a published project private"),
 );
@@ -165,6 +191,8 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
     meCommand,
     projectsCommand,
     publishCommand,
+    revokeCommand,
+    shareCommand,
     streamCommand,
     templateCommand,
     unpublishCommand,

@@ -82,10 +82,23 @@ export function apiJson(
   });
 }
 
-/** Extracts the most useful error text from a failed response: its `error` field, raw body, or status. */
+/** Extracts the most useful error text from a failed response: the JSON `error` field
+ * when the server sent one, otherwise a short summary. Non-JSON bodies (Cloudflare or
+ * proxy HTML error pages, stack dumps) are never echoed wholesale into the terminal —
+ * an HTML page is reduced to its title and anything long is truncated. */
 export function apiErrorText(response: ApiResponse): string {
-  const fromBody = isRecord(response.json) && typeof response.json.error === "string" ? response.json.error : response.text;
-  return fromBody || `server returned ${response.status}`;
+  if (isRecord(response.json) && typeof response.json.error === "string" && response.json.error !== "") {
+    return response.json.error;
+  }
+  const text = response.text.trim();
+  if (text === "") return `server returned ${response.status}`;
+  if (/^<(!doctype|html|!--)/i.test(text)) {
+    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(text)?.[1]?.trim();
+    return title != null && title !== ""
+      ? `server returned ${response.status}: ${title}`
+      : `server returned ${response.status} with an HTML error page`;
+  }
+  return text.length > 300 ? `server returned ${response.status}: ${text.slice(0, 300)}…` : text;
 }
 
 /** Builds the API URL for one project, preserving any server path prefix. */

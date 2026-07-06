@@ -211,6 +211,334 @@ describe("server app", () => {
     expect(republish.status).toBe(200);
   });
 
+  test("share grants access and revoke removes it", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+    expect(publish.status).toBe(200);
+
+    const share = await handler(post("/api/projects/site/share", { add: ["Alice@Example.com", "@team.example.com"] }));
+    expect(share.status).toBe(200);
+    const shared = await json(share) as {
+      project: { visibility: string; permissions: { read: string[]; write: string[]; admin: string[] } };
+      warnings: string[];
+    };
+    expect(shared.project.visibility).toBe("private");
+    expect(shared.project.permissions).toEqual({ read: ["alice@example.com", "@team.example.com"], write: [], admin: [] });
+    expect(shared.warnings).toEqual([]);
+
+    // Re-granting an existing target is idempotent.
+    const again = await handler(post("/api/projects/site/share", { add: ["alice@example.com"] }));
+    expect(((await json(again)) as { project: { permissions: { read: string[] } } }).project.permissions.read)
+      .toEqual(["alice@example.com", "@team.example.com"]);
+
+    const revoke = await handler(post("/api/projects/site/share", { remove: ["alice@example.com"] }));
+    expect(((await json(revoke)) as { project: { permissions: { read: string[] } } }).project.permissions.read)
+      .toEqual(["@team.example.com"]);
+
+    const last = await handler(post("/api/projects/site/share", { remove: ["@team.example.com"] }));
+    const cleared = await json(last) as { project: { visibility: string; permissions: { read: string[] } } };
+    expect(cleared.project.visibility).toBe("private");
+    expect(cleared.project.permissions.read).toEqual([]);
+  });
+
+  test("revoke warns when the address keeps access anyway", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+    await handler(post("/api/projects/site/share", { add: ["alice@corp.example.com", "@corp.example.com"] }));
+
+    const covered = await handler(post("/api/projects/site/share", { remove: ["alice@corp.example.com"] }));
+    const coveredBody = await json(covered) as { project: { permissions: { read: string[] } }; warnings: string[] };
+    expect(coveredBody.project.permissions.read).toEqual(["@corp.example.com"]);
+    expect(coveredBody.warnings).toEqual([
+      "alice@corp.example.com still has read access through remaining grants",
+    ]);
+
+    const owner = await handler(post("/api/projects/site/share", { remove: [user.email] }));
+    const ownerBody = await json(owner) as { warnings: string[] };
+    expect(ownerBody.warnings).toEqual(["founder@example.com owns this project and always has access"]);
+  });
+
+  test("share assigns roles and moves targets between them", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+
+    const write = await handler(post("/api/projects/site/share", { add: ["alice@example.com"], role: "write" }));
+    expect(write.status).toBe(200);
+    const written = await json(write) as {
+      project: { visibility: string; permissions: { read: string[]; write: string[]; admin: string[] } };
+    };
+    expect(written.project.visibility).toBe("private");
+    expect(written.project.permissions).toEqual({ read: [], write: ["alice@example.com"], admin: [] });
+
+    // Re-sharing with a different role moves the target, never duplicates it.
+    const admin = await handler(post("/api/projects/site/share", { add: ["alice@example.com"], role: "admin" }));
+    const promoted = await json(admin) as { project: { permissions: { read: string[]; write: string[]; admin: string[] } } };
+    expect(promoted.project.permissions).toEqual({ read: [], write: [], admin: ["alice@example.com"] });
+
+    const read = await handler(post("/api/projects/site/share", { add: ["alice@example.com"] }));
+    const demoted = await json(read) as { project: { permissions: { read: string[]; write: string[]; admin: string[] } } };
+    expect(demoted.project.permissions).toEqual({ read: ["alice@example.com"], write: [], admin: [] });
+
+    // Revoke strips every role.
+    await handler(post("/api/projects/site/share", { add: ["@team.example.com"], role: "write" }));
+    const revoke = await handler(post("/api/projects/site/share", { remove: ["alice@example.com", "@team.example.com"] }));
+    const revoked = await json(revoke) as {
+      project: { permissions: { read: string[]; write: string[]; admin: string[] } };
+      warnings: string[];
+    };
+    expect(revoked.project.permissions).toEqual({ read: [], write: [], admin: [] });
+    expect(revoked.warnings).toEqual([]);
+  });
+
+  test("writers can publish updates but nothing more; admins can share and unpublish", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const ownerHandler = await appHandler({ db, storage, auth: testAuth(user) });
+    const writerHandler = await appHandler({ db, storage, auth: testAuth({ id: "user-w", email: "writer@example.com" }) });
+    const adminHandler = await appHandler({ db, storage, auth: testAuth({ id: "user-a", email: "admin@example.com" }) });
+
+    await ownerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v1" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+    await ownerHandler(post("/api/projects/site/share", { add: ["writer@example.com"], role: "write" }));
+    await ownerHandler(post("/api/projects/site/share", { add: ["admin@example.com"], role: "admin" }));
+
+    // The writer can push a new revision without changing visibility.
+    const republish = await writerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v2 by writer" }),
+      openPath: "/",
+      project: "site",
+    }));
+    expect(republish.status).toBe(200);
+
+    // Changing visibility on publish is an admin action.
+    const escalate = await writerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v3" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    expect(escalate.status).toBe(403);
+    expect(await escalate.text()).toContain("admin access");
+
+    const writerShare = await writerHandler(post("/api/projects/site/share", { add: ["friend@example.com"] }));
+    expect(writerShare.status).toBe(403);
+    const writerUnpublish = await writerHandler(post("/api/projects/site/unpublish", {}));
+    expect(writerUnpublish.status).toBe(403);
+
+    // The admin can share, change visibility on publish, and unpublish — but not delete.
+    const adminShare = await adminHandler(post("/api/projects/site/share", { add: ["friend@example.com"] }));
+    expect(adminShare.status).toBe(200);
+    const adminPublish = await adminHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "v4" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    expect(adminPublish.status).toBe(200);
+    const adminUnpublish = await adminHandler(post("/api/projects/site/unpublish", {}));
+    expect(adminUnpublish.status).toBe(200);
+    const adminDelete = await adminHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
+    expect(adminDelete.status).toBe(403);
+    expect(await adminDelete.text()).toContain("owner");
+
+    const ownerDelete = await ownerHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
+    expect(ownerDelete.status).toBe(200);
+  });
+
+  test("revoking a writer works while the project is public", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    await handler(post("/api/projects/site/share", { add: ["alice@example.com"], role: "write" }));
+
+    const revoke = await handler(post("/api/projects/site/share", { remove: ["alice@example.com"] }));
+    expect(revoke.status).toBe(200);
+    const body = await json(revoke) as {
+      project: { visibility: string; permissions: { write: string[] } };
+      warnings: string[];
+    };
+    expect(body.project.visibility).toBe("public");
+    expect(body.project.permissions.write).toEqual([]);
+    // The write role is gone, but the site is still publicly readable.
+    expect(body.warnings).toEqual(["alice@example.com still has read access because the project is public"]);
+  });
+
+  test("info shows the permissions object to admins and hides it from readers", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const ownerHandler = await appHandler({ db, storage, auth: testAuth(user) });
+    const readerHandler = await appHandler({ db, storage, auth: testAuth({ id: "user-r", email: "reader@example.com" }) });
+
+    await ownerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+    await ownerHandler(post("/api/projects/site/share", { add: ["reader@example.com"] }));
+
+    const ownerInfo = await json(await ownerHandler(new Request("https://scratch.test/api/projects/site"))) as {
+      project: Record<string, unknown>;
+    };
+    expect(ownerInfo.project.visibility).toBe("private");
+    expect(ownerInfo.project.permissions).toEqual({ read: ["reader@example.com"], write: [], admin: [] });
+
+    const readerInfo = await json(await readerHandler(new Request("https://scratch.test/api/projects/site"))) as {
+      project: Record<string, unknown>;
+    };
+    expect(readerInfo.project.visibility).toBe("private");
+    expect("permissions" in readerInfo.project).toBe(false);
+  });
+
+  test("unpublish resets a project to owner-only, clearing every grant", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    await handler(post("/api/projects/site/share", { add: ["alice@example.com"] }));
+    await handler(post("/api/projects/site/share", { add: ["bob@example.com"], role: "write" }));
+
+    const unpublish = await handler(post("/api/projects/site/unpublish", {}));
+    expect(unpublish.status).toBe(200);
+    const body = await json(unpublish) as {
+      project: { visibility: string; permissions: { read: string[]; write: string[]; admin: string[] } };
+    };
+    expect(body.project.visibility).toBe("private");
+    expect(body.project.permissions).toEqual({ read: [], write: [], admin: [] });
+  });
+
+  test("read grants can be managed while a project is public", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "public",
+    }));
+    // The grant is stored alongside the public toggle, so alice keeps read access
+    // when the project later goes private.
+    const response = await handler(post("/api/projects/site/share", { add: ["alice@example.com"] }));
+    expect(response.status).toBe(200);
+    const body = await json(response) as { project: { visibility: string; permissions: { read: string[] } } };
+    expect(body.project.visibility).toBe("public");
+    expect(body.project.permissions.read).toEqual(["alice@example.com"]);
+  });
+
+  test("publish rejects grant-list visibilities in favor of share", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    const response = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "alice@example.com",
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("scratchwork share");
+  });
+
+  test("share is owner-only and 404s for missing projects", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const ownerHandler = await appHandler({ db, storage, auth: testAuth(user) });
+    const otherHandler = await appHandler({
+      db,
+      storage,
+      auth: testAuth({ id: "user-2", email: "other@example.com" }),
+    });
+    await ownerHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+
+    const forbidden = await otherHandler(post("/api/projects/site/share", { add: ["other@example.com"] }));
+    expect(forbidden.status).toBe(403);
+
+    const missing = await ownerHandler(post("/api/projects/no-such/share", { add: ["alice@example.com"] }));
+    expect(missing.status).toBe(404);
+
+    const unauthenticated = await appHandler({ db, storage, auth: testAuth(user, null) });
+    const denied = await unauthenticated(post("/api/projects/site/share", { add: ["alice@example.com"] }));
+    expect(denied.status).toBe(401);
+  });
+
+  test("share validates the request body and targets", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+    await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+
+    const empty = await handler(post("/api/projects/site/share", {}));
+    expect(empty.status).toBe(400);
+    expect(await empty.text()).toContain("at least one target");
+
+    for (const target of ["not-an-email", "public", "private"]) {
+      const invalid = await handler(post("/api/projects/site/share", { add: [target] }));
+      expect(invalid.status).toBe(400);
+      expect(await invalid.text()).toContain("Invalid share target");
+    }
+  });
+
+  test("share enforces sharing policy on grants but never on revokes", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const openHandler = await appHandler({ db, storage, auth: testAuth(user) });
+    await openHandler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+      visibility: "private",
+    }));
+    await openHandler(post("/api/projects/site/share", { add: ["alice@old.example.com", "bob@old.example.com"] }));
+
+    // The same server, after tightening shareAllowedDomains.
+    const restricted = await appHandler({
+      db,
+      storage,
+      auth: testAuth(user),
+      config: { shareAllowedDomains: new Set(["example.com"]) },
+    });
+    const grant = await restricted(post("/api/projects/site/share", { add: ["carol@old.example.com"] }));
+    expect(grant.status).toBe(403);
+    expect(await grant.text()).toContain("shareAllowedDomains");
+
+    // Revoking still works even though the remaining grants predate the policy.
+    const revoke = await restricted(post("/api/projects/site/share", { remove: ["alice@old.example.com"] }));
+    expect(revoke.status).toBe(200);
+    expect(((await json(revoke)) as { project: { permissions: { read: string[] } } }).project.permissions.read)
+      .toEqual(["bob@old.example.com"]);
+  });
+
   test("resolves published content paths to their project", async () => {
     const handler = await appHandler({ auth: testAuth(user) });
     const published = await json(await handler(post("/api/publish", {

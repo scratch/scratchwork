@@ -3,6 +3,9 @@
  * project declares, its resolution to app/content URLs, and its mapping onto the
  * SCRATCHWORK_* environment variables the server core reads at runtime.
  */
+import * as Effect from "effect/Effect";
+import * as Either from "effect/Either";
+import { readServerConfig } from "../core/src/config";
 import { nonEmpty } from "../../shared/src/util/strings";
 import type { DeployEnv } from "./env";
 
@@ -79,6 +82,18 @@ export function validateDeploymentAuth(env: DeployEnv, platform: string): void {
   }
   for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
     if (!env[key]) throw new Error(`${key} is required: ${platform} deploys always use OAuth`);
+  }
+}
+
+/** Validates the composed environment before a deploy by parsing it exactly as the
+ * deployed server will at runtime. A value the server would reject (a malformed
+ * maxVisibility group, a bad URL, a short session secret) must fail the deploy command,
+ * not take the deployed server down on its first request. */
+export function validateDeploymentConfig(env: DeployEnv, platform: string): void {
+  validateDeploymentAuth(env, platform);
+  const parsed = Effect.runSync(Effect.either(readServerConfig(env)));
+  if (Either.isLeft(parsed)) {
+    throw new Error(`Invalid server config: ${parsed.left.message}`);
   }
 }
 
