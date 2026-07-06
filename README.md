@@ -25,8 +25,11 @@ To publish to a running Scratchwork server:
 
 ```sh
 scratchwork login https://your-scratchwork-server.example
-scratchwork publish --workspace myspace --project myproject [path]
+scratchwork publish [path]
+scratchwork publish --project myproject [path]
 ```
+
+Project names are globally unique on a server. The name defaults to the directory name (or the file name without its extension); pass `--project` to choose one. Servers configured to assign random names return the name on first publish.
 
 ## Local development
 
@@ -82,7 +85,7 @@ scratchwork login --server http://localhost:43118
 scratchwork publish index.html
 ```
 
-The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `workspace`, `project`, `visibility`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
+The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `project`, `visibility`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
 
 Deployments live as projects under `deploy/`, one per domain, each deployable with one command:
 
