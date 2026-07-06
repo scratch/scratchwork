@@ -18,7 +18,8 @@ import { isSafeProjectIdentifier } from "./access";
 import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth";
 import { ServerConfig, type ServerConfigShape } from "./config";
 import { projectAccessCookie, projectAccessCookieValues } from "./cookies";
-import { errorJson, HttpError, jsonResponse, securityHeaders } from "./http";
+import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages";
+import { HttpError, jsonResponse, securityHeaders } from "./http";
 import { readPublishRequest } from "./publish-request";
 import { projectForRequest, routeRest } from "./routes";
 import { type SiteRecord } from "./site-records";
@@ -47,10 +48,10 @@ export const app: HttpApp.Default<never, ServerConfig | SiteStore | Auth> =
     const request = yield* HttpServerRequest.HttpServerRequest;
     return yield* handleRequest(request).pipe(
       Effect.catchTags({
-        HttpError: (error) => Effect.succeed(errorJson(error.status, error.message)),
-        AuthError: (error) => Effect.succeed(errorJson(error.status, error.message)),
-        SiteStoreError: (error) => Effect.succeed(errorJson(error.status, error.message)),
-        StorageError: (error) => Effect.succeed(errorJson(500, error.message)),
+        HttpError: (error) => Effect.succeed(errorResponse(request, error.status, error.message)),
+        AuthError: (error) => Effect.succeed(errorResponse(request, error.status, error.message)),
+        SiteStoreError: (error) => Effect.succeed(errorResponse(request, error.status, error.message)),
+        StorageError: (error) => Effect.succeed(errorResponse(request, 500, error.message)),
       }),
     );
   });
@@ -322,12 +323,41 @@ function issueProjectAccess(request: HttpServerRequest.HttpServerRequest, url: U
     }
 
     const siteStore = yield* SiteStore;
-    const site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
+    const loaded = yield* siteStore.loadProject(project);
+    if (acceptsHtmlPage(request) && (loaded == null || !canReadProject(loaded.record, user, config))) {
+      return projectUnavailableResponse(project, user, `${url.pathname}${url.search}`);
+    }
+    const site = yield* requireReadableSite(loaded, user, config);
 
     const token = yield* auth.issueProjectAccessToken(site.record.project, user, "handoff");
     const target = new URL(returnTo);
     target.searchParams.set(HANDOFF_PARAM, token);
     return HttpServerResponse.redirect(target.toString(), { status: 302 });
+  });
+}
+
+/** The browser-facing dead end of the handoff flow: the project is missing or this account
+ * can't read it. Missing and forbidden render the same page with the same status so the
+ * page never confirms which projects exist, and the signed-in viewer gets a way to retry
+ * as someone else — /auth/login always asks Google for the account chooser, and finishing
+ * it replaces the session cookie and re-runs this same /auth/project URL. */
+function projectUnavailableResponse(
+  project: string,
+  user: AuthUser,
+  retryPath: string,
+): HttpServerResponse.HttpServerResponse {
+  return errorPageResponse({
+    status: 404,
+    title: "Project not available",
+    message: `"${project}" doesn't exist, or the account you're signed in with doesn't have access to it.`,
+    note: `You're signed in as ${user.email}.`,
+    actions: [
+      {
+        label: "Sign in with a different account",
+        href: `/auth/login?returnTo=${encodeURIComponent(retryPath)}`,
+        primary: true,
+      },
+    ],
   });
 }
 

@@ -632,6 +632,86 @@ describe("server app", () => {
     expect(garbage.headers.get("set-cookie")).toBeNull();
   });
 
+  test("renders an account-switch page when a signed-in browser can't access a project", async () => {
+    const owner = { id: "owner-1", email: "owner@example.com" };
+    const viewer = { id: "viewer-1", email: "viewer@example.com" };
+    // Session user is the viewer; API bearer (publish) is the owner.
+    const handler = await appHandler({ auth: testAuth(viewer, owner) });
+
+    const publish = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "private" }),
+      openPath: "/",
+      project: "secret",
+      visibility: "private",
+    }));
+    expect(publish.status).toBe(200);
+
+    const pagePath = "/auth/project?route=secret&returnTo=https%3A%2F%2Fscratch.test%2Fsecret%2F";
+    const forbidden = await handler(new Request(`https://scratch.test${pagePath}`, {
+      headers: { accept: "text/html,application/xhtml+xml" },
+      redirect: "manual",
+    }));
+    expect(forbidden.status).toBe(404);
+    expect(forbidden.headers.get("content-type")).toContain("text/html");
+    const forbiddenHtml = await forbidden.text();
+    expect(forbiddenHtml).toContain("Project not available");
+    expect(forbiddenHtml).toContain("You&#39;re signed in as viewer@example.com.");
+    expect(forbiddenHtml).toContain("Sign in with a different account");
+    expect(forbiddenHtml).toContain(`href="/auth/login?returnTo=${encodeURIComponent(pagePath)}"`);
+
+    // A missing project renders the identical page and status, so the page never
+    // confirms whether a private project exists.
+    const missing = await handler(new Request("https://scratch.test/auth/project?route=nope", {
+      headers: { accept: "text/html" },
+      redirect: "manual",
+    }));
+    expect(missing.status).toBe(404);
+    expect(await missing.text()).toContain("Project not available");
+
+    // Non-browser clients keep the masked JSON contract unchanged.
+    const jsonForbidden = await handler(new Request(`https://scratch.test${pagePath}`, { redirect: "manual" }));
+    expect(jsonForbidden.status).toBe(403);
+    expect(await json(jsonForbidden)).toEqual({ error: "Project not found" });
+    const jsonMissing = await handler(new Request("https://scratch.test/auth/project?route=nope", { redirect: "manual" }));
+    expect(jsonMissing.status).toBe(404);
+    expect(await json(jsonMissing)).toEqual({ error: "Project not found" });
+  });
+
+  test("escapes user-controlled values on error pages", async () => {
+    const viewer = { id: "viewer-1", email: "<img src=x onerror=alert(1)>@example.com" };
+    const handler = await appHandler({ auth: testAuth(viewer, viewer) });
+    const response = await handler(new Request("https://scratch.test/auth/project?route=nope", {
+      headers: { accept: "text/html" },
+      redirect: "manual",
+    }));
+    expect(response.status).toBe(404);
+    const html = await response.text();
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;@example.com");
+  });
+
+  test("serves HTML error pages to browser navigations and JSON to everything else", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
+
+    const browser404 = await handler(new Request("https://scratch.test/missing/", {
+      headers: { accept: "text/html,application/xhtml+xml" },
+    }));
+    expect(browser404.status).toBe(404);
+    expect(browser404.headers.get("content-type")).toContain("text/html");
+    expect(await browser404.text()).toContain("Page not found");
+
+    const plain404 = await handler(new Request("https://scratch.test/missing/"));
+    expect(plain404.status).toBe(404);
+    expect(await json(plain404)).toEqual({ error: "Not found" });
+
+    // API routes stay JSON even when a browser navigates to them directly.
+    const api404 = await handler(new Request("https://scratch.test/api/nope", {
+      headers: { accept: "text/html" },
+    }));
+    expect(api404.status).toBe(404);
+    expect(await json(api404)).toEqual({ error: "Not found" });
+  });
+
   test("binds OAuth callback state to a browser cookie", async () => {
     const handler = await appHandler({
       config: {
