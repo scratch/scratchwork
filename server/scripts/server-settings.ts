@@ -11,8 +11,12 @@ import type { DeployEnv } from "./env";
 
 /** The `server` section of a deploy project's config, mapped onto SCRATCHWORK_* env vars. */
 export interface ScratchworkServerConfig {
-  readonly auth?: "oauth";
+  readonly auth?: "oauth" | "cloudflare-access";
   readonly googleClientId?: string;
+  /** Cloudflare Access team domain, like "myteam" or "myteam.cloudflareaccess.com". */
+  readonly cfAccessTeamDomain?: string;
+  /** Audience (AUD) tag of the Cloudflare Access application protecting this server. */
+  readonly cfAccessAud?: string;
   readonly authAllowedEmails?: string;
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
@@ -67,6 +71,8 @@ export function serverConfigEnv(config: ScratchworkServerConfig, resolved: Resol
   const env: DeployEnv = {};
   if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
   if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
+  if (config.cfAccessTeamDomain != null) env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN = config.cfAccessTeamDomain;
+  if (config.cfAccessAud != null) env.SCRATCHWORK_CF_ACCESS_AUD = config.cfAccessAud;
   if (config.authAllowedEmails != null) env.SCRATCHWORK_AUTH_ALLOWED_EMAILS = config.authAllowedEmails;
   if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
   if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
@@ -97,16 +103,26 @@ export function homepagePublishHint(
   return `publish the homepage with: scratchwork publish --server ${server} --project ${config.homepageProject} --visibility public`;
 }
 
-/** Validates required OAuth secrets before a deploy. Auth cannot be disabled. */
+/** Validates required auth settings before a deploy. Auth cannot be disabled. */
 export function validateDeploymentAuth(env: DeployEnv, platform: string): void {
   const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
-  if (authMode !== "" && authMode !== "oauth") {
-    throw new Error(`Invalid SCRATCHWORK_AUTH "${env.SCRATCHWORK_AUTH}": expected "oauth" (the only supported mode), or leave it unset`);
+  if (authMode !== "" && authMode !== "oauth" && authMode !== "cloudflare-access") {
+    throw new Error(`Invalid SCRATCHWORK_AUTH "${env.SCRATCHWORK_AUTH}": expected "oauth" or "cloudflare-access", or leave it unset for oauth`);
+  }
+  if (authMode === "cloudflare-access") {
+    for (const key of ["SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN", "SCRATCHWORK_CF_ACCESS_AUD", "SCRATCHWORK_SESSION_SECRET"]) {
+      if (!env[key]) {
+        throw new Error(
+          `${key} is required for Cloudflare Access auth: copy the team domain and application Audience (AUD) tag from the Cloudflare Zero Trust dashboard, and generate a session secret with "openssl rand -hex 32".`,
+        );
+      }
+    }
+    return;
   }
   for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
     if (!env[key]) {
       throw new Error(
-        `${key} is required: ${platform} deploys always use OAuth. Create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
+        `${key} is required: ${platform} deploys use OAuth unless SCRATCHWORK_AUTH is "cloudflare-access". Create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
       );
     }
   }

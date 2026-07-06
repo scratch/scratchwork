@@ -1,8 +1,10 @@
 /**
- * Google-OAuth auth service and the three signed HMAC token kinds it mints:
- * session tokens (browser cookie or CLI bearer, session TTL), OAuth state tokens
- * (10-minute, browser-bound), and project-access tokens ("handoff": ~60s,
- * query-string form; "cookie": session-length redeemed form).
+ * The auth service — one implementation per auth mode (built-in Google OAuth, or
+ * Cloudflare Access asserting identity via the Cf-Access-Jwt-Assertion header) — and
+ * the three signed HMAC token kinds it mints: session tokens (browser cookie or CLI
+ * bearer, session TTL), OAuth state tokens (10-minute, browser-bound), and
+ * project-access tokens ("handoff": ~60s, query-string form; "cookie": session-length
+ * redeemed form).
  */
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
@@ -15,7 +17,8 @@ import { base64UrlToBytes, bytesToBase64Url } from "../../../shared/src/encoding
 import { errorMessage } from "../../../shared/src/util/errors";
 import { parseJson } from "../../../shared/src/util/json";
 import { accessGroupMatches } from "./access";
-import { ServerConfig, type AuthConfig } from "./config";
+import { verifyCloudflareAccessToken } from "./cloudflare-jwt";
+import { ServerConfig, type AuthConfig, type CloudflareAccessAuthConfig, type OAuthAuthConfig } from "./config";
 import {
   clearSessionCookie,
   cookieToken,
@@ -58,7 +61,7 @@ const AuthUserSchema = Schema.Struct({
 /** Payload of a session token (browser cookie or CLI bearer). */
 const SessionPayloadSchema = Schema.Struct({
   version: Schema.Literal(SESSION_VERSION),
-  provider: Schema.Literal("google"),
+  provider: Schema.Literal("google", "cloudflare-access"),
   user: AuthUserSchema,
   issuedAt: Schema.Number,
   expiresAt: Schema.Number,
@@ -151,14 +154,19 @@ export interface AuthShape {
 /** Service tag for the auth service. */
 export class Auth extends Context.Tag("@scratchwork/server/Auth")<Auth, AuthShape>() {}
 
-/** Provides the Google OAuth auth service from server config. */
+/** Provides the configured auth mode's service from server config. */
 export const AuthLive: Layer.Layer<Auth, never, ServerConfig> = Layer.effect(
   Auth,
   Effect.map(ServerConfig, (config) => makeAuth(config.auth)),
 );
 
-/** Creates the auth service implementation over Google OAuth. */
+/** Creates the auth service implementation for the configured mode. */
 export function makeAuth(config: AuthConfig): AuthShape {
+  return config.mode === "cloudflare-access" ? makeCloudflareAccessAuth(config) : makeGoogleAuth(config);
+}
+
+/** Creates the auth service implementation over built-in Google OAuth. */
+function makeGoogleAuth(config: OAuthAuthConfig): AuthShape {
   return Auth.of({
     currentUser: (request) =>
       Effect.gen(function* () {
@@ -259,6 +267,145 @@ export function makeAuth(config: AuthConfig): AuthShape {
         },
       }),
 
+    ...projectAccessTokenMethods(config),
+  });
+}
+
+/** The Cloudflare Access request header carrying the edge-verified identity assertion. */
+const CF_ACCESS_JWT_HEADER = "cf-access-jwt-assertion";
+/** The client-supplied header the CLI sends its relayed Access JWT in. Cloudflare's edge
+ * accepts it as an Access credential; the server accepts it too so requests that reach
+ * the origin without passing the edge (grey-clouded origin, local testing) still verify.
+ * Verification is identical to the assertion header, so this adds no trust. */
+const CF_ACCESS_TOKEN_HEADER = "cf-access-token";
+
+/** The raw Access JWT presented on a request: the edge-injected assertion header first,
+ * then the CLI's relayed header. Null when neither is present. */
+function presentedAccessToken(request: HttpServerRequest.HttpServerRequest): string | null {
+  for (const header of [CF_ACCESS_JWT_HEADER, CF_ACCESS_TOKEN_HEADER]) {
+    const value = request.headers[header];
+    if (value != null && value !== "") return value;
+  }
+  return null;
+}
+
+/**
+ * Creates the auth service implementation over Cloudflare Access. The edge authenticates
+ * every request before it reaches the server and injects a signed assertion header; the
+ * server verifies it against the team's JWKS and the application AUD tag, so a directly
+ * reached origin cannot be fooled by a forged header. Sessions minted at /auth/login keep
+ * the CLI bearer flow working — the login redirect also relays the verified Access JWT so
+ * the CLI can pass the edge on API requests — and there is no OAuth redirect dance and no
+ * session cookie.
+ */
+function makeCloudflareAccessAuth(config: CloudflareAccessAuthConfig): AuthShape {
+  /** The identity asserted by the Access header: null when the header is absent, an
+   * AuthError when it is present but does not verify. The allow-list is applied here so
+   * every entry point shares the same gate. */
+  const assertedUser = (
+    request: HttpServerRequest.HttpServerRequest,
+  ): Effect.Effect<AuthUser | null, AuthError> =>
+    Effect.gen(function* () {
+      const token = presentedAccessToken(request);
+      if (token == null) return null;
+      const claims = yield* verifyCloudflareAccessToken(token, {
+        teamDomain: config.teamDomain,
+        audience: config.audience,
+      }).pipe(
+        Effect.mapError((cause) => new AuthError({ status: 401, message: cause.message, cause })),
+      );
+      const email = claims.email.toLowerCase();
+      // sub is Cloudflare's stable user UUID; tokens without one fall back to the email.
+      const user: AuthUser = {
+        id: typeof claims.sub === "string" && claims.sub !== "" ? claims.sub : email,
+        email,
+      };
+      return allowedUser(user, config) ? user : null;
+    });
+
+  return Auth.of({
+    currentUser: (request) =>
+      Effect.gen(function* () {
+        const token = bearerToken(request) ?? cookieToken(request);
+        if (token != null) {
+          const user = yield* verifySessionToken(token, config).pipe(Effect.orElseSucceed(() => null));
+          if (user != null) return user;
+        }
+        return yield* assertedUser(request).pipe(Effect.orElseSucceed(() => null));
+      }),
+
+    requireApiUser: (request) =>
+      Effect.gen(function* () {
+        const token = bearerToken(request);
+        const sessionUser = token == null ? null : yield* verifySessionToken(token, config);
+        if (sessionUser != null) return sessionUser;
+        const user = yield* assertedUser(request);
+        if (user == null) {
+          return yield* Effect.fail(new AuthError({ status: 401, message: "Authentication required" }));
+        }
+        return user;
+      }),
+
+    // Cloudflare already authenticated the browser before this request arrived, so login
+    // just converts the asserted identity into a redirect — with a bearer token for the
+    // CLI loopback, or straight back into the app for a browser.
+    login: (request, url, baseUrl) =>
+      Effect.gen(function* () {
+        const accessToken = presentedAccessToken(request);
+        if (accessToken == null) {
+          return yield* Effect.fail(
+            new AuthError({
+              status: 401,
+              message:
+                "Cloudflare Access did not authenticate this request (no Cf-Access-Jwt-Assertion header). This server expects to run behind a Cloudflare Access application.",
+            }),
+          );
+        }
+        const user = yield* assertedUser(request);
+        if (user == null) {
+          return yield* Effect.fail(new AuthError({ status: 403, message: "Account is not allowed on this server" }));
+        }
+
+        const cliRedirect = safeCliRedirect(url.searchParams.get("cli_redirect"));
+        if (cliRedirect != null) {
+          const token = yield* createSessionToken(user, config);
+          const redirectUrl = new URL(cliRedirect);
+          redirectUrl.searchParams.set("token", token);
+          redirectUrl.searchParams.set("server", baseUrl);
+          redirectUrl.searchParams.set("email", user.email);
+          // Relay the verified Access JWT so the CLI can present it back (as
+          // cf-access-token) and pass Cloudflare's edge on API requests. It rides the
+          // loopback query string exactly like the bearer token above — same exposure.
+          redirectUrl.searchParams.set("cf_token", accessToken);
+          return HttpServerResponse.redirect(redirectUrl, { status: 302 });
+        }
+        return HttpServerResponse.redirect(safeReturnTo(url.searchParams.get("returnTo")) ?? "/", { status: 302 });
+      }),
+
+    callback: () =>
+      Effect.fail(new AuthError({ status: 404, message: "This server uses Cloudflare Access; there is no OAuth callback" })),
+
+    // Cloudflare's edge handles /cdn-cgi/access/logout on the protected domain and ends
+    // the Access session; the server never sees that request. Clear the scratchwork
+    // session cookie too so a stale one cannot outlive the Access session.
+    logout: (baseUrl) =>
+      HttpServerResponse.redirect("/cdn-cgi/access/logout", {
+        status: 302,
+        headers: {
+          "set-cookie": clearSessionCookie(baseUrl),
+        },
+      }),
+
+    ...projectAccessTokenMethods(config),
+  });
+}
+
+/** The project-access token methods every auth mode shares: HMAC tokens signed with the
+ * session secret, carrying the viewer's email through the app-to-content-host handoff. */
+function projectAccessTokenMethods(
+  config: AuthConfig,
+): Pick<AuthShape, "issueProjectAccessToken" | "verifyProjectAccessToken"> {
+  return {
     issueProjectAccessToken: (project, user, use) =>
       signValue(
         {
@@ -287,7 +434,7 @@ export function makeAuth(config: AuthConfig): AuthShape {
         const user = { id: payload.email, email: payload.email };
         return allowedUser(user, config) ? user : null;
       }),
-  });
+  };
 }
 
 /** Signs a portable session token for browser cookies and CLI bearer auth. */
@@ -299,7 +446,7 @@ export function createSessionToken(
   return signValue(
     {
       version: SESSION_VERSION,
-      provider: "google",
+      provider: config.mode === "cloudflare-access" ? "cloudflare-access" : "google",
       user,
       issuedAt,
       expiresAt: issuedAt + config.sessionTtlSeconds,
@@ -326,7 +473,7 @@ function exchangeGoogleCode(
   code: string,
   redirectUri: string,
   nonce: string,
-  config: AuthConfig,
+  config: OAuthAuthConfig,
 ): Effect.Effect<AuthUser, AuthError> {
   return Effect.gen(function* () {
     const { ok, json } = yield* Effect.tryPromise({

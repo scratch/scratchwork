@@ -36,6 +36,14 @@ describe("serverConfigEnv", () => {
       SCRATCHWORK_HOMEPAGE_PROJECT: "home",
     });
   });
+
+  test("maps the Cloudflare Access settings onto their environment variables", () => {
+    expect(serverConfigEnv({ auth: "cloudflare-access", cfAccessTeamDomain: "myteam", cfAccessAud: "aud-tag-1" }, {})).toEqual({
+      SCRATCHWORK_AUTH: "cloudflare-access",
+      SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN: "myteam",
+      SCRATCHWORK_CF_ACCESS_AUD: "aud-tag-1",
+    });
+  });
 });
 
 describe("validateDeploymentConfig", () => {
@@ -63,6 +71,22 @@ describe("validateDeploymentConfig", () => {
 
   test("still enforces the OAuth requirements", () => {
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SESSION_SECRET: undefined }, "Test"))
+      .toThrow("SCRATCHWORK_SESSION_SECRET is required");
+  });
+
+  test("accepts a Cloudflare Access config without OAuth credentials", () => {
+    const cfEnv = {
+      SCRATCHWORK_AUTH: "cloudflare-access",
+      SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN: "myteam",
+      SCRATCHWORK_CF_ACCESS_AUD: "aud-tag-1",
+      SCRATCHWORK_SESSION_SECRET: "test-session-secret-test-session-secret",
+      SCRATCHWORK_APP_URL: "https://app.example",
+      SCRATCHWORK_CONTENT_URL: "https://pages.example",
+    };
+    expect(() => validateDeploymentConfig(cfEnv, "Test")).not.toThrow();
+    expect(() => validateDeploymentConfig({ ...cfEnv, SCRATCHWORK_CF_ACCESS_AUD: undefined }, "Test"))
+      .toThrow("SCRATCHWORK_CF_ACCESS_AUD is required");
+    expect(() => validateDeploymentConfig({ ...cfEnv, SCRATCHWORK_SESSION_SECRET: undefined }, "Test"))
       .toThrow("SCRATCHWORK_SESSION_SECRET is required");
   });
 

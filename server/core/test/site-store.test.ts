@@ -42,6 +42,7 @@ function config(maxVisibility: string): ServerConfigShape {
     usersCanSetProjectNames: true,
     defaultVisibility: "private",
     auth: {
+      mode: "oauth",
       clientId: "client-id",
       clientSecret: "client-secret",
       sessionSecret: "test-session-secret-test-session-secret",

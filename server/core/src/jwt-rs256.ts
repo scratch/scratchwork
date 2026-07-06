@@ -1,0 +1,140 @@
+/**
+ * Provider-neutral RS256 JWT machinery shared by google-jwt.ts and cloudflare-jwt.ts:
+ * compact-JWT decoding, header checks, JWKS fetch/cache, and signature verification.
+ * Claim validation (issuer, audience, expiry, email) stays in each provider module.
+ *
+ * This module is a deliberate Promise boundary, not an unfinished Effect migration:
+ * verification is plain async/await (raw fetch + Web Crypto) wrapped exactly once by
+ * Effect.tryPromise in each provider's verify function. `keyCache` is intentionally
+ * process-global: JWKS refreshes are idempotent, so concurrent cold-start misses at
+ * worst duplicate one fetch.
+ */
+import { base64UrlToBytes } from "../../../shared/src/encoding/base64";
+import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
+import { isRecord, parseJson } from "../../../shared/src/util/json";
+
+/** Tolerated clock difference for exp/nbf/iat claim checks. */
+export const CLOCK_SKEW_SECONDS = 300;
+const FETCH_TIMEOUT_MS = 5_000;
+const MIN_CACHE_SECONDS = 60;
+const MAX_CACHE_SECONDS = 60 * 60 * 24;
+
+/** The JWT header fields checked before verification. */
+interface JwtHeader {
+  readonly alg: string;
+  readonly kid: string;
+  readonly typ?: string;
+  readonly crit?: unknown;
+}
+
+/** A JWKS endpoint response shape. */
+interface JwksResponse {
+  readonly keys?: ReadonlyArray<JsonWebKey & { readonly kid?: string }>;
+}
+
+/** One imported verification key with its cache expiry. */
+interface CachedKey {
+  readonly key: CryptoKey;
+  readonly expiresAt: number;
+}
+
+/** Process-global JWKS key cache, keyed `jwksUrl:kid` and shared across requests. */
+const keyCache = new Map<string, CachedKey>();
+
+/**
+ * Verifies a compact RS256 JWT against the given JWKS endpoint and returns its decoded
+ * payload. Checks the header (algorithm, kid, no critical extensions) and the signature
+ * only; the caller validates the claims. Throws plain Errors on any failure.
+ */
+export async function verifyRs256Jwt(token: string, jwksUrl: string): Promise<Record<string, unknown>> {
+  const parts = token.split(".");
+  if (parts.length !== 3) throw new Error("Token must have 3 parts");
+  const [encodedHeader, encodedPayload, encodedSignature] = parts;
+  const header = decodeJwtJson<JwtHeader>(encodedHeader);
+  if (header.alg !== "RS256") throw new Error("Unsupported token algorithm");
+  if (typeof header.kid !== "string" || header.kid === "") throw new Error("Token is missing kid");
+  if (header.crit != null) throw new Error("Token uses unsupported critical headers");
+
+  const payload = decodeJwtJson<Record<string, unknown>>(encodedPayload);
+  const signature = base64UrlToBytes(encodedSignature);
+  if (signature == null) throw new Error("Invalid token signature encoding");
+
+  const key = await getJwksKey(header.kid, jwksUrl);
+  const ok = await crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    toArrayBuffer(signature),
+    toArrayBuffer(new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`)),
+  );
+  if (!ok) throw new Error("Invalid token signature");
+  return payload;
+}
+
+/** Decodes one base64url JWT part as JSON. */
+function decodeJwtJson<A>(value: string): A {
+  const bytes = base64UrlToBytes(value);
+  if (bytes == null) throw new Error("Invalid JWT base64url");
+  const parsed = parseJson(new TextDecoder().decode(bytes));
+  if (!isRecord(parsed)) throw new Error("Invalid JWT JSON");
+  return parsed as A;
+}
+
+/** Finds a cached signing key, refreshing the JWKS when needed. */
+async function getJwksKey(kid: string, jwksUrl: string): Promise<CryptoKey> {
+  const cached = keyCache.get(cacheKey(jwksUrl, kid));
+  if (cached != null && cached.expiresAt > Date.now()) return cached.key;
+
+  await refreshJwks(jwksUrl);
+  const refreshed = keyCache.get(cacheKey(jwksUrl, kid));
+  if (refreshed == null || refreshed.expiresAt <= Date.now()) throw new Error("Unknown signing key");
+  return refreshed.key;
+}
+
+/** Fetches one JWKS document and imports supported RSA verification keys. */
+async function refreshJwks(jwksUrl: string): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(jwksUrl, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Could not fetch JWKS: ${response.status}`);
+    const body = (await response.json().catch(() => null)) as JwksResponse | null;
+    if (body == null || !Array.isArray(body.keys)) throw new Error("Invalid JWKS response");
+    const expiresAt = Date.now() + jwksMaxAgeSeconds(response.headers.get("cache-control")) * 1000;
+    evictJwks(jwksUrl);
+    await Promise.all(
+      body.keys.map(async (jwk) => {
+        if (typeof jwk.kid !== "string" || jwk.kid === "" || jwk.kty !== "RSA") return;
+        const key = await crypto.subtle.importKey(
+          "jwk",
+          jwk,
+          { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+          false,
+          ["verify"],
+        );
+        keyCache.set(cacheKey(jwksUrl, jwk.kid), { key, expiresAt });
+      }),
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Removes cached keys for one JWKS URL before storing a refreshed set. */
+function evictJwks(jwksUrl: string): void {
+  const prefix = `${jwksUrl}:`;
+  for (const key of keyCache.keys()) {
+    if (key.startsWith(prefix)) keyCache.delete(key);
+  }
+}
+
+/** Parses JWKS cache lifetime and clamps it to sane bounds. */
+function jwksMaxAgeSeconds(cacheControl: string | null): number {
+  const match = /(?:^|,)\s*max-age=(\d+)/i.exec(cacheControl ?? "");
+  const seconds = match == null ? MIN_CACHE_SECONDS : Number(match[1]);
+  return Math.min(Math.max(seconds, MIN_CACHE_SECONDS), MAX_CACHE_SECONDS);
+}
+
+/** Builds the process-local cache key for one JWKS key ID. */
+function cacheKey(jwksUrl: string, kid: string): string {
+  return `${jwksUrl}:${kid}`;
+}

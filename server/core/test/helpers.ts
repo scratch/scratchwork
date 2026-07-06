@@ -45,6 +45,7 @@ export async function appHandler(options: {
     usersCanSetProjectNames: true,
     defaultVisibility: "public",
     auth: {
+      mode: "oauth",
       clientId: "test-client-id",
       clientSecret: "test-client-secret",
       sessionSecret: "test-session-secret-test-session-secret",

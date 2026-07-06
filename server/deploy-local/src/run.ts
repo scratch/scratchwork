@@ -107,6 +107,8 @@ function serverSettingsEnv(server: ScratchworkServerConfig, processEnv: EnvVars)
   };
   set("SCRATCHWORK_AUTH", server.auth);
   set("SCRATCHWORK_GOOGLE_CLIENT_ID", server.googleClientId);
+  set("SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN", server.cfAccessTeamDomain);
+  set("SCRATCHWORK_CF_ACCESS_AUD", server.cfAccessAud);
   set("SCRATCHWORK_AUTH_ALLOWED_EMAILS", server.authAllowedEmails);
   set("SCRATCHWORK_AUTH_ALLOWED_DOMAINS", server.authAllowedDomains);
   set("SCRATCHWORK_AUTH_SESSION_SECONDS", server.authSessionSeconds == null ? undefined : String(server.authSessionSeconds));
