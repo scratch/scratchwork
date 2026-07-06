@@ -187,7 +187,7 @@ function postPublish(
     readonly visibility?: string;
   },
   authToken: string | undefined,
-): Effect.Effect<PublishResponse, CliError, HttpClient.HttpClient> {
+): Effect.Effect<PublishResponse, CliError, FileSystem.FileSystem | HttpClient.HttpClient | Path.Path> {
   return Effect.gen(function* () {
     const response = yield* apiRequest("scratchwork publish", serverApiUrl(server, "/api/publish"), {
       method: "POST",
