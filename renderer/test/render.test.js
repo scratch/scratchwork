@@ -76,9 +76,9 @@ describe("inline markdown", () => {
   });
 
   test("badge pattern: image inside a link", () => {
-    const html = render("[![CI](https://img.shields.io/b.svg)](https://ci.example.com)");
+    const html = render('[![CI](https://img.shields.io/b.svg "Build status")](https://ci.example.com)');
     expect(html).toContain('<a href="https://ci.example.com"');
-    expect(html).toContain('<img src="https://img.shields.io/b.svg" alt="CI"');
+    expect(html).toContain('<img src="https://img.shields.io/b.svg" alt="CI" title="Build status"');
   });
 
   test("reference links resolve; unknown refs stay literal", () => {

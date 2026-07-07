@@ -46,6 +46,16 @@ scratchwork dev page.md
 scratchwork dev page.html
 ```
 
+When developing the CLI itself, activate this checkout once in each terminal
+session:
+
+```sh
+source ./cli/activate-scratchwork-alias
+```
+
+After that, `scratchwork` runs `cli/src/index.ts` from this checkout, even after
+changing to another directory.
+
 ## Working with Markdown
 
 Scratchwork renders Markdown with an embedded default renderer, and Markdown files can reference React components from nearby component files. See [`docs/index.md`](docs/index.md) for live examples.

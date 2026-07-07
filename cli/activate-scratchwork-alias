@@ -1,0 +1,16 @@
+# Source this file to run the checkout's CLI as `scratchwork` in this shell.
+
+if [ -n "${ZSH_VERSION:-}" ]; then
+  SCRATCHWORK_DEV_ROOT="${${(%):-%N}:A:h:h}"
+elif [ -n "${BASH_VERSION:-}" ]; then
+  SCRATCHWORK_DEV_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+else
+  echo "scratchwork: cli/activate-scratchwork-alias supports zsh and bash" >&2
+  return 1
+fi
+
+scratchwork() {
+  command bun "$SCRATCHWORK_DEV_ROOT/cli/src/index.ts" "$@"
+}
+
+echo "scratchwork: activated $SCRATCHWORK_DEV_ROOT/cli/src/index.ts"
