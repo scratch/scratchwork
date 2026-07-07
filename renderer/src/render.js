@@ -55,9 +55,11 @@ const linkDef = (ctx, ref) => (ctx.linkDefs || {})[ref.toLowerCase()];
 // deep, so wikipedia.org/wiki/Bracket_(disambiguation) survives), a title,
 // and a link label (escapes and complete inline images allowed, so the badge
 // pattern [![alt](img)](href) is just a link whose label is an image).
-const DEST = /((?:[^()\s]|\([^()\s]*\))+)/.source;
+const DEST_BODY = /(?:[^()\s]|\([^()\s]*\))+/.source;
+const DEST = `(${DEST_BODY})`;
 const TITLE = /(?:\s+"([^"]*)")?/.source;
-const LABEL = /((?:\\.|!\[[^\]]*\]\([^()\s]*\)|[^[\]\\])+)/.source;
+const INLINE_IMAGE = `!\\[[^\\]]*\\]\\(${DEST_BODY}(?:\\s+"[^"]*")?\\)`;
+const LABEL = `((?:\\\\.|${INLINE_IMAGE}|[^\\[\\]\\\\])+)`;
 
 // When a [ref] has no definition, render the brackets literally but still
 // parse the inline markdown between them.
