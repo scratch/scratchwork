@@ -42,6 +42,22 @@ describe("verifyCloudflareAccessToken", () => {
     expect(claims.sub).toBe("cf-user-uuid-1");
   });
 
+  test("accepts a valid token against a preloaded local JWKS without fetching", async () => {
+    const keyPair = await makeKeyPair();
+    globalThis.fetch = (async () => {
+      throw new Error("local verification must not fetch");
+    }) as unknown as typeof fetch;
+    const token = await signJwt(keyPair.privateKey, validClaims());
+
+    const claims = await Effect.runPromise(verifyCloudflareAccessToken(token, {
+      teamDomain: TEAM_DOMAIN,
+      audience: AUDIENCE,
+      jwks: [keyPair.publicJwk],
+    }));
+
+    expect(claims.email).toBe("founder@example.com");
+  });
+
   test("rejects wrong audiences, wrong issuers, and expired tokens", async () => {
     const keyPair = await makeKeyPair();
     globalThis.fetch = jwksFetch(keyPair.publicJwk);

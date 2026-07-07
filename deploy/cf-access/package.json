@@ -1,10 +1,9 @@
 {
-  "name": "@scratchwork/deploy-sndbx-sh",
+  "name": "@scratchwork/deploy-cf-access-local",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "bun deploy.ts",
     "local": "bun local.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

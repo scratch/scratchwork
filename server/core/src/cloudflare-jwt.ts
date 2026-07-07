@@ -10,7 +10,7 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { errorMessage } from "../../../shared/src/util/errors";
-import { CLOCK_SKEW_SECONDS, verifyRs256Jwt } from "./jwt-rs256";
+import { CLOCK_SKEW_SECONDS, verifyRs256Jwt, verifyRs256JwtWithJwks } from "./jwt-rs256";
 
 /** Raised when an Access token fails signature or claim validation. */
 export class CloudflareJwtError extends Data.TaggedError("CloudflareJwtError")<{
@@ -45,12 +45,17 @@ export function verifyCloudflareAccessToken(
     /** Audience (AUD) tag of the Access application protecting this server. */
     readonly audience: string;
     readonly jwksUrl?: string;
+    /** Preloaded public keys for an offline local Access simulation. Production uses
+     * the team JWKS URL and never sets this. */
+    readonly jwks?: ReadonlyArray<JsonWebKey & { readonly kid?: string }>;
     readonly nowSeconds?: number;
   },
 ): Effect.Effect<CloudflareAccessClaims, CloudflareJwtError> {
   return Effect.tryPromise({
     try: async () => {
-      const payload = (await verifyRs256Jwt(token, options.jwksUrl ?? cloudflareJwksUrl(options.teamDomain))) as unknown as CloudflareAccessClaims;
+      const payload = (await (options.jwks == null
+        ? verifyRs256Jwt(token, options.jwksUrl ?? cloudflareJwksUrl(options.teamDomain))
+        : verifyRs256JwtWithJwks(token, options.jwks))) as unknown as CloudflareAccessClaims;
       validateClaims(payload, options.teamDomain, options.audience, options.nowSeconds ?? epochSeconds());
       return payload;
     },

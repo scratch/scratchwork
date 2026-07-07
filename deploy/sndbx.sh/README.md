@@ -16,9 +16,10 @@ cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
 ```
 
 The server settings (domains, auth policy, visibility rules) live in
-`server-config.ts` and are shared by the Cloudflare deploy and the local run;
-`deploy.ts` adds the Cloudflare-specific bindings. Secrets are read from `.env`
-in this directory and the shell environment.
+`server-config.ts`. `cloudflare-config.ts` adds the Worker, R2, D1, and route
+configuration; both the remote deploy and local Wrangler run consume that same
+complete config. Secrets are read from `.env` in this directory and the shell
+environment.
 It binds the Worker with routes for `app.sndbx.sh/*` (app/API/auth),
 `pages.sndbx.sh/*` (published content), and the home domains `sndbx.sh/*` and
 `www.sndbx.sh/*`, which serve the homepage project `www` (`homepageDomains` /
@@ -44,27 +45,26 @@ https://app.sndbx.sh/auth/callback/google
 
 ## Local run
 
-Run the sndbx.sh server settings on a local server (local file storage,
-in-memory database, no Cloudflare access needed):
+Run the sndbx.sh Worker with Wrangler's persistent local R2 and D1 bindings:
 
 ```sh
 bun run local:sndbx.sh   # from the repo root, or `bun run local` here
 ```
 
 Because the config declares separate app and content domains, the local run
-mirrors that split on one port: the app/API on `http://localhost:43118`,
-published content on `http://pages.localhost:43118`, and the homepage project
-on `http://home.localhost:43118` (`*.localhost` names are loopback per RFC
+mirrors that split on one port: the app/API on `http://localhost:8787`,
+published content on `http://pages.localhost:8787`, and the homepage project
+on `http://home.localhost:8787` (`*.localhost` names are loopback per RFC
 6761; browsers and macOS resolve them without setup). The app
 stays on plain `localhost` because Google OAuth accepts it as an http redirect
-URI. Set `PORT` to change the port, and `SCRATCHWORK_STORAGE_DIR` to relocate
-storage (default `.scratchwork-local-data` in this directory). Any
-`SCRATCHWORK_*` environment variable overrides the shared config.
+URI. Set `PORT` to change the port. Wrangler stores both local R2 and D1 state
+under `.scratchwork-cloudflare-data` in this directory; remove it for a clean
+environment. The remote route entries are ignored by the local runtime.
 
 The same OAuth secrets are required as for the Cloudflare deploy; Bun loads
 them from `.env` in this directory. To complete a browser login locally, add
 a second redirect URI to the Google OAuth client:
 
 ```txt
-http://localhost:43118/auth/callback/google
+http://localhost:8787/auth/callback/google
 ```

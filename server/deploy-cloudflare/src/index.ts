@@ -1,9 +1,12 @@
 export {
   deployServer,
+  runLocalCloudflareServer,
   type CloudflareDeployConfig,
   type CloudflareDeployOptions,
   type CloudflareDeployResult,
   type CloudflareDeployServerConfig,
+  type CloudflareLocalAccessConfig,
+  type CloudflareLocalOptions,
   type CloudflareR2BucketConfig,
   type CloudflareRouteConfig,
   type ScratchworkServerConfig,
