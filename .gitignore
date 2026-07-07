@@ -15,3 +15,5 @@ dist/
 # deploy project's directory.
 .scratchwork-data/
 .scratchwork-local-data/
+.scratchwork-cloudflare-data/
+.wrangler/

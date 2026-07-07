@@ -311,6 +311,7 @@ function makeCloudflareAccessAuth(config: CloudflareAccessAuthConfig): AuthShape
       const claims = yield* verifyCloudflareAccessToken(token, {
         teamDomain: config.teamDomain,
         audience: config.audience,
+        jwks: config.localJwks,
       }).pipe(
         Effect.mapError((cause) => new AuthError({ status: 401, message: cause.message, cause })),
       );

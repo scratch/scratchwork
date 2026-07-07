@@ -12,7 +12,9 @@
   },
   "scripts": {
     "check": "bun run typecheck && bun test",
+    "dev": "bun scripts/dev.ts",
     "deploy": "bun scripts/deploy.ts",
+    "smoke:local": "bun scripts/smoke-local.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "wrangler": "^4.107.0"
   }
 }

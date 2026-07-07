@@ -54,6 +54,8 @@ export interface CloudflareAccessAuthConfig extends AuthConfigCommon {
   readonly teamDomain: string;
   /** Audience (AUD) tag of the Access application protecting this server. */
   readonly audience: string;
+  /** Public signing keys supplied only by the offline local Access simulator. */
+  readonly localJwks?: ReadonlyArray<JsonWebKey & { readonly kid?: string }>;
   readonly mode: "cloudflare-access";
 }
 
@@ -112,7 +114,7 @@ export function readServerConfig(
       shareAllowedDomains: yield* readDomainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS"),
       usersCanSetProjectNames: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES, true, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES"),
       defaultVisibility: yield* readBinaryVisibility(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
-      auth: yield* readAuthConfig(env),
+      auth: yield* readAuthConfig(env, appUrl),
     };
   });
 }
@@ -183,7 +185,7 @@ function readHomepage(
 /** Parses auth settings from environment variables. Auth cannot be disabled, and the
  * mode must be chosen explicitly: a server either runs built-in Google OAuth or sits
  * behind Cloudflare Access. */
-function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigError> {
+function readAuthConfig(env: EnvVars, appUrl: string | undefined): Effect.Effect<AuthConfig, ServerConfigError> {
   return Effect.gen(function* () {
     const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
     if (authMode === "") {
@@ -196,7 +198,7 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
     if (authMode !== "oauth" && authMode !== "cloudflare-access") {
       return yield* Effect.fail(invalidValue("SCRATCHWORK_AUTH", authMode, '"oauth" or "cloudflare-access"'));
     }
-    if (authMode === "cloudflare-access") return yield* readCloudflareAccessConfig(env);
+    if (authMode === "cloudflare-access") return yield* readCloudflareAccessConfig(env, appUrl);
     return yield* readOAuthConfig(env);
   });
 }
@@ -231,7 +233,7 @@ function readOAuthConfig(env: EnvVars): Effect.Effect<OAuthAuthConfig, ServerCon
 }
 
 /** Parses required Cloudflare Access settings from environment variables. */
-function readCloudflareAccessConfig(env: EnvVars): Effect.Effect<CloudflareAccessAuthConfig, ServerConfigError> {
+function readCloudflareAccessConfig(env: EnvVars, appUrl: string | undefined): Effect.Effect<CloudflareAccessAuthConfig, ServerConfigError> {
   return Effect.gen(function* () {
     const teamDomainValue = nonEmpty(env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN?.trim());
     const audience = nonEmpty(env.SCRATCHWORK_CF_ACCESS_AUD?.trim());
@@ -261,9 +263,42 @@ function readCloudflareAccessConfig(env: EnvVars): Effect.Effect<CloudflareAcces
       mode: "cloudflare-access",
       teamDomain,
       audience,
+      ...(yield* readLocalCloudflareJwks(env.SCRATCHWORK_LOCAL_CF_ACCESS_JWKS, appUrl)),
       ...(yield* readCommonAuthConfig(env, sessionSecret)),
     } as const;
   });
+}
+
+/** Parses the generated public JWKS used by the offline Access simulator. Keeping the
+ * override behind a LOCAL-prefixed variable prevents it from becoming part of normal
+ * Cloudflare deployment configuration. */
+function readLocalCloudflareJwks(
+  value: string | undefined,
+  appUrl: string | undefined,
+): Effect.Effect<Pick<CloudflareAccessAuthConfig, "localJwks">, ServerConfigError> {
+  if (value == null || value === "") return Effect.succeed({});
+  if (appUrl == null || !isLoopbackHost(new URL(appUrl).hostname)) {
+    return Effect.fail(
+      new ServerConfigError({
+        message: "SCRATCHWORK_LOCAL_CF_ACCESS_JWKS is accepted only when SCRATCHWORK_APP_URL uses a loopback host",
+      }),
+    );
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed !== "object" || parsed == null || !Array.isArray((parsed as { readonly keys?: unknown }).keys)) {
+      throw new Error("keys is not an array");
+    }
+    const keys = (parsed as { readonly keys: ReadonlyArray<unknown> }).keys;
+    if (keys.length === 0 || keys.some((key) => typeof key !== "object" || key == null)) {
+      throw new Error("keys is empty or invalid");
+    }
+    return Effect.succeed({ localJwks: keys as ReadonlyArray<JsonWebKey & { readonly kid?: string }> });
+  } catch {
+    return Effect.fail(
+      invalidValue("SCRATCHWORK_LOCAL_CF_ACCESS_JWKS", value, "a generated JWKS JSON document with at least one public key"),
+    );
+  }
 }
 
 /** Parses the auth settings every mode shares: the session-signing secret (validated
