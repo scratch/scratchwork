@@ -336,8 +336,14 @@ function makeCloudflareAccessAuth(config: CloudflareAccessAuthConfig): AuthShape
 
     requireApiUser: (request) =>
       Effect.gen(function* () {
+        // A bearer that fails verification (e.g. signed with a rotated secret) is treated
+        // as absent rather than fatal: the Access assertion is an independent credential
+        // and may still authenticate the request.
         const token = bearerToken(request);
-        const sessionUser = token == null ? null : yield* verifySessionToken(token, config);
+        const sessionUser =
+          token == null
+            ? null
+            : yield* verifySessionToken(token, config).pipe(Effect.orElseSucceed(() => null));
         if (sessionUser != null) return sessionUser;
         const user = yield* assertedUser(request);
         if (user == null) {

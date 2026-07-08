@@ -231,6 +231,21 @@ describe("Auth (cloudflare-access)", () => {
     expect(apiUser.email).toBe("founder@example.com");
   });
 
+  test("a stale bearer token falls back to a valid Access assertion", async () => {
+    // A bearer signed with a rotated secret must not lock out a request that also
+    // carries a verifiable Access assertion.
+    const staleBearer = await Effect.runPromise(
+      createSessionToken(user, { ...cloudflareConfig, sessionSecret: "rotated-secret-rotated-secret-32-bytes" }),
+    );
+    const { token } = await accessAssertion();
+    const auth = makeAuth(cloudflareConfig);
+
+    const apiUser = await Effect.runPromise(
+      auth.requireApiUser(request({ authorization: `Bearer ${staleBearer}`, "cf-access-jwt-assertion": token })),
+    );
+    expect(apiUser.email).toBe("founder@example.com");
+  });
+
   test("login redirects the CLI loopback with a working bearer token", async () => {
     const { token } = await accessAssertion();
     const auth = makeAuth(cloudflareConfig);
