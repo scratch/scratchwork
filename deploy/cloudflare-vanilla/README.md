@@ -1,18 +1,19 @@
 # sndbx.sh Cloudflare deploy
 
 This deploy instance is a Bun project that uses the shared Cloudflare Worker
-deploy package.
+deploy package to serve the sndbx.sh domain, without Cloudflare Access in
+front of it (hence "vanilla" — compare `deploy/cf-access`).
 
 Deploy from the repo root:
 
 ```sh
-bun run deploy:sndbx.sh
+bun run deploy:cloudflare-vanilla
 ```
 
 Start local secrets from the template:
 
 ```sh
-cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
+cp deploy/cloudflare-vanilla/.env.example deploy/cloudflare-vanilla/.env
 ```
 
 The server settings (domains, auth policy, visibility rules) live in
@@ -48,7 +49,7 @@ https://app.sndbx.sh/auth/callback/google
 Run the sndbx.sh Worker with Wrangler's persistent local R2 and D1 bindings:
 
 ```sh
-bun run local:sndbx.sh   # from the repo root, or `bun run local` here
+bun run local:cloudflare-vanilla   # from the repo root, or `bun run local` here
 ```
 
 Because the config declares separate app and content domains, the local run

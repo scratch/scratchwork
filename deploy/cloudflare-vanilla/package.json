@@ -1,5 +1,5 @@
 {
-  "name": "@scratchwork/deploy-sndbx-sh",
+  "name": "@scratchwork/deploy-cloudflare-vanilla",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -20,6 +20,7 @@
   "dependencies": {
     "@effect/platform": "0.96.2",
     "@scratchwork/server-core": "workspace:*",
+    "cloudflare": "^6.5.0",
     "effect": "3.21.4"
   },
   "devDependencies": {
