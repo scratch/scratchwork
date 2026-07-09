@@ -29,8 +29,8 @@
         "typescript": "^6.0.3",
       },
     },
-    "deploy/cf-access": {
-      "name": "@scratchwork/deploy-cf-access-local",
+    "deploy/cloudflare-access": {
+      "name": "@scratchwork/deploy-cloudflare-access",
       "version": "0.1.0",
       "dependencies": {
         "@scratchwork/server-deploy-cloudflare": "workspace:*",
@@ -404,7 +404,7 @@
 
     "@poppinss/exception": ["@poppinss/exception@1.2.3", "", {}, "sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw=="],
 
-    "@scratchwork/deploy-cf-access-local": ["@scratchwork/deploy-cf-access-local@workspace:deploy/cf-access"],
+    "@scratchwork/deploy-cloudflare-access": ["@scratchwork/deploy-cloudflare-access@workspace:deploy/cloudflare-access"],
 
     "@scratchwork/deploy-cloudflare-vanilla": ["@scratchwork/deploy-cloudflare-vanilla@workspace:deploy/cloudflare-vanilla"],
 

@@ -2,7 +2,7 @@
 
 This deploy instance is a Bun project that uses the shared Cloudflare Worker
 deploy package to serve the sndbx.sh domain, without Cloudflare Access in
-front of it (hence "vanilla" — compare `deploy/cf-access`).
+front of it (hence "vanilla" — compare `deploy/cloudflare-access`).
 
 Deploy from the repo root:
 
