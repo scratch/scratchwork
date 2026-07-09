@@ -93,7 +93,7 @@ an optional locally signed Cloudflare Access identity), see
 [`server/deploy-cloudflare/README.md`](server/deploy-cloudflare/README.md).
 
 The ready-made Access test deployment is `bun run local:cf-access`; the sndbx.sh
-project's production Worker configuration runs locally with `bun run local:sndbx.sh`.
+project's production Worker configuration runs locally with `bun run local:cloudflare-vanilla`.
 
 Then publish a directory or file:
 
@@ -115,7 +115,7 @@ scratchwork revoke alice@example.com
 Deployments live as projects under `deploy/`, one per domain, each deployable with one command:
 
 ```sh
-bun run deploy:sndbx.sh
+bun run deploy:cloudflare-vanilla
 ```
 
 Cloud runtime dependencies live in `server/deploy-aws` and `server/deploy-cloudflare`. See `server/README.md` for cloud setup details.
@@ -123,8 +123,8 @@ Cloud runtime dependencies live in `server/deploy-aws` and `server/deploy-cloudf
 Deploy secrets load from the project's `.env`:
 
 ```sh
-cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
-bun run deploy:sndbx.sh
+cp deploy/cloudflare-vanilla/.env.example deploy/cloudflare-vanilla/.env
+bun run deploy:cloudflare-vanilla
 ```
 
 ---

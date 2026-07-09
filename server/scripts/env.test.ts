@@ -33,7 +33,7 @@ describe("loadDeployEnv", () => {
   test("can isolate explicit env loading to caller roots", async () => {
     const root = await mkdtemp(join(tmpdir(), "scratchwork-env-"));
     const packageRoot = join(root, "server", "deploy-cloudflare");
-    const deployRoot = join(root, "deploy", "sndbx.sh");
+    const deployRoot = join(root, "deploy", "cloudflare-vanilla");
     try {
       await mkdir(packageRoot, { recursive: true });
       await mkdir(deployRoot, { recursive: true });
@@ -61,7 +61,7 @@ describe("loadDeployEnv", () => {
   test("does not fall back to server env when caller env is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "scratchwork-env-"));
     const packageRoot = join(root, "server", "deploy-cloudflare");
-    const deployRoot = join(root, "deploy", "sndbx.sh");
+    const deployRoot = join(root, "deploy", "cloudflare-vanilla");
     try {
       await mkdir(packageRoot, { recursive: true });
       await mkdir(deployRoot, { recursive: true });

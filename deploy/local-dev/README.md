@@ -25,4 +25,4 @@ SCRATCHWORK_STORAGE_DIR=/tmp/scratchwork-local-storage
 ```
 
 To run a real deploy's server config locally instead, use that project's local
-run (for example `bun run local:sndbx.sh`).
+run (for example `bun run local:cloudflare-vanilla`).

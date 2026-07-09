@@ -78,4 +78,10 @@ import { deployServer } from "@scratchwork/server-deploy-cloudflare";
 await deployServer(config, { envFile: ".env" });
 ```
 
+Deploys call the Cloudflare REST API through the official `cloudflare` SDK, so they
+need `CLOUDFLARE_API_TOKEN` in the environment or an env file. Set
+`CLOUDFLARE_ACCOUNT_ID` as well when the token can see more than one account. The
+token needs permission to manage Workers scripts, R2 buckets, D1 databases, and —
+when routes or custom domains are configured — the zone's Workers routes.
+
 See the repository's `server/README.md` for all server and deployment settings.

@@ -9,7 +9,7 @@ The server is split into four packages:
 3. `deploy-cloudflare`: Cloudflare Worker adapter backed by R2
 4. `deploy-local`: local Bun adapter backed by local files and an in-memory database
 
-These packages are libraries. Actual deployments live as projects under `deploy/` — one per domain the Scratchwork project owns (currently `deploy/sndbx.sh`), plus `deploy/local-dev` (local-only development server) and `deploy/generic-aws` (a placeholder AWS deploy).
+These packages are libraries. Actual deployments live as projects under `deploy/` — one per domain the Scratchwork project owns (currently `deploy/cloudflare-vanilla`), plus `deploy/local-dev` (local-only development server) and `deploy/generic-aws` (a placeholder AWS deploy).
 
 ## Local
 
@@ -17,7 +17,7 @@ These packages are libraries. Actual deployments live as projects under `deploy/
 bun run local:local-dev
 ```
 
-By default the generic local server listens on `43118` and stores published bundles under `.scratchwork-local-data/`. Deploy projects can choose the local adapter matching their platform: `bun run local:sndbx.sh` now runs its production Worker configuration with Wrangler-backed R2 and D1, while the generic AWS project uses `deploy-local`'s `runLocalServer` — see the deploy project's README.
+By default the generic local server listens on `43118` and stores published bundles under `.scratchwork-local-data/`. Deploy projects can choose the local adapter matching their platform: `bun run local:cloudflare-vanilla` now runs its production Worker configuration with Wrangler-backed R2 and D1, while the generic AWS project uses `deploy-local`'s `runLocalServer` — see the deploy project's README.
 
 To exercise the actual Cloudflare Worker adapter with locally simulated R2 and D1
 bindings instead, run:
@@ -56,14 +56,14 @@ SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
 Deploy projects load environment values from files and the shell. Precedence is:
 
 1. Shell environment
-2. The project's `.env`, such as `deploy/sndbx.sh/.env`
+2. The project's `.env`, such as `deploy/cloudflare-vanilla/.env`
 3. Built-in defaults
 
 Start from the project's example file, then deploy:
 
 ```sh
-cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
-bun run deploy:sndbx.sh
+cp deploy/cloudflare-vanilla/.env.example deploy/cloudflare-vanilla/.env
+bun run deploy:cloudflare-vanilla
 ```
 
 Configure your Google OAuth app with this redirect URI:
@@ -165,13 +165,13 @@ SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
 
 ## Cloudflare
 
-Deploy to Cloudflare Workers + R2 via a deploy project, such as `deploy/sndbx.sh`:
+Deploy to Cloudflare Workers + R2 via a deploy project, such as `deploy/cloudflare-vanilla`:
 
 ```sh
-bun run deploy:sndbx.sh
+bun run deploy:cloudflare-vanilla
 ```
 
-The deploy command uses the `wrangler` CLI credentials in your environment. It creates the R2 bucket if needed, writes a generated Wrangler config under `server/deploy-cloudflare/dist/`, and deploys the Worker. The package pins Wrangler as a development dependency, so neither deployment nor local development requires a separate global install.
+The deploy command talks to the Cloudflare REST API through the official `cloudflare` SDK, authenticated by `CLOUDFLARE_API_TOKEN` in the environment or an env file (also set `CLOUDFLARE_ACCOUNT_ID` when the token can see more than one account). It creates the R2 bucket and D1 database if needed, uploads the Worker with its bindings, and applies routes and custom domains. A Wrangler-format config is still written under `server/deploy-cloudflare/dist/` as a record of the deploy. Local development runs through the pinned Wrangler development dependency, so it requires no separate global install.
 
 Optional environment variables:
 
@@ -186,6 +186,6 @@ SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
 ```
 
-Cloudflare deploy writes non-secret auth values into the generated Wrangler config and uploads `SCRATCHWORK_GOOGLE_CLIENT_SECRET` plus `SCRATCHWORK_SESSION_SECRET` with `wrangler secret put`. AWS deploy sends `SCRATCHWORK_*` values to Lambda environment variables.
+Cloudflare deploy attaches non-secret auth values to the Worker as plain-text bindings and uploads `SCRATCHWORK_GOOGLE_CLIENT_SECRET` plus `SCRATCHWORK_SESSION_SECRET` through the Workers secrets API. AWS deploy sends `SCRATCHWORK_*` values to Lambda environment variables.
 
 Set `SCRATCHWORK_APP_URL` and `SCRATCHWORK_CONTENT_URL` (or the `appDomain`/`contentDomain` config values) behind a custom domain or proxy so publish responses return the public URL. Use the same value for both on a single-host server.
