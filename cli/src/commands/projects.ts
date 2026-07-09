@@ -17,10 +17,11 @@ import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
 import { isRecord } from "../../../shared/src/util/json";
 import { apiErrorText, apiJson, apiRequest, projectApiUrl } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
+import { SKIPPED_DIRECTORIES } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
 import { PROJECT_CONFIG_FILE, resolveProjectRef, resolveServerFromCwd, writeProjectConfig } from "../project-config";
 import type { CloneConfig, PathConfig, ProjectRefConfig, ServerConfig, ShareConfig } from "../types";
-import { runPublish, SKIPPED_DIRECTORIES, type PublishServices } from "./publish";
+import { runPublish, type PublishServices } from "./publish";
 
 /** Project metadata as returned by /api/projects. */
 interface ApiProject {
