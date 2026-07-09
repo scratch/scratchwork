@@ -6,41 +6,58 @@ import { PrimitiveDb, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../sr
 import type { PublishRequest } from "../src/publish-request";
 import { projectForRequest, routeRest } from "../src/routes";
 import * as Schema from "effect/Schema";
-import { SiteRecordSchema, type SiteRecord } from "../src/site-records";
+import { StoredSiteRecordSchema, type SiteRecord, type StoredSiteRecord } from "../src/site-records";
 import { SiteStore, SiteStoreLive, SiteStoreError, canReadProject, migrateSiteRecord, projectRole } from "../src/site-store";
 import { bundle, memoryStorageLayer } from "./helpers";
 
 const owner = { id: "user-1", email: "founder@example.com" };
 const reader = { id: "user-2", email: "reader@example.com" };
 
-/** Builds a SiteRecord fixture with the given visibility and optional grant groups. */
-function record(visibility: string, groups: { readers?: string; writers?: string; admins?: string } = {}): SiteRecord {
+/** The pointer fields shared by the current and legacy record fixtures. */
+const recordCommon = {
+  project: "site",
+  owner,
+  createdAt: "2026-06-29T00:00:00.000Z",
+  updatedAt: "2026-06-29T00:00:00.000Z",
+  currentRevisionId: "rev-1",
+  currentOpenPath: "/",
+  fileCount: 1,
+  totalBytes: 10,
+} as const;
+
+/** Builds a SiteRecord fixture with the given public toggle and optional grant groups. */
+function record(isPublic: boolean, groups: { readers?: string; writers?: string; admins?: string } = {}): SiteRecord {
   return {
-    version: 4,
-    project: "site",
-    visibility,
+    version: 5,
+    isPublic,
     readers: groups.readers ?? "private",
     writers: groups.writers ?? "private",
     admins: groups.admins ?? "private",
-    owner,
-    createdAt: "2026-06-29T00:00:00.000Z",
-    updatedAt: "2026-06-29T00:00:00.000Z",
-    currentRevisionId: "rev-1",
-    currentOpenPath: "/",
-    fileCount: 1,
-    totalBytes: 10,
+    ...recordCommon,
   };
 }
 
-/** Builds a ServerConfigShape fixture with the given visibility ceiling. */
-function config(maxVisibility: string): ServerConfigShape {
+/** Builds a retired version-4 record fixture, whose toggle was a visibility string. */
+function v4Record(visibility: string): StoredSiteRecord {
+  return {
+    version: 4,
+    visibility,
+    readers: "private",
+    writers: "private",
+    admins: "private",
+    ...recordCommon,
+  };
+}
+
+/** Builds a ServerConfigShape fixture with optional policy overrides. */
+function config(policy: { allowPublicProjects?: boolean; allowedShareDomains?: ReadonlySet<string> } = {}): ServerConfigShape {
   return {
     port: 3001,
     homepageUrls: [],
-    maxVisibility,
-    shareAllowedDomains: new Set(),
+    allowPublicProjects: policy.allowPublicProjects ?? true,
+    allowedShareDomains: policy.allowedShareDomains ?? new Set(),
     usersCanSetProjectNames: true,
-    defaultVisibility: "private",
+    publicByDefault: false,
     auth: {
       mode: "oauth",
       clientId: "client-id",
@@ -58,7 +75,7 @@ function request(project: string | undefined): PublishRequest {
     bundle: bundle({ "index.html": "hello" }),
     openPath: "/",
     project,
-    visibility: "public",
+    isPublic: true,
     totalBytes: 5,
   } as PublishRequest;
 }
@@ -81,26 +98,26 @@ function run<A, E>(
 }
 
 describe("canReadProject", () => {
-  test("owner can read their project when maxVisibility tightens below stored visibility", () => {
-    expect(canReadProject(record("public"), owner, config("@example.com"))).toBe(true);
+  test("owner can read their public project even after allowPublicProjects turns off", () => {
+    expect(canReadProject(record(true), owner, config({ allowPublicProjects: false }))).toBe(true);
   });
 
-  test("non-owner readers are still gated by the maxVisibility ceiling", () => {
-    expect(canReadProject(record("public"), reader, config("@example.com"))).toBe(false);
-    expect(canReadProject(record("public"), null, config("@example.com"))).toBe(false);
+  test("non-owner readers of a public project are gated by allowPublicProjects", () => {
+    expect(canReadProject(record(true), reader, config({ allowPublicProjects: false }))).toBe(false);
+    expect(canReadProject(record(true), null, config({ allowPublicProjects: false }))).toBe(false);
   });
 
-  test("matching readers can read within the ceiling", () => {
-    expect(canReadProject(record("public"), reader, config("public"))).toBe(true);
-    expect(canReadProject(record("public"), null, config("public"))).toBe(true);
-    expect(canReadProject(record("private"), reader, config("public"))).toBe(false);
+  test("public projects read for everyone while the server allows them", () => {
+    expect(canReadProject(record(true), reader, config())).toBe(true);
+    expect(canReadProject(record(true), null, config())).toBe(true);
+    expect(canReadProject(record(false), reader, config())).toBe(false);
   });
 });
 
 describe("projectRole", () => {
   test("grades owner, admin, write, read, and none", () => {
-    const shared = record("private", { readers: "reader@example.com", writers: "writer@example.com", admins: "admin@example.com" });
-    const serverConfig = config("public");
+    const shared = record(false, { readers: "reader@example.com", writers: "writer@example.com", admins: "admin@example.com" });
+    const serverConfig = config();
     expect(projectRole(shared, owner, serverConfig)).toBe("owner");
     expect(projectRole(shared, { id: "u-a", email: "admin@example.com" }, serverConfig)).toBe("admin");
     expect(projectRole(shared, { id: "u-w", email: "writer@example.com" }, serverConfig)).toBe("write");
@@ -109,21 +126,21 @@ describe("projectRole", () => {
     expect(projectRole(shared, null, serverConfig)).toBe("none");
   });
 
-  test("public visibility confers read on everyone, including anonymous viewers", () => {
-    const open = record("public");
-    expect(projectRole(open, reader, config("public"))).toBe("read");
-    expect(projectRole(open, null, config("public"))).toBe("read");
+  test("a public project confers read on everyone, including anonymous viewers", () => {
+    const open = record(true);
+    expect(projectRole(open, reader, config())).toBe("read");
+    expect(projectRole(open, null, config())).toBe("read");
   });
 
   test("domain grants confer write and admin", () => {
-    const shared = record("private", { writers: "@team.example.com", admins: "@ops.example.com" });
-    expect(projectRole(shared, { id: "u-1", email: "dev@team.example.com" }, config("public"))).toBe("write");
-    expect(projectRole(shared, { id: "u-2", email: "sre@ops.example.com" }, config("public"))).toBe("admin");
+    const shared = record(false, { writers: "@team.example.com", admins: "@ops.example.com" });
+    expect(projectRole(shared, { id: "u-1", email: "dev@team.example.com" }, config())).toBe("write");
+    expect(projectRole(shared, { id: "u-2", email: "sre@ops.example.com" }, config())).toBe("admin");
   });
 
-  test("the maxVisibility ceiling gates every granted role, never the owner", () => {
-    const shared = record("public", { writers: "writer@example.com", admins: "admin@example.com" });
-    const tightened = config("@allowed.example.com");
+  test("tightened server policy gates every granted role, never the owner", () => {
+    const shared = record(true, { writers: "writer@example.com", admins: "admin@example.com" });
+    const tightened = config({ allowPublicProjects: false, allowedShareDomains: new Set(["allowed.example.com"]) });
     expect(projectRole(shared, owner, tightened)).toBe("owner");
     expect(projectRole(shared, { id: "u-a", email: "admin@example.com" }, tightened)).toBe("none");
     expect(projectRole(shared, { id: "u-w", email: "writer@example.com" }, tightened)).toBe("none");
@@ -132,8 +149,8 @@ describe("projectRole", () => {
 });
 
 describe("legacy record migration", () => {
-  test("records written before roles decode with private grant groups", () => {
-    const decoded = Schema.decodeUnknownSync(SiteRecordSchema)({
+  test("version-4 records decode, defaulting pre-role grant groups to private", () => {
+    const decoded = Schema.decodeUnknownSync(StoredSiteRecordSchema)({
       version: 4,
       project: "site",
       visibility: "public",
@@ -150,13 +167,15 @@ describe("legacy record migration", () => {
     expect(decoded.admins).toBe("private");
   });
 
-  test("a legacy group visibility migrates into the readers grant list", () => {
-    const legacy = migrateSiteRecord(record("alice@example.com,@example.com"));
-    expect(legacy.visibility).toBe("private");
+  test("version-4 visibility strings migrate onto the isPublic toggle", () => {
+    expect(migrateSiteRecord(v4Record("public"))).toEqual(record(true));
+    expect(migrateSiteRecord(v4Record("private"))).toEqual(record(false));
+    // A pre-role-split grant list moves to readers with the project private.
+    const legacy = migrateSiteRecord(v4Record("alice@example.com,@example.com"));
+    expect(legacy.isPublic).toBe(false);
     expect(legacy.readers).toBe("alice@example.com,@example.com");
-    // Binary visibilities pass through untouched.
-    expect(migrateSiteRecord(record("public"))).toEqual(record("public"));
-    expect(migrateSiteRecord(record("private"))).toEqual(record("private"));
+    // Current records pass through untouched.
+    expect(migrateSiteRecord(record(true))).toEqual(record(true));
   });
 });
 
@@ -177,9 +196,9 @@ describe("project name claims", () => {
       },
     };
 
-    await run(db, (store) => store.publish(request("site"), owner, config("public")));
+    await run(db, (store) => store.publish(request("site"), owner, config()));
     const failed = await run(db, (store) =>
-      store.publish(request("site"), reader, config("public")).pipe(Effect.flip),
+      store.publish(request("site"), reader, config()).pipe(Effect.flip),
     ) as SiteStoreError;
 
     expect(failed.status).toBe(409);
@@ -191,14 +210,14 @@ describe("project name claims", () => {
   test("owner updates in place; another owner gets the canonical 409", async () => {
     const db = makeMemoryPrimitiveDb();
 
-    const created = await run(db, (store) => store.publish(request("site"), owner, config("public")));
+    const created = await run(db, (store) => store.publish(request("site"), owner, config()));
     expect(created.project).toBe("site");
 
-    const updated = await run(db, (store) => store.publish(request("site"), owner, config("public")));
+    const updated = await run(db, (store) => store.publish(request("site"), owner, config()));
     expect(updated.project).toBe("site");
 
     const denied = await run(db, (store) =>
-      store.publish(request("site"), reader, config("public")).pipe(Effect.flip),
+      store.publish(request("site"), reader, config()).pipe(Effect.flip),
     ) as SiteStoreError;
     expect(denied.status).toBe(409);
     expect(denied.message).toContain("already taken");
@@ -206,7 +225,7 @@ describe("project name claims", () => {
 
   test("random naming mints a slug, republishes by slug, and retries collisions", async () => {
     const db = makeMemoryPrimitiveDb();
-    const randomConfig = { ...config("public"), usersCanSetProjectNames: false };
+    const randomConfig = { ...config(), usersCanSetProjectNames: false };
 
     const created = await run(db, (store) => store.publish(request(undefined), owner, randomConfig));
     expect(created.project).toMatch(/^[a-z2-9]{10}$/);

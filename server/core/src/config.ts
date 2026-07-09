@@ -21,15 +21,16 @@ export interface ServerConfigShape {
   readonly homepageUrls: ReadonlyArray<string>;
   /** Name of the project served on the homepage origins; set iff homepageUrls is non-empty. */
   readonly homepageProject?: string;
-  /** Server-wide ceiling on how visible any project may be. */
-  readonly maxVisibility: AccessGroup;
-  /** When non-empty, explicit share targets must fall inside these domains. */
-  readonly shareAllowedDomains: ReadonlySet<string>;
+  /** false: no project may be public — existing public projects read as private. */
+  readonly allowPublicProjects: boolean;
+  /** When non-empty, share grants must fall inside these domains; grants outside them
+   * stop conferring access. */
+  readonly allowedShareDomains: ReadonlySet<string>;
   /** true: publishers choose globally-unique project names (first-writer-wins).
    * false: the server assigns a random slug on first publish. */
   readonly usersCanSetProjectNames: boolean;
-  /** Visibility applied when a publish does not specify one. */
-  readonly defaultVisibility: AccessGroup;
+  /** Whether a publish that does not say public/private creates a public project. */
+  readonly publicByDefault: boolean;
   readonly auth: AuthConfig;
 }
 
@@ -105,15 +106,16 @@ export function readServerConfig(
       "SCRATCHWORK_CONTENT_URL",
     );
 
+    yield* rejectRetiredEnvVars(env);
     return {
       port,
       appUrl,
       contentUrl,
       ...(yield* readHomepage(env, appUrl, contentUrl)),
-      maxVisibility: yield* readAccessGroup(env.SCRATCHWORK_MAX_VISIBILITY, "public", "SCRATCHWORK_MAX_VISIBILITY"),
-      shareAllowedDomains: yield* readDomainSet(env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS"),
+      allowPublicProjects: yield* readBoolean(env.SCRATCHWORK_ALLOW_PUBLIC_PROJECTS, true, "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS"),
+      allowedShareDomains: yield* readDomainSet(env.SCRATCHWORK_ALLOWED_SHARE_DOMAINS, "SCRATCHWORK_ALLOWED_SHARE_DOMAINS"),
       usersCanSetProjectNames: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES, true, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES"),
-      defaultVisibility: yield* readBinaryVisibility(env.SCRATCHWORK_DEFAULT_VISIBILITY, "private", "SCRATCHWORK_DEFAULT_VISIBILITY"),
+      publicByDefault: yield* readBoolean(env.SCRATCHWORK_PUBLIC_BY_DEFAULT, false, "SCRATCHWORK_PUBLIC_BY_DEFAULT"),
       auth: yield* readAuthConfig(env, appUrl),
     };
   });
@@ -339,19 +341,23 @@ function normalizeCfTeamDomain(value: string): string | null {
   return safeDomain(domain) ? `https://${domain}` : null;
 }
 
-/** Parses a visibility-toggle environment value: project visibility is only ever public
- * or private (per-account access is a grant list managed through share, not a visibility
- * value). */
-function readBinaryVisibility(
-  value: string | undefined,
-  fallback: "public" | "private",
-  name: string,
-): Effect.Effect<AccessGroup, ServerConfigError> {
-  const visibility = value == null || value === "" ? fallback : value.trim().toLowerCase();
-  if (visibility !== "public" && visibility !== "private") {
-    return Effect.fail(invalidValue(name, value ?? "", '"public" or "private" (per-account access is granted through share, not a visibility value)'));
+/** Retired visibility-era variables and their replacements. These carried access policy,
+ * so silently ignoring one could leave a server more open than its operator intended —
+ * refuse to start instead. */
+const RETIRED_ENV_VARS: ReadonlyArray<readonly [string, string]> = [
+  ["SCRATCHWORK_MAX_VISIBILITY", 'SCRATCHWORK_ALLOW_PUBLIC_PROJECTS ("true"/"false") and, for domain ceilings, SCRATCHWORK_ALLOWED_SHARE_DOMAINS'],
+  ["SCRATCHWORK_SHARE_ALLOWED_DOMAINS", "SCRATCHWORK_ALLOWED_SHARE_DOMAINS"],
+  ["SCRATCHWORK_DEFAULT_VISIBILITY", 'SCRATCHWORK_PUBLIC_BY_DEFAULT ("true"/"false")'],
+];
+
+/** Fails when a retired environment variable is still set. */
+function rejectRetiredEnvVars(env: EnvVars): Effect.Effect<void, ServerConfigError> {
+  for (const [name, replacement] of RETIRED_ENV_VARS) {
+    if (nonEmpty(env[name]) != null) {
+      return Effect.fail(new ServerConfigError({ message: `${name} is no longer supported: use ${replacement} instead` }));
+    }
   }
-  return Effect.succeed(visibility);
+  return Effect.void;
 }
 
 /** Parses one access-group environment value with a fallback expression. */

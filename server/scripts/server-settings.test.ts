@@ -18,9 +18,9 @@ describe("serverConfigEnv", () => {
     const config: ScratchworkServerConfig = {
       auth: "oauth",
       allowedUsers: "public",
-      maxVisibility: "public",
+      allowPublicProjects: true,
       usersCanSetProjectNames: true,
-      defaultVisibility: "private",
+      publicByDefault: false,
     };
     const env = serverConfigEnv(config, { appUrl: "https://app.example", contentUrl: "https://pages.example" });
 
@@ -60,17 +60,26 @@ describe("validateDeploymentConfig", () => {
   };
 
   test("accepts a config the server can parse", () => {
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "@gmail.com,@koomen.org" })).not.toThrow();
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOWED_USERS: "@gmail.com,@koomen.org" })).not.toThrow();
   });
 
   test("rejects values the deployed server would crash on at runtime", () => {
     // Domains without the leading "@" are not valid group terms.
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "gmail.com,koomen.org" }))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOWED_USERS: "gmail.com,koomen.org" }))
       .toThrow("Invalid access group");
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "@example.com" }))
-      .toThrow('expected "public" or "private"');
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_PUBLIC_BY_DEFAULT: "@example.com" }))
+      .toThrow('expected "true" or "false"');
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_APP_URL: "not a url" }))
       .toThrow('expected a URL, like "https://example.com"');
+  });
+
+  test("rejects the retired visibility-era variables", () => {
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "public" }))
+      .toThrow("SCRATCHWORK_ALLOW_PUBLIC_PROJECTS");
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "private" }))
+      .toThrow("SCRATCHWORK_PUBLIC_BY_DEFAULT");
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SHARE_ALLOWED_DOMAINS: "example.com" }))
+      .toThrow("SCRATCHWORK_ALLOWED_SHARE_DOMAINS");
   });
 
   test("still enforces the OAuth requirements", () => {

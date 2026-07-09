@@ -22,8 +22,10 @@ export interface ScratchworkServerConfig {
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
   readonly allowedUsers?: string;
-  readonly maxVisibility?: string;
-  readonly shareAllowedDomains?: string;
+  /** false: no project on this server may be public. Default: true. */
+  readonly allowPublicProjects?: boolean;
+  /** When non-empty, share grants must fall inside these domains (comma-separated). */
+  readonly allowedShareDomains?: string;
   readonly appDomain?: string;
   readonly contentDomain?: string;
   /** Hostnames served from the homepage project; the first is canonical, the rest 308 to
@@ -33,7 +35,8 @@ export interface ScratchworkServerConfig {
   /** Globally unique name of the project served on the homepage domains. */
   readonly homepageProject?: string;
   readonly usersCanSetProjectNames?: boolean;
-  readonly defaultVisibility?: string;
+  /** Whether a publish that does not say public/private creates a public project. Default: false. */
+  readonly publicByDefault?: boolean;
 }
 
 /** Options shared by every deployServer entry point. */
@@ -81,10 +84,10 @@ export function serverConfigEnv(config: Partial<ScratchworkServerConfig>, resolv
   if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
   if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
   if (config.allowedUsers != null) env.SCRATCHWORK_ALLOWED_USERS = config.allowedUsers;
-  if (config.maxVisibility != null) env.SCRATCHWORK_MAX_VISIBILITY = config.maxVisibility;
-  if (config.shareAllowedDomains != null) env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS = config.shareAllowedDomains;
+  if (config.allowPublicProjects != null) env.SCRATCHWORK_ALLOW_PUBLIC_PROJECTS = String(config.allowPublicProjects);
+  if (config.allowedShareDomains != null) env.SCRATCHWORK_ALLOWED_SHARE_DOMAINS = config.allowedShareDomains;
   if (config.usersCanSetProjectNames != null) env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES = String(config.usersCanSetProjectNames);
-  if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
+  if (config.publicByDefault != null) env.SCRATCHWORK_PUBLIC_BY_DEFAULT = String(config.publicByDefault);
   if (config.homepageDomains != null && config.homepageDomains.length > 0) {
     env.SCRATCHWORK_HOMEPAGE_DOMAINS = config.homepageDomains.join(",");
   }
@@ -104,7 +107,7 @@ export function homepagePublishHint(
 ): string | null {
   if (config.homepageProject == null) return null;
   const server = resolved.appUrl ?? "<app url>";
-  return `publish the homepage with: scratchwork publish --server ${server} --project ${config.homepageProject} --visibility public`;
+  return `publish the homepage with: scratchwork publish --server ${server} --project ${config.homepageProject} --public`;
 }
 
 /** Validates required auth settings before a deploy. Auth cannot be disabled, and the
@@ -138,7 +141,7 @@ export function validateDeploymentAuth(env: DeployEnv): void {
 
 /** Validates the composed environment before a deploy by parsing it exactly as the
  * deployed server will at runtime. A value the server would reject (a malformed
- * maxVisibility group, a bad URL, a short session secret) must fail the deploy command,
+ * allowedShareDomains list, a bad URL, a short session secret) must fail the deploy command,
  * not take the deployed server down on its first request. */
 export function validateDeploymentConfig(env: DeployEnv): void {
   validateDeploymentAuth(env);

@@ -41,7 +41,7 @@ export type PublishServices = CommandExecutor | FileSystem.FileSystem | HttpClie
  * random-naming server it is how the CLI learns the assigned name. */
 interface PublishResponse {
   readonly project: string;
-  readonly visibility: string;
+  readonly isPublic: boolean;
   readonly openPath: string;
   readonly url: string;
 }
@@ -67,16 +67,16 @@ export function runPublish(
     const authToken = yield* readAuthToken(server);
     const project = yield* resolveProjectName(config, projectConfig, target);
     const nameSource = target.file ?? (yield* basename(target.root));
-    // An omitted visibility lets the server preserve an existing project's visibility
-    // or apply its default; an omitted project lets a random-naming server mint one.
-    const visibility = nonEmpty(config.visibility) ?? nonEmpty(projectConfig?.visibility);
+    // An omitted isPublic lets the server preserve an existing project's setting or
+    // apply its default; an omitted project lets a random-naming server mint one.
+    const isPublic = config.isPublic ?? projectConfig?.isPublic;
 
     const bundle = yield* createBundle(target.root);
     const body = {
       bundle,
       openPath: target.openPath,
       project,
-      visibility,
+      isPublic,
     };
     const response = yield* postPublish(server, body, authToken).pipe(
       Effect.catchIf((error) => error instanceof PublishAuthRequired, () =>
@@ -184,7 +184,7 @@ function postPublish(
     readonly bundle: PublishBundle;
     readonly openPath: string;
     readonly project?: string;
-    readonly visibility?: string;
+    readonly isPublic?: boolean;
   },
   authToken: string | undefined,
 ): Effect.Effect<PublishResponse, CliError, FileSystem.FileSystem | HttpClient.HttpClient | Path.Path> {
@@ -230,7 +230,7 @@ function writeMetadata(
   return writeProjectConfig(root, {
     server,
     project: response.project,
-    visibility: response.visibility,
+    isPublic: response.isPublic,
     url: response.url,
     updatedAt: new Date().toISOString(),
   }).pipe(
@@ -260,7 +260,7 @@ function printResult(
       ...(sentProject != null && sentProject !== response.project
         ? [`  note    server assigned project name "${response.project}"`]
         : []),
-      `  access  ${response.visibility}`,
+      `  access  ${response.isPublic ? "public" : "private"}`,
       `  files   ${bundle.files.length} (${formatBytes(bytes)})`,
       ...(saved ? [`  saved   ${PROJECT_CONFIG_FILE}\n`] : [""]),
     ].join("\n"),
@@ -272,7 +272,7 @@ function decodePublishResponse(value: unknown): PublishResponse | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.project !== "string" ||
-    typeof value.visibility !== "string" ||
+    typeof value.isPublic !== "boolean" ||
     typeof value.openPath !== "string" ||
     typeof value.url !== "string"
   ) {
@@ -280,7 +280,7 @@ function decodePublishResponse(value: unknown): PublishResponse | null {
   }
   return {
     project: value.project,
-    visibility: value.visibility,
+    isPublic: value.isPublic,
     openPath: value.openPath,
     url: value.url,
   };

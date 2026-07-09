@@ -10,12 +10,12 @@ describe("decodePublishRequest", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "//docs///",
       project: "site_docs",
-      visibility: "Public",
+      isPublic: true,
     }));
 
     expect(request.openPath).toBe("/docs/");
     expect(request.project).toBe("site_docs");
-    expect(request.visibility).toBe("public");
+    expect(request.isPublic).toBe(true);
     expect(request.totalBytes).toBe(5);
   });
 
@@ -54,7 +54,7 @@ describe("decodePublishRequest", () => {
     }))).rejects.toThrow("Invalid openPath");
   });
 
-  test("validates project and visibility", async () => {
+  test("validates project and isPublic", async () => {
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
       project: "../bad",
@@ -66,18 +66,18 @@ describe("decodePublishRequest", () => {
       project: "Docs",
     }))).rejects.toThrow("Invalid project");
 
+    // The retired visibility strings are not silently accepted.
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
       project: "site",
-      visibility: "public,@example.com",
-    }))).rejects.toThrow("Invalid access group");
+      isPublic: "public",
+    }))).rejects.toThrow("Expected boolean");
 
-    // Grant lists are managed through share, not the visibility toggle.
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
       project: "site",
-      visibility: "alice@example.com,@example.com",
-    }))).rejects.toThrow("scratchwork share");
+      visibility: "public",
+    }))).rejects.toThrow("visibility");
   });
 
   test("rejects the retired workspace field as an excess property", async () => {

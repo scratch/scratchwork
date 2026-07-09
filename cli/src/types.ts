@@ -21,12 +21,13 @@ export interface TemplateConfig {
   readonly file: string;
 }
 
-/** `scratchwork publish` options. */
+/** `scratchwork publish` options. `isPublic` stays undefined when neither --public nor
+ * --private is passed, letting saved config or the server decide. */
 export interface PublishConfig {
   readonly path: string;
   readonly server?: string;
   readonly project?: string;
-  readonly visibility?: string;
+  readonly isPublic?: boolean;
 }
 
 /** `scratchwork login` options. */

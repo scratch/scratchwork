@@ -28,7 +28,7 @@ describe("worker fetch", () => {
       SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
       SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
       SCRATCHWORK_SESSION_SECRET: "test-session-secret-test-session-secret",
-      SCRATCHWORK_MAX_VISIBILITY: "gmail.com,koomen.org",
+      SCRATCHWORK_ALLOWED_USERS: "gmail.com,koomen.org",
     };
     const response = await worker.fetch(new Request("https://scratch.test/health"), env as never, {
       waitUntil: () => {},
@@ -45,7 +45,7 @@ describe("worker fetch", () => {
       SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
       SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
       SCRATCHWORK_SESSION_SECRET: "test-session-secret-test-session-secret",
-      SCRATCHWORK_MAX_VISIBILITY: "@gmail.com,@koomen.org",
+      SCRATCHWORK_ALLOWED_USERS: "@gmail.com,@koomen.org",
     };
     const response = await worker.fetch(new Request("https://scratch.test/health"), env as never, {
       waitUntil: () => {},

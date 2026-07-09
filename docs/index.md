@@ -46,7 +46,7 @@ scratchwork dev
 Publish it privately
 
 ```sh
-scratchwork publish --server scratchwork.dev --visibility private
+scratchwork publish --server scratchwork.dev --private
 ```
 
 Give your all of your teammates read access:

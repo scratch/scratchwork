@@ -36,14 +36,6 @@ export function accessGroupMatches(group: AccessGroup, principal: AccessPrincipa
   return terms.some((term) => termMatches(term, principal));
 }
 
-/** Returns true when every principal in `candidate` would also be allowed by `ceiling`. */
-export function accessGroupIsSubset(candidate: AccessGroup, ceiling: AccessGroup): boolean {
-  const candidateTerms = parseAccessGroup(candidate);
-  const ceilingTerms = parseAccessGroup(ceiling);
-  if (candidateTerms == null || ceilingTerms == null) return false;
-  return candidateTerms.every((term) => termIsSubset(term, ceilingTerms));
-}
-
 export { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
 
 /** Names that cannot be claimed as projects. Projects live at single top-level path
@@ -96,7 +88,7 @@ export function accessGroupModify(
   if (current.some((term) => term._tag === "Public")) {
     if (additions.length > 0) {
       return Effect.fail(new AccessGroupError({
-        message: 'Visibility is "public", which has no per-account grants to edit. Set an explicit visibility first (scratchwork publish --visibility or unpublish).',
+        message: 'This group is "public", which has no per-account grants to edit. Make the project private first (scratchwork publish --private or unpublish).',
       }));
     }
     return Effect.succeed("public");
@@ -190,21 +182,6 @@ function termMatches(term: GroupTerm, principal: AccessPrincipal | null | undefi
   const email = principal.email.toLowerCase();
   if (term._tag === "Email") return email === term.email;
   return email.endsWith(`@${term.domain}`);
-}
-
-/** Returns true when everyone matched by `term` is also matched by some ceiling term. */
-function termIsSubset(term: GroupTerm, ceiling: ReadonlyArray<GroupTerm>): boolean {
-  if (term._tag === "Private") return true;
-  if (ceiling.some((candidate) => candidate._tag === "Public")) return true;
-  if (term._tag === "Public") return false;
-  if (term._tag === "Email") {
-    return ceiling.some((candidate) =>
-      candidate._tag === "Email"
-        ? candidate.email === term.email
-        : candidate._tag === "Domain" && term.email.endsWith(`@${candidate.domain}`),
-    );
-  }
-  return ceiling.some((candidate) => candidate._tag === "Domain" && candidate.domain === term.domain);
 }
 
 /** Renders parsed terms back into the canonical expression string. */

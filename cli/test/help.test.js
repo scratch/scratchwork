@@ -81,7 +81,7 @@ describe("CLI help", () => {
     expect(after.code).toBe(0);
     expect(before.stdout).toBe(after.stdout);
     expect(before.stdout).toContain("scratchwork publish [path] [--server <url>]");
-    expect(before.stdout).toContain("--visibility <scope>");
+    expect(before.stdout).toContain("--public");
   });
 
   test("treats a bare help token after the command as a positional argument", async () => {

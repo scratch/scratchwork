@@ -9,7 +9,7 @@ export const server = {
   auth: "oauth",
   authSessionSeconds: 2_592_000,
   allowedUsers: "public",
-  maxVisibility: "public",
+  allowPublicProjects: true,
   usersCanSetProjectNames: true,
-  defaultVisibility: "private",
+  publicByDefault: false,
 } satisfies ScratchworkServerConfig;

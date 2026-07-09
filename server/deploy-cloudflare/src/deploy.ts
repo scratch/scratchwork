@@ -380,10 +380,10 @@ function workerVars(
   copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_ALLOWED_USERS");
   copyEnv(vars, env, "SCRATCHWORK_AUTH_SESSION_SECONDS");
-  copyEnv(vars, env, "SCRATCHWORK_MAX_VISIBILITY");
-  copyEnv(vars, env, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS");
+  copyEnv(vars, env, "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS");
+  copyEnv(vars, env, "SCRATCHWORK_ALLOWED_SHARE_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES");
-  copyEnv(vars, env, "SCRATCHWORK_DEFAULT_VISIBILITY");
+  copyEnv(vars, env, "SCRATCHWORK_PUBLIC_BY_DEFAULT");
   copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_PROJECT");
   if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;

@@ -26,7 +26,6 @@ export { Auth, AuthError, AuthLive, createSessionToken, makeAuth, type AuthShape
 // Access-group expressions ("public" | "private" | emails/@domains) and identifier helpers.
 export {
   AccessGroupError,
-  accessGroupIsSubset,
   accessGroupMatches,
   accessGroupUsesOnlyDomains,
   normalizeAccessGroup,

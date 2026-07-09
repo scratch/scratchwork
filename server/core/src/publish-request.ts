@@ -7,7 +7,7 @@ import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
 import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeSitePath } from "../../../shared/src/site/paths";
 import { parseJson } from "../../../shared/src/util/json";
-import { normalizeAccessGroup, isSafeProjectIdentifier, type AccessGroup } from "./access";
+import { isSafeProjectIdentifier } from "./access";
 import { HttpError } from "./http";
 
 /** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
@@ -26,7 +26,7 @@ export interface PublishRequest {
   readonly bundle: PublishBundle;
   readonly openPath: string;
   readonly project?: string;
-  readonly visibility?: AccessGroup;
+  readonly isPublic?: boolean;
   readonly totalBytes: number;
 }
 
@@ -49,7 +49,9 @@ const RawPublishRequestSchema = Schema.Struct({
   bundle: PublishBundleSchema,
   openPath: Schema.optional(Schema.String),
   project: Schema.optional(Schema.String.pipe(Schema.filter((project) => isSafeProjectIdentifier(project) || "Invalid project"))),
-  visibility: Schema.optional(Schema.String),
+  // The public/private toggle; per-account and per-domain access is a separate grant
+  // list managed through the share API, not a publish-time setting.
+  isPublic: Schema.optional(Schema.Boolean),
 });
 
 type RawPublishRequest = Schema.Schema.Type<typeof RawPublishRequestSchema>;
@@ -125,25 +127,11 @@ function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishR
     if (openPath == null) {
       return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid openPath" }));
     }
-    const visibility = raw.visibility == null
-      ? undefined
-      : yield* normalizeAccessGroup(raw.visibility).pipe(
-        Effect.mapError((cause) => new HttpError({ status: 400, message: cause.message })),
-      );
-    // Visibility is the public/private toggle; per-account and per-domain access is a
-    // separate grant list managed through the share API, not a publish-time setting.
-    if (visibility != null && visibility !== "public" && visibility !== "private") {
-      return yield* Effect.fail(new HttpError({
-        status: 400,
-        message: 'visibility must be "public" or "private"; grant per-account access with scratchwork share',
-      }));
-    }
-
     return {
       bundle: raw.bundle,
       openPath,
       project: raw.project,
-      visibility,
+      isPublic: raw.isPublic,
       totalBytes,
     };
   });

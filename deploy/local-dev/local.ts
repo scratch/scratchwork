@@ -6,6 +6,6 @@ runLocalServer({
   server: {
     auth: "oauth",
     usersCanSetProjectNames: true,
-    defaultVisibility: "public",
+    publicByDefault: true,
   },
 });
