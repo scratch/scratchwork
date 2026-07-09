@@ -60,14 +60,18 @@ export function errorPageResponse(
   });
 }
 
-/** Maps an error status to friendly page copy. 4xx messages are crafted for clients and
- * shown as-is; 5xx details stay out of the page (they can carry internals). */
+/** Maps an error status to friendly page copy. 4xx messages are crafted for clients
+ * (the JSON error path already sends them verbatim) and shown as-is; on 401/403 pages
+ * the specific reason appears as the note under the friendly copy, so an auth
+ * misconfiguration (say, a Cloudflare Access AUD mismatch) is diagnosable from the page
+ * itself. 5xx details stay out of the page (they can carry internals). */
 function genericErrorPage(status: number, message: string): ErrorPage {
   if (status === 401) {
     return {
       status,
       title: "Sign-in required",
       message: "You need to sign in to view this page.",
+      note: message === "" ? undefined : message,
     };
   }
   if (status === 403) {
@@ -75,6 +79,7 @@ function genericErrorPage(status: number, message: string): ErrorPage {
       status,
       title: "Access denied",
       message: "You don't have access to this page.",
+      note: message === "" ? undefined : message,
     };
   }
   if (status === 404) {
