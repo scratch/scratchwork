@@ -19,7 +19,7 @@ import { nonEmpty } from "../../../shared/src/util/strings";
 import { apiErrorText, apiRequest } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
 import { openBrowser } from "../browser";
-import { resolveDevTarget } from "../dev/target";
+import { resolveDevTarget, SKIPPED_DIRECTORIES } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
 import {
   PROJECT_CONFIG_FILE,
@@ -30,9 +30,6 @@ import {
 } from "../project-config";
 import type { PublishConfig } from "../types";
 import { runLogin } from "./login";
-
-/** Directories never uploaded by publish and never watched by stream. */
-export const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", ".scratchwork-data"]);
 
 /** Services runPublish needs; exported for callers that wrap it (stream). */
 export type PublishServices = CommandExecutor | FileSystem.FileSystem | HttpClient.HttpClient | Path.Path;

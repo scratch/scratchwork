@@ -353,6 +353,55 @@ describe("path argument → open URL → served content", () => {
     );
   });
 
+  test("(2) a directory without an index opens the first page file's route", async () => {
+    await withServer(
+      { "zebra.md": "# zebra\n", "notes.html": staticPage("notes") },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/notes"); // alphabetically first page file at the root
+        expect((await get(openPath)).body).toContain("static@notes");
+      },
+    );
+  });
+
+  test("(2) a directory whose only pages are nested opens the shallowest one", async () => {
+    await withServer(
+      { "docs/guide.md": "# guide\n", "styles.css": "body {}" },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/docs/guide");
+        expect((await get("/docs/guide.md")).body).toBe("# guide\n");
+      },
+    );
+  });
+
+  test("(2) a nested index file opens its directory route", async () => {
+    await withServer(
+      { "docs/index.html": staticPage("docs") },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/docs/");
+        expect((await get(openPath)).body).toContain("static@docs");
+      },
+    );
+  });
+
+  test("(2) a marked renderer shell without index.md is not treated as the index", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "notes.md": "# notes\n" },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/notes"); // "/" would 404: the shell only renders .md routes
+        expect((await get(openPath)).body).toContain("shell@root");
+      },
+    );
+  });
+
+  test("(2) a directory with no page files still opens /", async () => {
+    await withServer(
+      { "styles.css": "body {}" },
+      async ({ openPath }) => {
+        expect(openPath).toBe("/");
+      },
+    );
+  });
+
   test("(1) `scratchwork dev dir/index.html` opens /", async () => {
     await withServer(
       { "index.html": staticPage("root") },
@@ -714,6 +763,45 @@ describe("scratchwork publish", () => {
       expect(publishBody.project).toBe("site");
       expect(publishBody.isPublic).toBe(true);
       expect(publishBody.bundle.files.map((file) => file.path)).toEqual(["index.html"]);
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("publishing a directory without an index sends the first page file's route as openPath", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-publish-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-config-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    let publishBody;
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        publishBody = await request.json();
+        return Response.json({
+          project: publishBody.project,
+          isPublic: true,
+          openPath: publishBody.openPath,
+          url: `${serverUrl}/${publishBody.project}${publishBody.openPath}`,
+        });
+      },
+    });
+
+    try {
+      writeFileSync(join(dir, "notes.md"), "# notes\n");
+      writeFileSync(join(dir, "styles.css"), "body {}");
+
+      const { code, stdout, stderr } = await runCli(["publish", ".", "--server", serverUrl], dir, {
+        env: { SCRATCHWORK_HOME: configDir },
+      });
+
+      expect(code).toBe(0);
+      expect(stderr).toBe("");
+      expect(publishBody.openPath).toBe("/notes");
+      expect(stdout).toContain("/notes"); // the printed (and opened) URL points at a real page
     } finally {
       server.stop(true);
       rmSync(dir, { recursive: true, force: true });
