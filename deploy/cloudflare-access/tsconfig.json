@@ -17,7 +17,10 @@
     "verbatimModuleSyntax": true
   },
   "include": [
+    "deploy.ts",
     "local.ts",
+    "cloudflare-config.ts",
+    "server-config.ts",
     "../../server/core/src/assets.d.ts",
     "../../shared/src/**/*.ts",
     "../../shared/**/*.js"

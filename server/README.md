@@ -36,10 +36,10 @@ SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL=developer@example.com bun run local:cloudflare
 See `server/deploy-cloudflare/README.md` for the deploy-project API and the exact
 Access behavior that is simulated.
 
-For a ready-made local-only Access deployment, run:
+For a ready-made local run of the Access-protected deploy project, run:
 
 ```sh
-bun run local:cf-access
+bun run local:cloudflare-access
 ```
 
 ## Google OAuth
