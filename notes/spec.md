@@ -18,7 +18,7 @@ A **group** is the access expression used everywhere access is configured:
 - `user@example.com` means one specific authenticated user can access it.
 - `user@x.com,@acme.com` means any matching email or domain can access it.
 
-A project has a **visibility** toggle — `public` or `private` — controlling whether everyone can read the published project, plus three **grant groups** (read, write, admin) naming the specific emails and `@domains` that hold each role. Server-level settings (`allowedUsers`, `maxVisibility`) use the full group syntax.
+A project has an **isPublic** toggle controlling whether everyone can read the published project, plus three **grant groups** (read, write, admin) naming the specific emails and `@domains` that hold each role. The server-level `allowedUsers` setting uses the full group syntax; the other policy settings are explicit scalars — `allowPublicProjects` (boolean), `allowedShareDomains` (domain list), `publicByDefault` (boolean).
 
 A server may designate one project as its **homepage** — the project served on the server's home domains, typically the naked domain and `www`. The homepage is an ordinary project: it is published, updated, and access-controlled exactly like any other project. Only the way requests reach it differs. See "Server homepage" below.
 
@@ -37,13 +37,13 @@ A project config looks like this:
 {
   "server": "example.com",
   "project": "hello-world",
-  "visibility": "private",
+  "isPublic": false,
   "url": "https://pages.example.com/hello-world/",
   "updatedAt": "2026-07-04T00:00:00.000Z"
 }
 ```
 
-`server` and `project` are the portable identity fields. `visibility` is the next publish default. `url` and `updatedAt` are server-assigned output fields saved by the CLI for display and convenience; they are not required to identify the project. A config still carrying the retired `workspace` or `routePath` fields is a hard error: the CLI names the stale field and asks for the file to be fixed or deleted, then republished.
+`server` and `project` are the portable identity fields. `isPublic` is the next publish default. `url` and `updatedAt` are server-assigned output fields saved by the CLI for display and convenience; they are not required to identify the project. A config still carrying the retired `workspace` or `routePath` fields is a hard error: the CLI names the stale field and asks for the file to be fixed or deleted, then republished.
 
 ## Server Config
 
@@ -94,12 +94,12 @@ export const server = {
   allowedUsers: "@example.com",
   authSessionSeconds: 2_592_000,
 
-  // Caps project visibility. A project cannot be published more broadly than this group.
-  maxVisibility: "@example.com",
+  // false: no project on this server may be public. Default: true.
+  allowPublicProjects: true,
 
-  // If shareAllowedDomains is set, users can only share published content with users on these
+  // If allowedShareDomains is set, users can only share published content with users on these
   // domains. If it is not set, there are no restrictions on who users can share with.
-  shareAllowedDomains: undefined,
+  allowedShareDomains: undefined,
 
   // How new projects get their globally unique, server-wide name.
   //   true (default) - publishers choose names; the first publish of a name claims it
@@ -110,8 +110,8 @@ export const server = {
   // for future features such as gh/g and auth-provider names) are rejected either way.
   usersCanSetProjectNames: true,
 
-  // Server fallback when the CLI does not send visibility.
-  defaultVisibility: "private",
+  // Server fallback when the CLI does not say public or private. Default: false.
+  publicByDefault: false,
 } satisfies ScratchworkServerConfig;
 ```
 
@@ -208,11 +208,11 @@ Cloudflare deploys also require Cloudflare credentials, and AWS deploys require 
 
 Scratchwork uses the same group syntax for project-level and server-level access.
 
-Project-level access has two parts: a `visibility` toggle that is only ever `"public"` or `"private"`, and per-role grant lists managed through the share API. In API responses they appear as:
+Project-level access has two parts: a boolean `isPublic` toggle, and per-role grant lists managed through the share API. In API responses they appear as:
 
 ```json
 {
-  "visibility": "private",
+  "isPublic": false,
   "permissions": {
     "read": ["alice@example.com"],
     "write": ["@team.example.com"],
@@ -221,20 +221,20 @@ Project-level access has two parts: a `visibility` toggle that is only ever `"pu
 }
 ```
 
-`permissions` names other users' emails, so it is included only for callers with admin access; everyone else sees just the visibility toggle.
+`permissions` names other users' emails, so it is included only for callers with admin access; everyone else sees just the public/private toggle.
 
 Every user holds one effective role per project: `none < read < write < admin < owner`. Each level implies the ones below it:
 
 - `read` — view the published site, `info`, `clone`.
-- `write` — read, plus publish new revisions (`publish`, `stream`). Writers cannot change visibility.
-- `admin` — write, plus manage sharing (`share`/`revoke`), change visibility, and `unpublish`.
+- `write` — read, plus publish new revisions (`publish`, `stream`). Writers cannot flip the public/private toggle.
+- `admin` — write, plus manage sharing (`share`/`revoke`), flip the public/private toggle, and `unpublish`.
 - `owner` — admin, plus `delete`. The owner is fixed at creation and always retains full access; ownership cannot be granted or transferred (yet).
 
-The project record stores the visibility toggle plus three grant groups, one per grantable role — `readers`, `writers`, and `admins` — the groups using the email/@domain syntax. A viewer has read access when the project is public or any grant group names them; grants are independent of the toggle, so read grants persist while a project is temporarily public. (Records written before this split stored read grants inside `visibility`; they migrate to `readers` on first load.)
+The project record stores the `isPublic` toggle plus three grant groups, one per grantable role — `readers`, `writers`, and `admins` — the groups using the email/@domain syntax. A viewer has read access when the project is public or any grant group names them; grants are independent of the toggle, so read grants persist while a project is temporarily public. (Records written before this split stored read grants inside a `visibility` string; they migrate to `readers` on first load, and the retired string toggle migrates onto `isPublic`.)
 
-The visibility toggle is set at publish time (`--visibility public|private`); the grant lists are edited with `scratchwork share --role <read|write|admin>` / `scratchwork revoke` (`POST /api/projects/:project/share` with `{"role": ..., "add": [...], "remove": [...]}`). Sharing assigns the role — a target holding a different role is moved, never duplicated — and revoking strips every role. Grants are validated against `maxVisibility` and `shareAllowedDomains`; revokes are not, so tightening server policy never blocks revocation. `unpublish` resets a project to owner-only: visibility private and every grant cleared. A revoke response warns when the removed address still has access (through a remaining domain grant, public visibility, or ownership).
+The toggle is set at publish time (`--public` / `--private`); the grant lists are edited with `scratchwork share --role <read|write|admin>` / `scratchwork revoke` (`POST /api/projects/:project/share` with `{"role": ..., "add": [...], "remove": [...]}`). Sharing assigns the role — a target holding a different role is moved, never duplicated — and revoking strips every role. Grants are validated against `allowedShareDomains`; revokes are not, so tightening server policy never blocks revocation. `unpublish` resets a project to owner-only: private and every grant cleared. A revoke response warns when the removed address still has access (through a remaining domain grant, the project being public, or ownership).
 
-`allowedUsers` gates app/API login. `maxVisibility` caps project visibility, so a project cannot be more public than the server allows; the ceiling gates every granted role (a group outside the ceiling stops conferring access), never the owner. For example, if `maxVisibility` is `"@example.com"`, a project cannot be published as `public`.
+`allowedUsers` gates app/API login. `allowPublicProjects: false` forbids public projects: public publishes are rejected, and existing public projects read as private while the setting is off. `allowedShareDomains` bounds every granted role (a group outside the allowed domains stops conferring access). Neither setting ever gates the owner.
 
 API responses report the caller's own role as `access`; the grant lists themselves are returned only to admins and the owner, since they name other users' emails.
 
@@ -263,7 +263,7 @@ This keeps routing deterministic — on any given host, a request path still res
 
 The homepage project also remains addressable at its normal content route (`pages.example.com/<project>/`). When the published project is the configured `homepageProject`, the publish response and the saved project config report the canonical home origin as the project `url`.
 
-Access control is unchanged: the homepage project has an owner, a visibility toggle, and grant groups, checked on every request under the server's `maxVisibility` ceiling. A non-public homepage runs the standard project-access handoff, with the access cookie scoped to `/` on the home origin. Because the home origin is separate from the content origin, homepage JavaScript does not share an origin with projects on the content domain, so the same-origin exposures described under Security do not extend across the two hosts. Most servers will want the homepage published as `public`.
+Access control is unchanged: the homepage project has an owner, a public/private toggle, and grant groups, checked on every request under the server's policy settings. A non-public homepage runs the standard project-access handoff, with the access cookie scoped to `/` on the home origin. Because the home origin is separate from the content origin, homepage JavaScript does not share an origin with projects on the content domain, so the same-origin exposures described under Security do not extend across the two hosts. Most servers will want the homepage published as `public`.
 
 ### Publishing the homepage
 
@@ -272,7 +272,7 @@ There is no deploy-time publishing step. Deploys provision infrastructure only; 
 ```sh
 cd homepage/
 scratchwork publish --server https://app.example.com \
-  --project home --visibility public
+  --project home --public
 ```
 
 Two affordances make this easy to get right:
@@ -308,8 +308,9 @@ scratchwork me
 # publish this project
 # server must be specified unless it is found in .scratchwork.json in the current
 # directory or a parent directory
-# visibility defaults to the project config, then user default, then interactive prompt
-# in non-interactive contexts with no user default, visibility defaults to private
+# the public/private setting defaults to the project config, then the server's
+# publicByDefault (omitting both --public and --private preserves an existing
+# project's setting)
 # project name defaults, highest precedence first: --project, the publish root's
 # .scratchwork.json, the directory name for a directory target, or the file name
 # minus its final extension for a file target (notes.md -> notes); if nothing
@@ -319,7 +320,7 @@ scratchwork me
 # if the server is specified (either in the args or project config) and the cli is not logged
 # in to that server, scratchwork login <server> is automatically run first
 # if the server is not specified, this command should error out
-scratchwork publish [--server text] [--project text] [--visibility <private|public>] [<path>]
+scratchwork publish [--server text] [--project text] [--public | --private] [<path>]
 
 # The following commands reference a project on the server. The project may be identified in one
 # of three ways:
@@ -329,7 +330,8 @@ scratchwork publish [--server text] [--project text] [--visibility <private|publ
 #   3. a url, e.g. example.com/myproject/
 
 # Grant accounts or whole domains a role on a project: read (view), write
-# (read + publish updates), or admin (write + manage sharing/visibility/unpublish);
+# (read + publish updates), or admin (write + manage sharing, the public/private
+# toggle, and unpublish);
 # default read. Sharing sets the targets' role, moving targets that hold another
 # role. Ownership (admin + delete) stays with the creator and cannot be granted.
 # targets and the project reference mix as positionals: anything containing "@"
@@ -337,12 +339,12 @@ scratchwork publish [--server text] [--project text] [--visibility <private|publ
 scratchwork share [--role read|write|admin] [--server text] [--project text] [<path-or-url>] <email-or-@domain>...
 
 # Revoke every role the exact email/@domain targets hold (the CLI warns when a
-# revoked address still has access through a remaining domain grant, public
-# visibility, or ownership)
+# revoked address still has access through a remaining domain grant, the project
+# being public, or ownership)
 scratchwork revoke [--server text] [--project text] [<path-or-url>] <email-or-@domain>...
 
-# Unpublish a given project: reset it to owner-only (visibility private, all
-# share grants cleared)
+# Unpublish a given project: reset it to owner-only (private, all share
+# grants cleared)
 scratchwork unpublish [--server text] [--project text] [<path-or-url>]
 
 # Delete a given project (releases its name)
@@ -373,7 +375,7 @@ Users authenticate to the app. domain using google oauth, or — on a `cloudflar
 
 ### Accessing a server
 
-A server uses `allowedUsers` to limit who can authenticate to the app/API. It uses `maxVisibility` to limit how widely any project on that server can be shared. Both settings use the standard group syntax.
+A server uses `allowedUsers` (standard group syntax) to limit who can authenticate to the app/API. It uses `allowPublicProjects` to decide whether any project may be public, and `allowedShareDomains` to limit which domains share grants may name.
 
 ### Accessing content
 
@@ -381,9 +383,9 @@ The server exposes an API on the `app.` subdomain, and serves published projects
 
 Published pages are served with normal, unrestrictive policies — no `Content-Security-Policy: sandbox` — so published JavaScript behaves like an ordinary static site. Isolation from the API and the login session comes from the host split alone: the `app.` session cookie is host-bound and never visible to `pages.`.
 
-To view a non-public project in the browser, a viewer needs a _project access cookie_ for that project. When a user requests a non-public project at its clean URL (`pages.example.com/<project>/...`), the content host redirects them to `app.example.com/auth/project?route=<project>&returnTo=<content-url>`, where they authenticate if needed via the `app.`-scoped session cookie. If they hold at least read access (public visibility, a grant naming their email or domain, or ownership) under the server `maxVisibility` ceiling, `app.` mints a **handoff token** — an HMAC-signed, ~60-second, single-purpose token bound to the project name and the viewer email — and redirects back to the content URL with the token in a reserved query parameter (`?_scratchwork_handoff=...`). The content host redeems it: it re-signs the same claims as a longer-lived **cookie token** (`authSessionSeconds`, matching the app session) and sets it as an `HttpOnly; Secure; SameSite=Lax` cookie whose `Path` matches where the redeeming host serves the project — `/<project>` on the content host, `/` on a home origin — then immediately redirects to the clean URL. The token never stays in the address bar, so the URL a viewer shares never carries a credential; a recipient who follows it just runs the same handoff under their own identity. An invalid or expired handoff token redirects to the clean URL, which re-runs the handoff.
+To view a non-public project in the browser, a viewer needs a _project access cookie_ for that project. When a user requests a non-public project at its clean URL (`pages.example.com/<project>/...`), the content host redirects them to `app.example.com/auth/project?route=<project>&returnTo=<content-url>`, where they authenticate if needed via the `app.`-scoped session cookie. If they hold at least read access (the project being public, a grant naming their email or domain, or ownership) under server policy, `app.` mints a **handoff token** — an HMAC-signed, ~60-second, single-purpose token bound to the project name and the viewer email — and redirects back to the content URL with the token in a reserved query parameter (`?_scratchwork_handoff=...`). The content host redeems it: it re-signs the same claims as a longer-lived **cookie token** (`authSessionSeconds`, matching the app session) and sets it as an `HttpOnly; Secure; SameSite=Lax` cookie whose `Path` matches where the redeeming host serves the project — `/<project>` on the content host, `/` on a home origin — then immediately redirects to the clean URL. The token never stays in the address bar, so the URL a viewer shares never carries a credential; a recipient who follows it just runs the same handoff under their own identity. An invalid or expired handoff token redirects to the clean URL, which re-runs the handoff.
 
-Every private-content request re-verifies the cookie signature and re-checks project access (the visibility toggle, grant groups, and `maxVisibility`) against the cookie's email, so revoking access (unpublish, revoke, tightened policy) takes effect immediately despite the long-lived cookie. The redirect dance only repeats when the cookie expires or access changes. Because the cookie is minted by the content host for its own hostname, the flow does not depend on `app.` and `pages.` sharing a registrable domain.
+Every private-content request re-verifies the cookie signature and re-checks project access (the public/private toggle, grant groups, and server policy) against the cookie's email, so revoking access (unpublish, revoke, tightened policy) takes effect immediately despite the long-lived cookie. The redirect dance only repeats when the cookie expires or access changes. Because the cookie is minted by the content host for its own hostname, the flow does not depend on `app.` and `pages.` sharing a registrable domain.
 
 Without the sandbox, every project on `pages.` shares one web origin, so the server — not the browser — must keep one project's JavaScript from reading another project's private content with the viewer's ambient cookies. Private-content responses set `Referrer-Policy: same-origin`, and the content host rejects any private **subresource** request (`Sec-Fetch-Dest` present and not `document`: fetch/XHR, `<img>`, `<script>`, iframes, ...) whose `Referer` path is not inside the same project. `Referer` cannot be set or spoofed from scripts, in-project pages always send it under our referrer policy, and a request that strips it is refused — so a malicious project's fetches and iframes of another private project fail with 403, while a project referencing its own files works normally. Requests without `Sec-Fetch-Dest` (non-browser clients, old browsers) are treated as navigations. Unauthenticated subresource requests fail fast with 401 rather than redirecting into OAuth.
 

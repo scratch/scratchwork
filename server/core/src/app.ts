@@ -237,7 +237,7 @@ function projectBundle(request: HttpServerRequest.HttpServerRequest, project: st
   });
 }
 
-/** Makes a project owner-only by setting visibility to private. */
+/** Makes a project owner-only: private and with every grant cleared. */
 function unpublishProject(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
@@ -252,7 +252,7 @@ function unpublishProject(request: HttpServerRequest.HttpServerRequest, project:
   });
 }
 
-/** Grants or revokes email/@domain access by editing the project's visibility group. */
+/** Grants or revokes email/@domain access by editing the project's grant groups. */
 function shareProject(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
@@ -312,7 +312,7 @@ function rejectCrossOriginApiRequest(
   return Effect.void;
 }
 
-/** Shapes one project record for API responses. `visibility` is the public/private
+/** Shapes one project record for API responses. `isPublic` is the public/private
  * toggle; `permissions` lists the per-role grants and names other users' emails, so it
  * is shown only to admins and the owner (the caller's role decides, never appears in
  * the payload). */
@@ -328,7 +328,7 @@ function projectSummary(record: SiteRecord, contentBase: string, callerRole: Pro
     : {};
   return {
     project: record.project,
-    visibility: record.visibility,
+    isPublic: record.isPublic,
     ...permissions,
     url: projectUrl(record.project, contentBase, config),
     owner: record.owner,
@@ -508,7 +508,7 @@ function projectAccessUser(
       const user = yield* auth
         .verifyProjectAccessToken(value, site.record.project, "cookie")
         .pipe(Effect.orElseSucceed(() => null));
-      // Re-check visibility on every request so revocation applies immediately even
+      // Re-check read access on every request so revocation applies immediately even
       // though the cookie itself is long-lived.
       if (user != null && canReadProject(site.record, user, config)) return user;
     }
@@ -769,7 +769,7 @@ function homepageSetupResponse(
   project: string,
   appBase: string,
 ): HttpServerResponse.HttpServerResponse {
-  const command = `scratchwork publish --server ${appBase} --project ${project} --visibility public`;
+  const command = `scratchwork publish --server ${appBase} --project ${project} --public`;
   if (!acceptsHtmlPage(request)) {
     return HttpServerResponse.text(
       `This server's homepage is the project "${project}", which has not been published yet.\nPublish it with:\n\n  ${command}\n`,

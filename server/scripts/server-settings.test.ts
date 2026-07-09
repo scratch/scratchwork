@@ -16,9 +16,9 @@ describe("serverConfigEnv", () => {
     const config: ScratchworkServerConfig = {
       auth: "oauth",
       allowedUsers: "public",
-      maxVisibility: "public",
+      allowPublicProjects: true,
       usersCanSetProjectNames: true,
-      defaultVisibility: "private",
+      publicByDefault: false,
     };
     const env = serverConfigEnv(config, { appUrl: "https://app.example", contentUrl: "https://pages.example" });
 
@@ -56,17 +56,26 @@ describe("validateDeploymentConfig", () => {
   };
 
   test("accepts a config the server can parse", () => {
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "@gmail.com,@koomen.org" }, "Test")).not.toThrow();
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOWED_USERS: "@gmail.com,@koomen.org" }, "Test")).not.toThrow();
   });
 
   test("rejects values the deployed server would crash on at runtime", () => {
     // Domains without the leading "@" are not valid group terms.
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "gmail.com,koomen.org" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOWED_USERS: "gmail.com,koomen.org" }, "Test"))
       .toThrow("Invalid access group");
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "@example.com" }, "Test"))
-      .toThrow('expected "public" or "private"');
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_PUBLIC_BY_DEFAULT: "@example.com" }, "Test"))
+      .toThrow('expected "true" or "false"');
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_APP_URL: "not a url" }, "Test"))
       .toThrow('expected a URL, like "https://example.com"');
+  });
+
+  test("rejects the retired visibility-era variables", () => {
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "public" }, "Test"))
+      .toThrow("SCRATCHWORK_ALLOW_PUBLIC_PROJECTS");
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "private" }, "Test"))
+      .toThrow("SCRATCHWORK_PUBLIC_BY_DEFAULT");
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SHARE_ALLOWED_DOMAINS: "example.com" }, "Test"))
+      .toThrow("SCRATCHWORK_ALLOWED_SHARE_DOMAINS");
   });
 
   test("still enforces the OAuth requirements", () => {

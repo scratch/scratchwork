@@ -113,10 +113,10 @@ function serverSettingsEnv(server: ScratchworkServerConfig, processEnv: EnvVars)
   set("SCRATCHWORK_AUTH_ALLOWED_DOMAINS", server.authAllowedDomains);
   set("SCRATCHWORK_AUTH_SESSION_SECONDS", server.authSessionSeconds == null ? undefined : String(server.authSessionSeconds));
   set("SCRATCHWORK_ALLOWED_USERS", server.allowedUsers);
-  set("SCRATCHWORK_MAX_VISIBILITY", server.maxVisibility);
-  set("SCRATCHWORK_SHARE_ALLOWED_DOMAINS", server.shareAllowedDomains);
+  set("SCRATCHWORK_ALLOW_PUBLIC_PROJECTS", server.allowPublicProjects == null ? undefined : String(server.allowPublicProjects));
+  set("SCRATCHWORK_ALLOWED_SHARE_DOMAINS", server.allowedShareDomains);
   set("SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES", server.usersCanSetProjectNames == null ? undefined : String(server.usersCanSetProjectNames));
-  set("SCRATCHWORK_DEFAULT_VISIBILITY", server.defaultVisibility);
+  set("SCRATCHWORK_PUBLIC_BY_DEFAULT", server.publicByDefault == null ? undefined : String(server.publicByDefault));
   set("SCRATCHWORK_HOMEPAGE_PROJECT", server.homepageProject);
   return env;
 }

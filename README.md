@@ -102,7 +102,7 @@ scratchwork login --server http://localhost:43118
 scratchwork publish index.html
 ```
 
-The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `project`, `visibility`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
+The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `project`, `isPublic`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
 
 Share a published project with specific accounts or a whole domain — as readers, writers (can publish updates), or admins (can also manage sharing) — or take access away again:
 

@@ -23,7 +23,7 @@ export const PROJECT_CONFIG_FILE = ".scratchwork.json";
 export interface ProjectConfigFile {
   readonly server?: string;
   readonly project?: string;
-  readonly visibility?: string;
+  readonly isPublic?: boolean;
   readonly url?: string;
   readonly updatedAt?: string;
 }
@@ -187,13 +187,15 @@ function parseProjectUrl(value: string | undefined): { readonly server: string; 
 }
 
 /** Validates and narrows parsed JSON into a ProjectConfigFile, dropping unknown fields.
- * Workspace-era fields never reach here — rejectLegacyConfig fails on them first. */
+ * Workspace-era fields never reach here — rejectLegacyConfig fails on them first. A
+ * retired string `visibility` field is dropped too: omitting isPublic is safe because
+ * the server then preserves the project's current setting. */
 function decodeProjectConfig(value: unknown): ProjectConfigFile | null {
   if (!isRecord(value)) return null;
-  const config: Record<string, string> = {};
+  const config: Record<string, string | boolean> = {};
   if (typeof value.server === "string") config.server = value.server;
   if (typeof value.project === "string") config.project = value.project;
-  if (typeof value.visibility === "string") config.visibility = value.visibility;
+  if (typeof value.isPublic === "boolean") config.isPublic = value.isPublic;
   if (typeof value.url === "string") config.url = value.url;
   if (typeof value.updatedAt === "string") config.updatedAt = value.updatedAt;
   return config;

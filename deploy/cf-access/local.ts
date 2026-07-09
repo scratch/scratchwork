@@ -10,9 +10,9 @@ const config = {
     auth: "cloudflare-access",
     authSessionSeconds: 2_592_000,
     allowedUsers: "public",
-    maxVisibility: "public",
+    allowPublicProjects: true,
     usersCanSetProjectNames: true,
-    defaultVisibility: "private",
+    publicByDefault: false,
   },
   deploy: {
     workerName: "scratchwork-cf-access-local",

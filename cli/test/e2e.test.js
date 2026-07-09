@@ -660,7 +660,7 @@ describe("scratchwork publish", () => {
         publishBody = await request.json();
         return Response.json({
           project: publishBody.project,
-          visibility: publishBody.visibility,
+          isPublic: publishBody.isPublic ?? true,
           openPath: publishBody.openPath,
           url: `${serverUrl}/${publishBody.project}/`,
         });
@@ -693,7 +693,7 @@ describe("scratchwork publish", () => {
           {
             server: serverUrl,
             project: "site",
-            visibility: "public",
+            isPublic: true,
             url: `${serverUrl}/site/`,
             updatedAt: "2026-06-29T00:00:00.000Z",
           },
@@ -712,7 +712,7 @@ describe("scratchwork publish", () => {
       expect(authorization).toBe(`Bearer ${authToken}`);
       expect("workspace" in publishBody).toBe(false);
       expect(publishBody.project).toBe("site");
-      expect(publishBody.visibility).toBe("public");
+      expect(publishBody.isPublic).toBe(true);
       expect(publishBody.bundle.files.map((file) => file.path)).toEqual(["index.html"]);
     } finally {
       server.stop(true);
@@ -731,7 +731,7 @@ describe("scratchwork project commands", () => {
     const shareBodies = [];
     const project = {
       project: "site",
-      visibility: "public",
+      isPublic: true,
       url: `${serverUrl}/site/`,
       updatedAt: "2026-06-29T00:00:00.000Z",
     };
@@ -747,7 +747,7 @@ describe("scratchwork project commands", () => {
         }
         if (url.pathname === "/api/projects/site" && request.method === "GET") return Response.json({ project });
         if (url.pathname === "/api/projects/site/unpublish" && request.method === "POST") {
-          return Response.json({ project: { ...project, visibility: "private" } });
+          return Response.json({ project: { ...project, isPublic: false } });
         }
         if (url.pathname === "/api/projects/site/share" && request.method === "POST") {
           const body = await request.json();
@@ -774,7 +774,7 @@ describe("scratchwork project commands", () => {
     try {
       expect((await runCli(["projects", "--server", serverUrl], dir)).stdout).toContain(`site\tpublic\t${serverUrl}/site/`);
       expect((await runCli(["info", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"project": "site"');
-      expect((await runCli(["unpublish", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["unpublish", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"isPublic": false');
       expect((await runCli(["share", "alice@example.com", "@example.com", "--server", serverUrl, "--project", "site"], dir)).stdout)
         .toContain('"alice@example.com"');
       expect((await runCli(["share", "--role", "write", "bob@example.com", "--server", serverUrl, "--project", "site"], dir)).code)
@@ -795,7 +795,7 @@ describe("scratchwork project commands", () => {
       expect(noTargets.stderr).toContain("pass at least one email address or @domain group");
       expect((await runCli(["delete", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain("Deleted site");
       expect((await runCli(["info", `${serverUrl}/site/`], dir)).stdout).toContain('"project": "site"');
-      expect((await runCli(["unpublish", `${serverUrl}/site/`], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["unpublish", `${serverUrl}/site/`], dir)).stdout).toContain('"isPublic": false');
       expect((await runCli(["delete", `${serverUrl}/site/`], dir)).stdout).toContain("Deleted site");
       expect((await runCli(["clone", `${serverUrl}/site/`], dir)).stdout).toContain("Cloned site");
       expect(readFileSync(join(dir, "site", "index.html"), "utf8")).toBe("<h1>cloned</h1>");
@@ -935,7 +935,7 @@ describe("scratchwork stream", () => {
         publishes.push(await request.json());
         return Response.json({
           project: "site",
-          visibility: "public",
+          isPublic: true,
           openPath: "/",
           url: `${serverUrl}/site/`,
         });
@@ -998,7 +998,7 @@ describe("publish and auth safety", () => {
         publishBody = await request.json();
         return Response.json({
           project: publishBody.project,
-          visibility: "public",
+          isPublic: true,
           openPath: "/",
           url: `${serverUrl}/${publishBody.project}/`,
         });
@@ -1074,7 +1074,7 @@ describe("project naming", () => {
         const project = assignedName ?? body.project;
         return Response.json({
           project,
-          visibility: "public",
+          isPublic: true,
           openPath: body.openPath ?? "/",
           url: `${serverUrl}/${project}/`,
         });

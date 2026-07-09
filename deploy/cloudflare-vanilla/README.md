@@ -16,7 +16,7 @@ Start local secrets from the template:
 cp deploy/cloudflare-vanilla/.env.example deploy/cloudflare-vanilla/.env
 ```
 
-The server settings (domains, auth policy, visibility rules) live in
+The server settings (domains, auth policy, sharing rules) live in
 `server-config.ts`. `cloudflare-config.ts` adds the Worker, R2, D1, and route
 configuration; both the remote deploy and local Wrangler run consume that same
 complete config. Secrets are read from `.env` in this directory and the shell
@@ -31,7 +31,7 @@ Cloudflare route assignment for those hostnames.
 The homepage is an ordinary project: after a fresh deploy, publish it with
 
 ```sh
-scratchwork publish --server https://app.sndbx.sh --project www --visibility public
+scratchwork publish --server https://app.sndbx.sh --project www --public
 ```
 
 (the deploy output prints this command). Until then, `sndbx.sh` serves a

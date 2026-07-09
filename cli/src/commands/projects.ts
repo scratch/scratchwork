@@ -25,7 +25,7 @@ import { runPublish, SKIPPED_DIRECTORIES, type PublishServices } from "./publish
 /** Project metadata as returned by /api/projects. */
 interface ApiProject {
   readonly project: string;
-  readonly visibility: string;
+  readonly isPublic: boolean;
   readonly url?: string;
   readonly updatedAt: string;
 }
@@ -59,7 +59,7 @@ export function runProjects(
       return;
     }
     yield* Console.log(projects.map((project) =>
-      `${project.project}\t${project.visibility}\t${project.url ?? `/${project.project}/`}`,
+      `${project.project}\t${project.isPublic ? "public" : "private"}\t${project.url ?? `/${project.project}/`}`,
     ).join("\n"));
   });
 }
@@ -76,7 +76,7 @@ export function runInfo(
   });
 }
 
-/** Runs `scratchwork unpublish`: sets a project's visibility to private. */
+/** Runs `scratchwork unpublish`: makes a project private and clears every grant. */
 export function runUnpublish(
   config: ProjectRefConfig,
 ): Effect.Effect<void, PlatformError | CliError, ProjectServices> {
