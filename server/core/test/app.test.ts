@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import { createSessionToken } from "../src/auth";
 import { MemoryPrimitiveDbLive } from "../src/db";
 import { appHandler, bundle, json, testAuth, type MemoryStoredObject } from "./helpers";
+import { jwksFetch, makeKeyPair, nowSeconds, signJwt } from "./jwt-helpers";
 
 const user = { id: "user-1", email: "founder@example.com" };
 
@@ -1030,6 +1031,70 @@ describe("server app", () => {
     }));
     expect(api404.status).toBe(404);
     expect(await json(api404)).toEqual({ error: "Not found" });
+  });
+
+  describe("auth error pages state the specific reason", () => {
+    const originalFetch = globalThis.fetch;
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    // Its own team domain: the production JWKS cache is process-global and keyed by the
+    // JWKS URL the auth service derives from the team.
+    const teamDomain = "https://app-error-page-test.cloudflareaccess.com";
+
+    async function cloudflareHandler() {
+      return appHandler({
+        config: {
+          auth: {
+            mode: "cloudflare-access",
+            teamDomain,
+            audience: "expected-aud-tag",
+            sessionSecret: "session-secret-session-secret-32-bytes",
+            allowedUsers: "public",
+            sessionTtlSeconds: 60,
+          },
+        },
+      });
+    }
+
+    test("a rejected Access assertion names the verification failure", async () => {
+      const keyPair = await makeKeyPair();
+      globalThis.fetch = jwksFetch(keyPair.publicJwk);
+      // The misconfiguration this catches in the field: the edge injects a valid JWT,
+      // but the server was deployed with a different Access application's AUD tag.
+      const token = await signJwt(keyPair.privateKey, {
+        iss: teamDomain,
+        aud: ["some-other-application"],
+        sub: "cf-user-1",
+        email: "founder@example.com",
+        exp: nowSeconds() + 600,
+        iat: nowSeconds(),
+        type: "app",
+      });
+      const handler = await cloudflareHandler();
+
+      const page = await handler(new Request("https://scratch.test/auth/login", {
+        headers: { accept: "text/html", "cf-access-jwt-assertion": token },
+        redirect: "manual",
+      }));
+      expect(page.status).toBe(401);
+      const html = await page.text();
+      expect(html).toContain("Sign-in required");
+      expect(html).toContain("Invalid Access token audience");
+    });
+
+    test("a missing Access assertion names the absent header", async () => {
+      const handler = await cloudflareHandler();
+      const page = await handler(new Request("https://scratch.test/auth/login", {
+        headers: { accept: "text/html" },
+        redirect: "manual",
+      }));
+      expect(page.status).toBe(401);
+      const html = await page.text();
+      expect(html).toContain("Sign-in required");
+      expect(html).toContain("no Cf-Access-Jwt-Assertion header");
+    });
   });
 
   test("binds OAuth callback state to a browser cookie", async () => {
