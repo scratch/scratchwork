@@ -257,7 +257,7 @@ function printResult(
       ...(sentProject != null && sentProject !== response.project
         ? [`  note    server assigned project name "${response.project}"`]
         : []),
-      `  access  ${response.isPublic ? "public" : "private"}`,
+      `  is publicly visible?  ${response.isPublic ? "yes" : "no"}`,
       `  files   ${bundle.files.length} (${formatBytes(bytes)})`,
       ...(saved ? [`  saved   ${PROJECT_CONFIG_FILE}\n`] : [""]),
     ].join("\n"),
