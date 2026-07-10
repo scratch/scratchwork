@@ -10,8 +10,11 @@ import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { base64ToBytes } from "../../../shared/src/encoding/base64";
+import { ProjectsListResponseSchema } from "../../../shared/src/publish/api";
 import { decodePublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
 import { isRecord } from "../../../shared/src/util/json";
@@ -22,14 +25,6 @@ import { CliError, errorMessage } from "../errors";
 import { PROJECT_CONFIG_FILE, resolveProjectRef, resolveServerFromCwd, writeProjectConfig } from "../project-config";
 import type { CloneConfig, PathConfig, ProjectRefConfig, ServerConfig, ShareConfig } from "../types";
 import { runPublish, type PublishServices } from "./publish";
-
-/** Project metadata as returned by /api/projects. */
-interface ApiProject {
-  readonly project: string;
-  readonly isPublic: boolean;
-  readonly url?: string;
-  readonly updatedAt: string;
-}
 
 /** Services shared by the project management commands. */
 type ProjectServices = FileSystem.FileSystem | HttpClient.HttpClient | Path.Path;
@@ -54,7 +49,10 @@ export function runProjects(
     const server = yield* resolveServerFromCwd(config.server, "projects");
     const token = yield* readAuthToken(server);
     const body = yield* apiJson("scratchwork projects", serverApiUrl(server, "/api/projects"), { token });
-    const projects = isRecord(body) && Array.isArray(body.projects) ? body.projects as ReadonlyArray<ApiProject> : [];
+    // Tolerant decoding on purpose: unknown fields from a newer server are ignored,
+    // and an undecodable body degrades to an empty listing (as it always has).
+    const decoded = Schema.decodeUnknownOption(ProjectsListResponseSchema)(body);
+    const projects = Option.isSome(decoded) ? decoded.value.projects : [];
     if (projects.length === 0) {
       yield* Console.log("No projects.");
       return;

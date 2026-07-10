@@ -10,11 +10,17 @@ import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { bytesToBase64, decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
+import {
+  PublishResponseSchema,
+  type PublishRequestBody,
+  type PublishResponse,
+} from "../../../shared/src/publish/api";
 import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeProjectIdentifier, slugifyIdentifier } from "../../../shared/src/site/identifiers";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
-import { isRecord } from "../../../shared/src/util/json";
 import { nonEmpty } from "../../../shared/src/util/strings";
 import { apiErrorText, apiRequest } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
@@ -33,15 +39,6 @@ import { runLogin } from "./login";
 
 /** Services runPublish needs; exported for callers that wrap it (stream). */
 export type PublishServices = CommandExecutor | FileSystem.FileSystem | HttpClient.HttpClient | Path.Path;
-
-/** The server's response to a successful publish. `project` is authoritative: on a
- * random-naming server it is how the CLI learns the assigned name. */
-interface PublishResponse {
-  readonly project: string;
-  readonly isPublic: boolean;
-  readonly openPath: string;
-  readonly url: string;
-}
 
 /** 401 from the publish endpoint: distinguished so runPublish can log in and retry. */
 class PublishAuthRequired extends CliError {}
@@ -64,12 +61,12 @@ export function runPublish(
     const authToken = yield* readAuthToken(server);
     const project = yield* resolveProjectName(config, projectConfig, target);
     const nameSource = target.file ?? (yield* basename(target.root));
-    // An omitted isPublic lets the server preserve an existing project's setting or
-    // apply its default; an omitted project lets a random-naming server mint one.
+    // An omitted isPublic preserves an existing project's setting (new projects are
+    // created private); an omitted project lets a random-naming server mint one.
     const isPublic = config.isPublic ?? projectConfig?.isPublic;
 
     const bundle = yield* createBundle(target.root);
-    const body = {
+    const body: PublishRequestBody = {
       bundle,
       openPath: target.openPath,
       project,
@@ -177,12 +174,7 @@ function collectFiles(
 /** POSTs the bundle to /api/publish; 401 becomes PublishAuthRequired for the login retry. */
 function postPublish(
   server: string,
-  body: {
-    readonly bundle: PublishBundle;
-    readonly openPath: string;
-    readonly project?: string;
-    readonly isPublic?: boolean;
-  },
+  body: PublishRequestBody,
   authToken: string | undefined,
 ): Effect.Effect<PublishResponse, CliError, FileSystem.FileSystem | HttpClient.HttpClient | Path.Path> {
   return Effect.gen(function* () {
@@ -204,13 +196,14 @@ function postPublish(
         new CliError({ code: 1, message: `scratchwork publish: ${apiErrorText(response)}` }),
       );
     }
-    const parsed = decodePublishResponse(response.json);
-    if (parsed == null) {
+    // Tolerant decoding on purpose: unknown fields from a newer server are ignored.
+    const parsed = Schema.decodeUnknownOption(PublishResponseSchema)(response.json);
+    if (Option.isNone(parsed)) {
       return yield* Effect.fail(
         new CliError({ code: 1, message: "scratchwork publish: invalid server response" }),
       );
     }
-    return parsed;
+    return parsed.value;
   });
 }
 
@@ -262,25 +255,6 @@ function printResult(
       ...(saved ? [`  saved   ${PROJECT_CONFIG_FILE}\n`] : [""]),
     ].join("\n"),
   );
-}
-
-/** Validates and narrows the server's publish response. */
-function decodePublishResponse(value: unknown): PublishResponse | null {
-  if (!isRecord(value)) return null;
-  if (
-    typeof value.project !== "string" ||
-    typeof value.isPublic !== "boolean" ||
-    typeof value.openPath !== "string" ||
-    typeof value.url !== "string"
-  ) {
-    return null;
-  }
-  return {
-    project: value.project,
-    isPublic: value.isPublic,
-    openPath: value.openPath,
-    url: value.url,
-  };
 }
 
 /** Formats a byte count for the summary line. */

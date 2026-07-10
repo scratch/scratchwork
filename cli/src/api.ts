@@ -12,6 +12,9 @@ import * as HttpClient from "@effect/platform/HttpClient";
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
 import type * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import { ProjectResponseSchema } from "../../shared/src/publish/api";
 import { isRecord, parseJson } from "../../shared/src/util/json";
 import { readAuthToken, readCfToken, serverApiUrl } from "./auth";
 import { CliError, errorMessage } from "./errors";
@@ -183,11 +186,12 @@ export function resolveProjectByPath(
     const url = serverApiUrl(server, "/api/resolve");
     url.searchParams.set("path", pathname === "" ? "/" : pathname);
     const body = yield* apiJson(`scratchwork ${command}`, url, { token });
-    const project = isRecord(body) && isRecord(body.project) ? body.project : null;
-    if (project == null || typeof project.project !== "string") {
+    // Tolerant decoding on purpose: unknown fields from a newer server are ignored.
+    const decoded = Schema.decodeUnknownOption(ProjectResponseSchema)(body);
+    if (Option.isNone(decoded)) {
       return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: invalid server response` }));
     }
-    return { project: project.project };
+    return { project: decoded.value.project.project };
   });
 }
 

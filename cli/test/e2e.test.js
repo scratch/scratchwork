@@ -821,7 +821,12 @@ describe("scratchwork project commands", () => {
       project: "site",
       isPublic: true,
       url: `${serverUrl}/site/`,
+      owner: { id: "owner-1", email: "owner@example.com" },
+      createdAt: "2026-06-28T00:00:00.000Z",
       updatedAt: "2026-06-29T00:00:00.000Z",
+      currentOpenPath: "/",
+      fileCount: 1,
+      totalBytes: 5,
     };
 
     const server = Bun.serve({
@@ -967,7 +972,18 @@ describe("scratchwork project commands", () => {
       async fetch(request) {
         const url = new URL(request.url);
         if (url.pathname === "/api/resolve") {
-          return Response.json({ project: { project: "site" } });
+          return Response.json({
+            project: {
+              project: "site",
+              isPublic: true,
+              owner: { id: "owner-1", email: "owner@example.com" },
+              createdAt: "2026-06-28T00:00:00.000Z",
+              updatedAt: "2026-06-29T00:00:00.000Z",
+              currentOpenPath: "/",
+              fileCount: 2,
+              totalBytes: 30,
+            },
+          });
         }
         if (url.pathname === "/api/projects/site/bundle") {
           return Response.json({
