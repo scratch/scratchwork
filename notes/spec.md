@@ -18,7 +18,7 @@ A **group** is the access expression used everywhere access is configured:
 - `user@example.com` means one specific authenticated user can access it.
 - `user@x.com,@acme.com` means any matching email or domain can access it.
 
-A project has an **isPublic** toggle controlling whether everyone can read the published project, plus three **grant groups** (read, write, admin) naming the specific emails and `@domains` that hold each role. The server-level `allowedUsers` setting uses the full group syntax; the other policy settings are explicit scalars — `allowPublicProjects` (boolean), `allowedShareDomains` (domain list), `publicByDefault` (boolean).
+A project has an **isPublic** toggle controlling whether everyone can read the published project, plus three **grant groups** (read, write, admin) naming the specific emails and `@domains` that hold each role. The server-level `allowedUsers` setting uses the full group syntax; the other policy settings are explicit scalars — `allowPublicProjects` (boolean) and `allowedShareDomains` (domain list).
 
 A server may designate one project as its **homepage** — the project served on the server's home domains, typically the naked domain and `www`. The homepage is an ordinary project: it is published, updated, and access-controlled exactly like any other project. Only the way requests reach it differs. See "Server homepage" below.
 
@@ -109,9 +109,6 @@ export const server = {
   // Reserved names (api, auth, health, root files like robots.txt, and prefixes held
   // for future features such as gh/g and auth-provider names) are rejected either way.
   usersCanSetProjectNames: true,
-
-  // Server fallback when the CLI does not say public or private. Default: false.
-  publicByDefault: false,
 } satisfies ScratchworkServerConfig;
 ```
 
@@ -230,7 +227,7 @@ Every user holds one effective role per project: `none < read < write < admin < 
 - `admin` — write, plus manage sharing (`share`/`revoke`), flip the public/private toggle, and `unpublish`.
 - `owner` — admin, plus `delete`. The owner is fixed at creation and always retains full access; ownership cannot be granted or transferred (yet).
 
-The project record stores the `isPublic` toggle plus three grant groups, one per grantable role — `readers`, `writers`, and `admins` — the groups using the email/@domain syntax. A viewer has read access when the project is public or any grant group names them; grants are independent of the toggle, so read grants persist while a project is temporarily public. (Records written before this split stored read grants inside a `visibility` string; they migrate to `readers` on first load, and the retired string toggle migrates onto `isPublic`.)
+The project record stores the `isPublic` toggle plus three grant groups, one per grantable role — `readers`, `writers`, and `admins` — the groups using the email/@domain syntax. A viewer has read access when the project is public or any grant group names them; grants are independent of the toggle, so read grants persist while a project is temporarily public.
 
 The toggle is set at publish time (`--public` / `--private`); the grant lists are edited with `scratchwork share --role <read|write|admin>` / `scratchwork revoke` (`POST /api/projects/:project/share` with `{"role": ..., "add": [...], "remove": [...]}`). Sharing assigns the role — a target holding a different role is moved, never duplicated — and revoking strips every role. Grants are validated against `allowedShareDomains`; revokes are not, so tightening server policy never blocks revocation. `unpublish` resets a project to owner-only: private and every grant cleared. A revoke response warns when the removed address still has access (through a remaining domain grant, the project being public, or ownership).
 
@@ -308,9 +305,9 @@ scratchwork me
 # publish this project
 # server must be specified unless it is found in .scratchwork.json in the current
 # directory or a parent directory
-# the public/private setting defaults to the project config, then the server's
-# publicByDefault (omitting both --public and --private preserves an existing
-# project's setting)
+# the public/private setting defaults to the project config; omitting both
+# --public and --private preserves an existing project's setting, and a new
+# project is created private
 # project name defaults, highest precedence first: --project, the publish root's
 # .scratchwork.json, the directory name for a directory target, or the file name
 # minus its final extension for a file target (notes.md -> notes); if nothing

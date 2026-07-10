@@ -1,7 +1,7 @@
 /*
  * Body validation for POST /api/projects/:project/share. Only the shape is checked
  * here; target grammar (email vs @domain) and sharing policy are enforced by
- * access.ts and the site store so every visibility rule lives in one place.
+ * access.ts and the site store so every access rule lives in one place.
  */
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as Effect from "effect/Effect";

@@ -102,8 +102,27 @@ describe("server app", () => {
     expect(svg.headers.get("content-security-policy")).toBeNull();
   });
 
+  test("publishing a new project without isPublic creates it private", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const handler = await appHandler({ db, storage, auth: testAuth(user) });
+    const response = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+    }));
+    expect(response.status).toBe(200);
+    expect(((await json(response)) as { isPublic: boolean }).isPublic).toBe(false);
+
+    // Anonymous viewers are sent to login instead of the private site.
+    const anonymous = await appHandler({ db, storage, auth: testAuth(null) });
+    const page = await anonymous(new Request("https://scratch.test/site/", { redirect: "manual" }));
+    expect(page.status).toBe(302);
+    expect(page.headers.get("location")).toContain("/auth/");
+  });
+
   test("republishing without isPublic preserves the project's setting", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { publicByDefault: false } });
+    const handler = await appHandler({ auth: testAuth(user) });
     const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "v1" }),
       openPath: "/",
@@ -322,7 +341,7 @@ describe("server app", () => {
     await ownerHandler(post("/api/projects/site/share", { add: ["writer@example.com"], role: "write" }));
     await ownerHandler(post("/api/projects/site/share", { add: ["admin@example.com"], role: "admin" }));
 
-    // The writer can push a new revision without changing visibility.
+    // The writer can push a new revision without changing the public/private setting.
     const republish = await writerHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "v2 by writer" }),
       openPath: "/",
@@ -330,7 +349,7 @@ describe("server app", () => {
     }));
     expect(republish.status).toBe(200);
 
-    // Changing visibility on publish is an admin action.
+    // Changing the public/private setting on publish is an admin action.
     const escalate = await writerHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "v3" }),
       openPath: "/",
@@ -345,7 +364,7 @@ describe("server app", () => {
     const writerUnpublish = await writerHandler(post("/api/projects/site/unpublish", {}));
     expect(writerUnpublish.status).toBe(403);
 
-    // The admin can share, change visibility on publish, and unpublish — but not delete.
+    // The admin can share, flip public/private on publish, and unpublish — but not delete.
     const adminShare = await adminHandler(post("/api/projects/site/share", { add: ["friend@example.com"] }));
     expect(adminShare.status).toBe(200);
     const adminPublish = await adminHandler(post("/api/publish", {
@@ -451,16 +470,16 @@ describe("server app", () => {
     expect(body.project.permissions.read).toEqual(["alice@example.com"]);
   });
 
-  test("publish rejects the retired visibility field", async () => {
+  test("publish rejects unknown fields", async () => {
     const handler = await appHandler({ auth: testAuth(user) });
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "alice@example.com",
+      audience: "alice@example.com",
     }));
     expect(response.status).toBe(400);
-    expect(await response.text()).toContain("visibility");
+    expect(await response.text()).toContain("audience");
   });
 
   test("share is owner-only and 404s for missing projects", async () => {

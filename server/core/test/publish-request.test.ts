@@ -66,18 +66,12 @@ describe("decodePublishRequest", () => {
       project: "Docs",
     }))).rejects.toThrow("Invalid project");
 
-    // The retired visibility strings are not silently accepted.
+    // isPublic is strictly boolean; strings are not silently accepted.
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: bundle({ "index.html": "hello" }),
       project: "site",
       isPublic: "public",
     }))).rejects.toThrow("Expected boolean");
-
-    await expect(Effect.runPromise(decodePublishRequest({
-      bundle: bundle({ "index.html": "hello" }),
-      project: "site",
-      visibility: "public",
-    }))).rejects.toThrow("visibility");
   });
 
   test("rejects the retired workspace field as an excess property", async () => {

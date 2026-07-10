@@ -5,15 +5,15 @@ import { makeMemoryPrimitiveDb, safeDbKey, safeDbKeyPrefix, safeDbNamespace } fr
 describe("PrimitiveDb", () => {
   test("stores and reads JSON records with versions", async () => {
     const db = makeMemoryPrimitiveDb();
-    const created = await Effect.runPromise(db.put("projects", "alice/docs", { visibility: "private" }, { ifNoneMatch: "*" }));
+    const created = await Effect.runPromise(db.put("projects", "alice/docs", { revision: "rev-1" }, { ifNoneMatch: "*" }));
     expect(created.version).toBe(1);
-    expect(created.value).toEqual({ visibility: "private" });
+    expect(created.value).toEqual({ revision: "rev-1" });
 
-    const updated = await Effect.runPromise(db.put("projects", "alice/docs", { visibility: "@example.com" }, { ifMatch: created.version }));
+    const updated = await Effect.runPromise(db.put("projects", "alice/docs", { revision: "rev-2" }, { ifMatch: created.version }));
     expect(updated.version).toBe(2);
 
     const loaded = await Effect.runPromise(db.get("projects", "alice/docs"));
-    expect(loaded?.value).toEqual({ visibility: "@example.com" });
+    expect(loaded?.value).toEqual({ revision: "rev-2" });
     expect(loaded?.version).toBe(2);
   });
 

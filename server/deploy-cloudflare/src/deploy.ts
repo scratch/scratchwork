@@ -383,7 +383,6 @@ function workerVars(
   copyEnv(vars, env, "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS");
   copyEnv(vars, env, "SCRATCHWORK_ALLOWED_SHARE_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES");
-  copyEnv(vars, env, "SCRATCHWORK_PUBLIC_BY_DEFAULT");
   copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_PROJECT");
   if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;

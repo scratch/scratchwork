@@ -43,7 +43,6 @@ export async function appHandler(options: {
     allowPublicProjects: true,
     allowedShareDomains: new Set(),
     usersCanSetProjectNames: true,
-    publicByDefault: true,
     auth: {
       mode: "oauth",
       clientId: "test-client-id",

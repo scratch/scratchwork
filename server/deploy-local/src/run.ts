@@ -116,7 +116,6 @@ function serverSettingsEnv(server: ScratchworkServerConfig, processEnv: EnvVars)
   set("SCRATCHWORK_ALLOW_PUBLIC_PROJECTS", server.allowPublicProjects == null ? undefined : String(server.allowPublicProjects));
   set("SCRATCHWORK_ALLOWED_SHARE_DOMAINS", server.allowedShareDomains);
   set("SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES", server.usersCanSetProjectNames == null ? undefined : String(server.usersCanSetProjectNames));
-  set("SCRATCHWORK_PUBLIC_BY_DEFAULT", server.publicByDefault == null ? undefined : String(server.publicByDefault));
   set("SCRATCHWORK_HOMEPAGE_PROJECT", server.homepageProject);
   return env;
 }

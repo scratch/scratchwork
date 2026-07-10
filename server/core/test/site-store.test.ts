@@ -5,15 +5,14 @@ import type { ServerConfigShape } from "../src/config";
 import { PrimitiveDb, makeMemoryPrimitiveDb, type PrimitiveDbShape } from "../src/db";
 import type { PublishRequest } from "../src/publish-request";
 import { projectForRequest, routeRest } from "../src/routes";
-import * as Schema from "effect/Schema";
-import { StoredSiteRecordSchema, type SiteRecord, type StoredSiteRecord } from "../src/site-records";
-import { SiteStore, SiteStoreLive, SiteStoreError, canReadProject, migrateSiteRecord, projectRole } from "../src/site-store";
+import type { SiteRecord } from "../src/site-records";
+import { SiteStore, SiteStoreLive, SiteStoreError, canReadProject, projectRole } from "../src/site-store";
 import { bundle, memoryStorageLayer } from "./helpers";
 
 const owner = { id: "user-1", email: "founder@example.com" };
 const reader = { id: "user-2", email: "reader@example.com" };
 
-/** The pointer fields shared by the current and legacy record fixtures. */
+/** The pointer fields shared by the record fixtures. */
 const recordCommon = {
   project: "site",
   owner,
@@ -37,18 +36,6 @@ function record(isPublic: boolean, groups: { readers?: string; writers?: string;
   };
 }
 
-/** Builds a retired version-4 record fixture, whose toggle was a visibility string. */
-function v4Record(visibility: string): StoredSiteRecord {
-  return {
-    version: 4,
-    visibility,
-    readers: "private",
-    writers: "private",
-    admins: "private",
-    ...recordCommon,
-  };
-}
-
 /** Builds a ServerConfigShape fixture with optional policy overrides. */
 function config(policy: { allowPublicProjects?: boolean; allowedShareDomains?: ReadonlySet<string> } = {}): ServerConfigShape {
   return {
@@ -57,7 +44,6 @@ function config(policy: { allowPublicProjects?: boolean; allowedShareDomains?: R
     allowPublicProjects: policy.allowPublicProjects ?? true,
     allowedShareDomains: policy.allowedShareDomains ?? new Set(),
     usersCanSetProjectNames: true,
-    publicByDefault: false,
     auth: {
       mode: "oauth",
       clientId: "client-id",
@@ -148,37 +134,6 @@ describe("projectRole", () => {
   });
 });
 
-describe("legacy record migration", () => {
-  test("version-4 records decode, defaulting pre-role grant groups to private", () => {
-    const decoded = Schema.decodeUnknownSync(StoredSiteRecordSchema)({
-      version: 4,
-      project: "site",
-      visibility: "public",
-      owner,
-      createdAt: "2026-06-29T00:00:00.000Z",
-      updatedAt: "2026-06-29T00:00:00.000Z",
-      currentRevisionId: "rev-1",
-      currentOpenPath: "/",
-      fileCount: 1,
-      totalBytes: 10,
-    });
-    expect(decoded.readers).toBe("private");
-    expect(decoded.writers).toBe("private");
-    expect(decoded.admins).toBe("private");
-  });
-
-  test("version-4 visibility strings migrate onto the isPublic toggle", () => {
-    expect(migrateSiteRecord(v4Record("public"))).toEqual(record(true));
-    expect(migrateSiteRecord(v4Record("private"))).toEqual(record(false));
-    // A pre-role-split grant list moves to readers with the project private.
-    const legacy = migrateSiteRecord(v4Record("alice@example.com,@example.com"));
-    expect(legacy.isPublic).toBe(false);
-    expect(legacy.readers).toBe("alice@example.com,@example.com");
-    // Current records pass through untouched.
-    expect(migrateSiteRecord(record(true))).toEqual(record(true));
-  });
-});
-
 describe("project name claims", () => {
   test("maps a lost create race onto the canonical taken message", async () => {
     // Simulate a race: the name is free at load time, but another create lands first —
@@ -244,6 +199,14 @@ describe("project name claims", () => {
       store.publish(request(created.project), reader, randomConfig).pipe(Effect.flip),
     ) as SiteStoreError;
     expect(denied.status).toBe(409);
+  });
+
+  test("a publish that omits isPublic creates a private project", async () => {
+    const db = makeMemoryPrimitiveDb();
+    const created = await run(db, (store) =>
+      store.publish({ ...request("site"), isPublic: undefined }, owner, config()),
+    );
+    expect(created.isPublic).toBe(false);
   });
 
   test("garbage project names load as missing, not as backend keys", async () => {

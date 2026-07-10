@@ -20,7 +20,6 @@ describe("serverConfigEnv", () => {
       allowedUsers: "public",
       allowPublicProjects: true,
       usersCanSetProjectNames: true,
-      publicByDefault: false,
     };
     const env = serverConfigEnv(config, { appUrl: "https://app.example", contentUrl: "https://pages.example" });
 
@@ -67,17 +66,13 @@ describe("validateDeploymentConfig", () => {
     // Domains without the leading "@" are not valid group terms.
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOWED_USERS: "gmail.com,koomen.org" }))
       .toThrow("Invalid access group");
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_PUBLIC_BY_DEFAULT: "@example.com" }))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOW_PUBLIC_PROJECTS: "@example.com" }))
       .toThrow('expected "true" or "false"');
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_APP_URL: "not a url" }))
       .toThrow('expected a URL, like "https://example.com"');
   });
 
-  test("rejects the retired visibility-era variables", () => {
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "public" }))
-      .toThrow("SCRATCHWORK_ALLOW_PUBLIC_PROJECTS");
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "private" }))
-      .toThrow("SCRATCHWORK_PUBLIC_BY_DEFAULT");
+  test("rejects retired variable names", () => {
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SHARE_ALLOWED_DOMAINS: "example.com" }))
       .toThrow("SCRATCHWORK_ALLOWED_SHARE_DOMAINS");
   });

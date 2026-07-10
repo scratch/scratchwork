@@ -42,12 +42,10 @@ import {
   revisionRecordKey,
   SiteRecordSchema,
   SiteRevisionRecordSchema,
-  StoredSiteRecordSchema,
   type SiteFileObject,
   type SiteOwner,
   type SiteRecord,
   type SiteRevisionRecord,
-  type StoredSiteRecord,
 } from "./site-records";
 import { ObjectStorage, sha256Hex, StorageError, type ObjectStorageShape } from "./storage";
 import { randomRevisionId, randomSlug } from "./tokens";
@@ -112,13 +110,13 @@ export interface SiteStoreShape {
   readonly loadProject: (project: string) => Effect.Effect<LoadedSite | null, SiteStoreError | StorageError>;
   /** Lists the projects the user owns. */
   readonly listProjects: (user: AuthUser) => Effect.Effect<ReadonlyArray<SiteRecord>, SiteStoreError | StorageError>;
-  /** Sets a project's visibility to private, keeping all content. */
+  /** Sets a project private, keeping all content. */
   readonly unpublish: (
     project: string,
     user: AuthUser,
     config: ServerConfigShape,
   ) => Effect.Effect<SiteRecord, SiteStoreError | StorageError>;
-  /** Grants and revokes individual email/@domain access on a project's visibility. */
+  /** Grants and revokes individual email/@domain access on a project's grant groups. */
   readonly share: (
     project: string,
     user: AuthUser,
@@ -183,7 +181,7 @@ function publishProject(
     if (requested != null) yield* requireProjectIdentifier(requested);
 
     const loaded = requested == null ? null : yield* loadSiteRecord(db, requested);
-    const isPublic = request.isPublic ?? loaded?.value.isPublic ?? config.publicByDefault;
+    const isPublic = request.isPublic ?? loaded?.value.isPublic ?? false;
     yield* validateIsPublic(isPublic, config);
 
     if (loaded != null && requested != null) {
@@ -433,7 +431,7 @@ function updateProjectSharing(
 }
 
 /** Flags revoked emails that still have access: the owner (always readable to them), an
- * address a remaining grant covers, or public visibility — so a revoke never looks more
+ * address a remaining grant covers, or a public project — so a revoke never looks more
  * effective than it is. */
 function revokeWarnings(
   record: SiteRecord,
@@ -656,25 +654,8 @@ function loadSiteRecord(
   if (!isSafeProjectIdentifier(project)) return Effect.succeed(null);
   return db.get<JsonValue>(PROJECTS_NAMESPACE, project).pipe(
     Effect.mapError(dbError),
-    Effect.flatMap((record) => record == null ? Effect.succeed(null) : decodeDbRecord(record, StoredSiteRecordSchema)),
-    Effect.map((loaded) => loaded == null ? null : { ...loaded, value: migrateSiteRecord(loaded.value) }),
+    Effect.flatMap((record) => record == null ? Effect.succeed(null) : decodeDbRecord(record, SiteRecordSchema)),
   );
-}
-
-/** Migrates older stored pointer versions at read time. Version 4 carried a `visibility`
- * string: "public"/"private" becomes the isPublic toggle, and a pre-role-split grant
- * list (for example "alice@x.com,@x.com") moves to `readers` with the project private.
- * Every mutation flows through loadSiteRecord, so the first write after migration
- * persists the version-5 shape. */
-export function migrateSiteRecord(record: StoredSiteRecord): SiteRecord {
-  if (record.version === 5) return record;
-  const { visibility, ...common } = record;
-  return {
-    ...common,
-    version: 5,
-    isPublic: visibility === "public",
-    readers: visibility === "public" || visibility === "private" ? record.readers : visibility,
-  };
 }
 
 /** Writes the project pointer under the given precondition and decodes the result. */
