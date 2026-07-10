@@ -5,6 +5,5 @@ import { runLocalServer } from "@scratchwork/server-deploy-local";
 runLocalServer({
   server: {
     usersCanSetProjectNames: true,
-    publicByDefault: true,
   },
 });

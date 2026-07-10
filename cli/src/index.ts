@@ -81,7 +81,7 @@ const publishCommand = Command.make(
     server: textOption("server", "url", "Scratchwork app server, such as sndbx.sh or https://app.sndbx.sh. Required on first publish; later publishes read it from .scratchwork.json."),
     project: textOption("project", "name", "Project name for the published URL. Default: saved config, the directory name, or the file name without its extension. Servers in random-naming mode assign a name on first publish."),
     isPublicFlag: Options.boolean("public").pipe(
-      Options.withDescription("Make the project readable by everyone. Default: saved config, the project's current setting, or the server default. Grant per-account or per-domain access with scratchwork share."),
+      Options.withDescription("Make the project readable by everyone. Default: saved config, the project's current setting, or private for a new project. Grant per-account or per-domain access with scratchwork share."),
     ),
     isPrivateFlag: Options.boolean("private").pipe(
       Options.withDescription("Make the project readable only by its owner and share grants."),

@@ -29,8 +29,6 @@ export interface ServerConfigShape {
   /** true: publishers choose globally-unique project names (first-writer-wins).
    * false: the server assigns a random slug on first publish. */
   readonly usersCanSetProjectNames: boolean;
-  /** Whether a publish that does not say public/private creates a public project. */
-  readonly publicByDefault: boolean;
   readonly auth: AuthConfig;
 }
 
@@ -115,7 +113,6 @@ export function readServerConfig(
       allowPublicProjects: yield* readBoolean(env.SCRATCHWORK_ALLOW_PUBLIC_PROJECTS, true, "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS"),
       allowedShareDomains: yield* readDomainSet(env.SCRATCHWORK_ALLOWED_SHARE_DOMAINS, "SCRATCHWORK_ALLOWED_SHARE_DOMAINS"),
       usersCanSetProjectNames: yield* readBoolean(env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES, true, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES"),
-      publicByDefault: yield* readBoolean(env.SCRATCHWORK_PUBLIC_BY_DEFAULT, false, "SCRATCHWORK_PUBLIC_BY_DEFAULT"),
       auth: yield* readAuthConfig(env, appUrl),
     };
   });
@@ -333,13 +330,11 @@ function normalizeCfTeamDomain(value: string): string | null {
   return safeDomain(domain) ? `https://${domain}` : null;
 }
 
-/** Retired visibility-era variables and their replacements. These carried access policy,
- * so silently ignoring one could leave a server more open than its operator intended —
- * refuse to start instead. */
+/** Retired variables and their replacements. These carried access policy, so silently
+ * ignoring one could leave a server more open than its operator intended — refuse to
+ * start instead. */
 const RETIRED_ENV_VARS: ReadonlyArray<readonly [string, string]> = [
-  ["SCRATCHWORK_MAX_VISIBILITY", 'SCRATCHWORK_ALLOW_PUBLIC_PROJECTS ("true"/"false") and, for domain ceilings, SCRATCHWORK_ALLOWED_SHARE_DOMAINS'],
   ["SCRATCHWORK_SHARE_ALLOWED_DOMAINS", "SCRATCHWORK_ALLOWED_SHARE_DOMAINS"],
-  ["SCRATCHWORK_DEFAULT_VISIBILITY", 'SCRATCHWORK_PUBLIC_BY_DEFAULT ("true"/"false")'],
 ];
 
 /** Fails when a retired environment variable is still set. */

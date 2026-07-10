@@ -32,10 +32,10 @@ const SiteFileObjectSchema = Schema.Struct({
   contentType: Schema.String,
 });
 
-/** The pointer fields shared by every record version. The three access groups
+/** The pointer fields of a stored project record. The three access groups
  * (`readers`, `writers`, `admins`) grade per-account roles — each level implies the ones
- * below, and the owner holds every role. The grant groups default to "private" so
- * records written before roles existed decode unchanged. */
+ * below, and the owner holds every role. The grant groups default to "private" when
+ * absent. */
 const siteRecordCommonFields = {
   project: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid project")),
   readers: Schema.optionalWith(Schema.String, { default: () => "private" }),
@@ -56,19 +56,6 @@ const SiteRecordSchema = Schema.Struct({
   isPublic: Schema.Boolean,
   ...siteRecordCommonFields,
 });
-
-/** Validates the retired version-4 pointer, whose toggle was a `visibility` string —
- * "public", "private", or (before roles existed) a grant list. Decoded records are
- * migrated in memory at load (see site-store) and rewritten as version 5 on the next
- * mutation. */
-const SiteRecordV4Schema = Schema.Struct({
-  version: Schema.Literal(4),
-  visibility: Schema.String,
-  ...siteRecordCommonFields,
-});
-
-/** Accepts any decodable stored pointer version. */
-const StoredSiteRecordSchema = Schema.Union(SiteRecordSchema, SiteRecordV4Schema);
 
 /** Validates a stored owner-index entry. */
 const OwnerProjectRecordSchema = Schema.Struct({
@@ -91,7 +78,6 @@ const SiteRevisionRecordSchema = Schema.Struct({
 export {
   OwnerProjectRecordSchema,
   SiteRecordSchema,
-  StoredSiteRecordSchema,
   SiteRevisionRecordSchema,
 };
 
@@ -101,8 +87,6 @@ export type SiteOwner = typeof SiteOwnerSchema.Type;
 export type SiteFileObject = typeof SiteFileObjectSchema.Type;
 /** The mutable project pointer: current revision, public toggle, and owner metadata. */
 export type SiteRecord = typeof SiteRecordSchema.Type;
-/** Any decodable stored pointer version, before in-memory migration. */
-export type StoredSiteRecord = typeof StoredSiteRecordSchema.Type;
 /** Owner-index entry naming one project the owner has published. */
 export type OwnerProjectRecord = typeof OwnerProjectRecordSchema.Type;
 /** An immutable published revision: the file list for one publish. */

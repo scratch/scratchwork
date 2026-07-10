@@ -187,9 +187,9 @@ function parseProjectUrl(value: string | undefined): { readonly server: string; 
 }
 
 /** Validates and narrows parsed JSON into a ProjectConfigFile, dropping unknown fields.
- * Workspace-era fields never reach here — rejectLegacyConfig fails on them first. A
- * retired string `visibility` field is dropped too: omitting isPublic is safe because
- * the server then preserves the project's current setting. */
+ * Workspace-era fields never reach here — rejectLegacyConfig fails on them first.
+ * Omitting isPublic is safe because the server then preserves the project's current
+ * setting (and defaults new projects to private). */
 function decodeProjectConfig(value: unknown): ProjectConfigFile | null {
   if (!isRecord(value)) return null;
   const config: Record<string, string | boolean> = {};

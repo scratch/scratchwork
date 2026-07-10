@@ -34,8 +34,6 @@ export interface ScratchworkServerConfig {
   /** Globally unique name of the project served on the homepage domains. */
   readonly homepageProject?: string;
   readonly usersCanSetProjectNames?: boolean;
-  /** Whether a publish that does not say public/private creates a public project. Default: false. */
-  readonly publicByDefault?: boolean;
 }
 
 /** Options shared by every deployServer entry point. */
@@ -83,7 +81,6 @@ export function serverConfigEnv(config: ScratchworkServerConfig, resolved: Resol
   if (config.allowPublicProjects != null) env.SCRATCHWORK_ALLOW_PUBLIC_PROJECTS = String(config.allowPublicProjects);
   if (config.allowedShareDomains != null) env.SCRATCHWORK_ALLOWED_SHARE_DOMAINS = config.allowedShareDomains;
   if (config.usersCanSetProjectNames != null) env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES = String(config.usersCanSetProjectNames);
-  if (config.publicByDefault != null) env.SCRATCHWORK_PUBLIC_BY_DEFAULT = String(config.publicByDefault);
   if (config.homepageDomains != null && config.homepageDomains.length > 0) {
     env.SCRATCHWORK_HOMEPAGE_DOMAINS = config.homepageDomains.join(",");
   }
