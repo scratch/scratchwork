@@ -67,24 +67,55 @@ export function resolveServerConfig(
   };
 }
 
+/** One config-backed SCRATCHWORK_* variable: the env var name paired with the function
+ * that extracts and stringifies its value from the server config. Returning undefined
+ * omits the variable. */
+export interface ServerConfigEnvEntry {
+  readonly name: string;
+  readonly value: (config: ScratchworkServerConfig) => string | undefined;
+}
+
+/** The single source of truth mapping ScratchworkServerConfig fields onto their
+ * SCRATCHWORK_* environment variables. The resolved app/content origins are handled
+ * separately (see serverConfigEnv). Only non-secret settings belong here: cloud deploys
+ * forward every name in this table as a plaintext platform variable, so secrets like
+ * SCRATCHWORK_GOOGLE_CLIENT_SECRET and SCRATCHWORK_SESSION_SECRET must never be added. */
+export const serverConfigEnvEntries: ReadonlyArray<ServerConfigEnvEntry> = [
+  { name: "SCRATCHWORK_AUTH", value: (config) => config.auth },
+  { name: "SCRATCHWORK_GOOGLE_CLIENT_ID", value: (config) => config.googleClientId },
+  { name: "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN", value: (config) => config.cfAccessTeamDomain },
+  { name: "SCRATCHWORK_CF_ACCESS_AUD", value: (config) => config.cfAccessAud },
+  { name: "SCRATCHWORK_AUTH_ALLOWED_EMAILS", value: (config) => config.authAllowedEmails },
+  { name: "SCRATCHWORK_AUTH_ALLOWED_DOMAINS", value: (config) => config.authAllowedDomains },
+  { name: "SCRATCHWORK_AUTH_SESSION_SECONDS", value: (config) => stringified(config.authSessionSeconds) },
+  { name: "SCRATCHWORK_ALLOWED_USERS", value: (config) => config.allowedUsers },
+  { name: "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS", value: (config) => stringified(config.allowPublicProjects) },
+  { name: "SCRATCHWORK_ALLOWED_SHARE_DOMAINS", value: (config) => config.allowedShareDomains },
+  { name: "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES", value: (config) => stringified(config.usersCanSetProjectNames) },
+  {
+    name: "SCRATCHWORK_HOMEPAGE_DOMAINS",
+    value: (config) => config.homepageDomains == null || config.homepageDomains.length === 0
+      ? undefined
+      : config.homepageDomains.join(","),
+  },
+  { name: "SCRATCHWORK_HOMEPAGE_PROJECT", value: (config) => config.homepageProject },
+];
+
+/** The SCRATCHWORK_* names of every config-backed (non-secret) server setting. */
+export const serverConfigEnvNames: ReadonlyArray<string> = serverConfigEnvEntries.map((entry) => entry.name);
+
+/** Serializes an optional number or boolean setting with String(), keeping undefined. */
+function stringified(value: number | boolean | undefined): string | undefined {
+  return value == null ? undefined : String(value);
+}
+
 /** Maps the server settings and resolved origins onto SCRATCHWORK_* environment variables. */
 export function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScratchworkServerConfig): DeployEnv {
   const env: DeployEnv = {};
-  if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
-  if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
-  if (config.cfAccessTeamDomain != null) env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN = config.cfAccessTeamDomain;
-  if (config.cfAccessAud != null) env.SCRATCHWORK_CF_ACCESS_AUD = config.cfAccessAud;
-  if (config.authAllowedEmails != null) env.SCRATCHWORK_AUTH_ALLOWED_EMAILS = config.authAllowedEmails;
-  if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
-  if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
-  if (config.allowedUsers != null) env.SCRATCHWORK_ALLOWED_USERS = config.allowedUsers;
-  if (config.allowPublicProjects != null) env.SCRATCHWORK_ALLOW_PUBLIC_PROJECTS = String(config.allowPublicProjects);
-  if (config.allowedShareDomains != null) env.SCRATCHWORK_ALLOWED_SHARE_DOMAINS = config.allowedShareDomains;
-  if (config.usersCanSetProjectNames != null) env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES = String(config.usersCanSetProjectNames);
-  if (config.homepageDomains != null && config.homepageDomains.length > 0) {
-    env.SCRATCHWORK_HOMEPAGE_DOMAINS = config.homepageDomains.join(",");
+  for (const entry of serverConfigEnvEntries) {
+    const value = entry.value(config);
+    if (value != null) env[entry.name] = value;
   }
-  if (config.homepageProject != null) env.SCRATCHWORK_HOMEPAGE_PROJECT = config.homepageProject;
   if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
   if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;
   return env;
