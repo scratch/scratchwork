@@ -11,6 +11,8 @@ import * as FileSystem from "@effect/platform/FileSystem";
 import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { isRecord, parseJson } from "../../shared/src/util/json";
 import { nonEmpty } from "../../shared/src/util/strings";
 import { resolveProjectByPath, type ResolvedProjectRef } from "./api";
@@ -19,14 +21,20 @@ import { CliError } from "./errors";
 
 export const PROJECT_CONFIG_FILE = ".scratchwork.json";
 
+/** The .scratchwork.json file contents. Every field is optional — the file is
+ * user-editable and partial configs are valid. This is a local persistence format,
+ * deliberately separate from the wire types in shared/src/publish/api.ts, so API
+ * changes never silently change what is written to users' disks. */
+const ProjectConfigFileSchema = Schema.Struct({
+  server: Schema.optional(Schema.String),
+  project: Schema.optional(Schema.String),
+  isPublic: Schema.optional(Schema.Boolean),
+  url: Schema.optional(Schema.String),
+  updatedAt: Schema.optional(Schema.String),
+});
+
 /** Decoded contents of a .scratchwork.json file; every field is optional. */
-export interface ProjectConfigFile {
-  readonly server?: string;
-  readonly project?: string;
-  readonly isPublic?: boolean;
-  readonly url?: string;
-  readonly updatedAt?: string;
-}
+export type ProjectConfigFile = typeof ProjectConfigFileSchema.Type;
 
 /** A found config file together with the directory that contains it. */
 export interface ProjectConfigLookup {
@@ -186,17 +194,12 @@ function parseProjectUrl(value: string | undefined): { readonly server: string; 
   }
 }
 
-/** Validates and narrows parsed JSON into a ProjectConfigFile, dropping unknown fields.
- * Workspace-era fields never reach here — rejectLegacyConfig fails on them first.
- * Omitting isPublic is safe because the server then preserves the project's current
- * setting (and defaults new projects to private). */
+/** Validates and narrows parsed JSON into a ProjectConfigFile, dropping unknown
+ * fields; a wrong-typed field makes the whole file read as no config, per the
+ * best-effort lookup contract. Workspace-era fields never reach here —
+ * rejectLegacyConfig fails on them first. Omitting isPublic is safe because the
+ * server then preserves the project's current setting (and defaults new projects
+ * to private). */
 function decodeProjectConfig(value: unknown): ProjectConfigFile | null {
-  if (!isRecord(value)) return null;
-  const config: Record<string, string | boolean> = {};
-  if (typeof value.server === "string") config.server = value.server;
-  if (typeof value.project === "string") config.project = value.project;
-  if (typeof value.isPublic === "boolean") config.isPublic = value.isPublic;
-  if (typeof value.url === "string") config.url = value.url;
-  if (typeof value.updatedAt === "string") config.updatedAt = value.updatedAt;
-  return config;
+  return Option.getOrNull(Schema.decodeUnknownOption(ProjectConfigFileSchema)(value));
 }
