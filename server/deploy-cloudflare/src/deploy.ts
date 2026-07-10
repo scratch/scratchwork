@@ -18,6 +18,7 @@ import {
   optional,
   resolveServerConfig,
   serverConfigEnv,
+  serverConfigEnvNames,
   validateDeploymentConfig,
   type DeployServerOptions,
   type ResolvedScratchworkServerConfig,
@@ -372,19 +373,11 @@ function workerVars(
   extraVars?: Readonly<Record<string, string>>,
 ): Record<string, string> {
   const vars: Record<string, string> = {};
-  copyEnv(vars, env, "SCRATCHWORK_AUTH");
-  copyEnv(vars, env, "SCRATCHWORK_GOOGLE_CLIENT_ID");
-  copyEnv(vars, env, "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN");
-  copyEnv(vars, env, "SCRATCHWORK_CF_ACCESS_AUD");
-  copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_EMAILS");
-  copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_ALLOWED_USERS");
-  copyEnv(vars, env, "SCRATCHWORK_AUTH_SESSION_SECONDS");
-  copyEnv(vars, env, "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS");
-  copyEnv(vars, env, "SCRATCHWORK_ALLOWED_SHARE_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES");
-  copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_PROJECT");
+  // Every config-backed setting; the shared table holds no secrets, so these are safe
+  // to pass as plaintext Worker vars.
+  for (const name of serverConfigEnvNames) {
+    copyEnv(vars, env, name);
+  }
   if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;
   if (server.contentUrl != null && server.contentUrl !== "") vars.SCRATCHWORK_CONTENT_URL = server.contentUrl;
   Object.assign(vars, extraVars);

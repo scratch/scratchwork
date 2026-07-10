@@ -13,7 +13,7 @@ import {
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { ScratchworkServerConfig } from "../../scripts/server-settings";
+import { serverConfigEnvEntries, type ScratchworkServerConfig } from "../../scripts/server-settings";
 
 /** Options for a local run: the deploy project's `server` settings plus an env override
  * for tests. Using the shared config shape lets a deploy project run one config module
@@ -101,21 +101,9 @@ export function runLocalServer(options: RunLocalServerOptions): void {
 /** Maps server settings onto their environment variables, keeping any already set. */
 function serverSettingsEnv(server: ScratchworkServerConfig, processEnv: EnvVars): EnvVars {
   const env: Record<string, string | undefined> = {};
-  const set = (key: string, value: string | undefined) => {
-    const resolved = processEnv[key] ?? value;
-    if (resolved != null) env[key] = resolved;
-  };
-  set("SCRATCHWORK_AUTH", server.auth);
-  set("SCRATCHWORK_GOOGLE_CLIENT_ID", server.googleClientId);
-  set("SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN", server.cfAccessTeamDomain);
-  set("SCRATCHWORK_CF_ACCESS_AUD", server.cfAccessAud);
-  set("SCRATCHWORK_AUTH_ALLOWED_EMAILS", server.authAllowedEmails);
-  set("SCRATCHWORK_AUTH_ALLOWED_DOMAINS", server.authAllowedDomains);
-  set("SCRATCHWORK_AUTH_SESSION_SECONDS", server.authSessionSeconds == null ? undefined : String(server.authSessionSeconds));
-  set("SCRATCHWORK_ALLOWED_USERS", server.allowedUsers);
-  set("SCRATCHWORK_ALLOW_PUBLIC_PROJECTS", server.allowPublicProjects == null ? undefined : String(server.allowPublicProjects));
-  set("SCRATCHWORK_ALLOWED_SHARE_DOMAINS", server.allowedShareDomains);
-  set("SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES", server.usersCanSetProjectNames == null ? undefined : String(server.usersCanSetProjectNames));
-  set("SCRATCHWORK_HOMEPAGE_PROJECT", server.homepageProject);
+  for (const entry of serverConfigEnvEntries) {
+    const resolved = processEnv[entry.name] ?? entry.value(server);
+    if (resolved != null) env[entry.name] = resolved;
+  }
   return env;
 }

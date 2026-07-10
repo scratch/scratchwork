@@ -1,5 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import { serverConfigEnv, validateDeploymentConfig, type ScratchworkServerConfig } from "./server-settings";
+import { serverConfigEnv, serverConfigEnvNames, validateDeploymentConfig, type ScratchworkServerConfig } from "./server-settings";
+
+describe("serverConfigEnvNames", () => {
+  test("pins the exact non-secret variable set forwarded to cloud deploys", () => {
+    // Cloud deploys pass every name in this list as a plaintext platform variable, so
+    // this list must never grow a secret (SCRATCHWORK_GOOGLE_CLIENT_SECRET,
+    // SCRATCHWORK_SESSION_SECRET). Update it deliberately when a setting is added.
+    expect([...serverConfigEnvNames].sort()).toEqual([
+      "SCRATCHWORK_ALLOWED_SHARE_DOMAINS",
+      "SCRATCHWORK_ALLOWED_USERS",
+      "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS",
+      "SCRATCHWORK_AUTH",
+      "SCRATCHWORK_AUTH_ALLOWED_DOMAINS",
+      "SCRATCHWORK_AUTH_ALLOWED_EMAILS",
+      "SCRATCHWORK_AUTH_SESSION_SECONDS",
+      "SCRATCHWORK_CF_ACCESS_AUD",
+      "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN",
+      "SCRATCHWORK_GOOGLE_CLIENT_ID",
+      "SCRATCHWORK_HOMEPAGE_DOMAINS",
+      "SCRATCHWORK_HOMEPAGE_PROJECT",
+      "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES",
+    ]);
+  });
+});
 
 describe("serverConfigEnv", () => {
   test("maps usersCanSetProjectNames onto its environment variable", () => {
