@@ -9,6 +9,13 @@ import type * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
+import type {
+  ProjectInfo,
+  ProjectResponse,
+  ProjectsListResponse,
+  PublishResponse,
+  ShareResponse,
+} from "../../../shared/src/publish/api";
 import { SiteFiles } from "../../../shared/src/site/files";
 import { servePath } from "../../../shared/src/site/serve";
 import { isLoopbackHost } from "../../../shared/src/util/url";
@@ -170,7 +177,7 @@ function publish(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const siteStore = yield* SiteStore;
     const result = yield* siteStore.publish(publishRequest, user, config);
     const url = publishedUrl(contentBaseUrl(request, config), result.project, result.openPath, config);
-    return jsonResponse({ ...result, url }, 200);
+    return jsonResponse({ ...result, url } satisfies PublishResponse, 200);
   });
 }
 
@@ -186,7 +193,7 @@ function listProjects(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const contentBase = contentBaseUrl(request, config);
     return jsonResponse({
       projects: projects.map((project) => projectSummary(project, contentBase, projectRole(project, user, config), config)),
-    }, 200);
+    } satisfies ProjectsListResponse, 200);
   });
 }
 
@@ -205,7 +212,7 @@ function resolveProjectPath(request: HttpServerRequest.HttpServerRequest, url: U
     const site = yield* requireReadableSite(yield* loadSiteForPath(path), user, config);
     return jsonResponse({
       project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config), config),
-    }, 200);
+    } satisfies ProjectResponse, 200);
   });
 }
 
@@ -219,7 +226,7 @@ function projectInfo(request: HttpServerRequest.HttpServerRequest, project: stri
     const site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
     return jsonResponse({
       project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config), config),
-    }, 200);
+    } satisfies ProjectResponse, 200);
   });
 }
 
@@ -248,7 +255,7 @@ function unpublishProject(request: HttpServerRequest.HttpServerRequest, project:
     const record = yield* siteStore.unpublish(project, user, config);
     return jsonResponse({
       project: projectSummary(record, contentBaseUrl(request, config), projectRole(record, user, config), config),
-    }, 200);
+    } satisfies ProjectResponse, 200);
   });
 }
 
@@ -265,7 +272,7 @@ function shareProject(request: HttpServerRequest.HttpServerRequest, project: str
     return jsonResponse({
       project: projectSummary(result.record, contentBaseUrl(request, config), projectRole(result.record, user, config), config),
       warnings: result.warnings,
-    }, 200);
+    } satisfies ShareResponse, 200);
   });
 }
 
@@ -312,11 +319,11 @@ function rejectCrossOriginApiRequest(
   return Effect.void;
 }
 
-/** Shapes one project record for API responses. `isPublic` is the public/private
- * toggle; `permissions` lists the per-role grants and names other users' emails, so it
- * is shown only to admins and the owner (the caller's role decides, never appears in
- * the payload). */
-function projectSummary(record: SiteRecord, contentBase: string, callerRole: ProjectRole, config: ServerConfigShape): Record<string, unknown> {
+/** Shapes one project record for API responses (the shared ProjectInfo contract).
+ * `isPublic` is the public/private toggle; `permissions` lists the per-role grants and
+ * names other users' emails, so it is shown only to admins and the owner (the caller's
+ * role decides, never appears in the payload). */
+function projectSummary(record: SiteRecord, contentBase: string, callerRole: ProjectRole, config: ServerConfigShape): ProjectInfo {
   const permissions = roleAtLeast(callerRole, "admin")
     ? {
         permissions: {

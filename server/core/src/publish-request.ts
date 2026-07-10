@@ -4,10 +4,8 @@ import * as Option from "effect/Option";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
 import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
-import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
-import { isSafeSitePath } from "../../../shared/src/site/paths";
+import { PublishRequestBodySchema, type PublishRequestBody } from "../../../shared/src/publish/api";
 import { parseJson } from "../../../shared/src/util/json";
-import { isSafeProjectIdentifier } from "./access";
 import { HttpError } from "./http";
 
 /** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
@@ -19,42 +17,14 @@ export const MAX_PUBLISH_FILE_BYTES = 10 * 1024 * 1024;
 /** Maximum decoded size of the whole bundle. */
 export const MAX_PUBLISH_TOTAL_BYTES = 25 * 1024 * 1024;
 
-/** A validated publish request: the bundle plus normalized publish options. `project`
- * stays optional at the protocol level — the server mints a name when the naming mode is
- * random, and requires one in the store when publishers choose names. */
-export interface PublishRequest {
-  readonly bundle: PublishBundle;
+/** A validated publish request: the shared wire body (see the shared api module)
+ * plus a normalized `openPath` and the computed decoded bundle size. `project`
+ * stays optional at the protocol level — the server mints a name when the naming
+ * mode is random, and requires one in the store when publishers choose names. */
+export interface PublishRequest extends Omit<PublishRequestBody, "openPath"> {
   readonly openPath: string;
-  readonly project?: string;
-  readonly isPublic?: boolean;
   readonly totalBytes: number;
 }
-
-/** Runtime validators for the untrusted publish request body. */
-const PublishBundleFileSchema = Schema.Struct({
-  path: Schema.String.pipe(
-    Schema.filter((path) => isSafeSitePath(path) || "Invalid site path"),
-  ),
-  contentBase64: Schema.String.pipe(
-    Schema.filter((content) => decodedBase64ByteLength(content) != null || "Invalid base64 content"),
-  ),
-});
-
-const PublishBundleSchema = Schema.Struct({
-  version: Schema.Literal(PUBLISH_BUNDLE_VERSION),
-  files: Schema.Array(PublishBundleFileSchema),
-});
-
-const RawPublishRequestSchema = Schema.Struct({
-  bundle: PublishBundleSchema,
-  openPath: Schema.optional(Schema.String),
-  project: Schema.optional(Schema.String.pipe(Schema.filter((project) => isSafeProjectIdentifier(project) || "Invalid project"))),
-  // The public/private toggle; per-account and per-domain access is a separate grant
-  // list managed through the share API, not a publish-time setting.
-  isPublic: Schema.optional(Schema.Boolean),
-});
-
-type RawPublishRequest = Schema.Schema.Type<typeof RawPublishRequestSchema>;
 
 /** Reads, size-limits, parses, and validates a publish request body. */
 export function readPublishRequest(
@@ -78,10 +48,12 @@ export function readPublishRequest(
   });
 }
 
-/** Decodes an unknown JSON value into a normalized publish request. */
+/** Decodes an unknown JSON value into a normalized publish request. Decoding is
+ * deliberately strict — every problem is reported and unknown fields are errors —
+ * so protocol drift surfaces as a clear 400 instead of being silently dropped. */
 export function decodePublishRequest(value: unknown): Effect.Effect<PublishRequest, HttpError> {
   return Effect.gen(function* () {
-    const raw = yield* Schema.decodeUnknown(RawPublishRequestSchema)(value, {
+    const raw = yield* Schema.decodeUnknown(PublishRequestBodySchema)(value, {
       errors: "all",
       onExcessProperty: "error",
     }).pipe(
@@ -94,7 +66,7 @@ export function decodePublishRequest(value: unknown): Effect.Effect<PublishReque
 }
 
 /** Applies cross-field publish validation and computes decoded bundle size. */
-function normalizePublishRequest(raw: RawPublishRequest): Effect.Effect<PublishRequest, HttpError> {
+function normalizePublishRequest(raw: PublishRequestBody): Effect.Effect<PublishRequest, HttpError> {
   return Effect.gen(function* () {
     if (raw.bundle.files.length === 0) {
       return yield* Effect.fail(new HttpError({ status: 400, message: "Publish bundle must contain files" }));

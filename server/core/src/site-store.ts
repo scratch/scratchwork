@@ -11,6 +11,7 @@ import * as Layer from "effect/Layer";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
 import { base64ToBytes, bytesToBase64 } from "../../../shared/src/encoding/base64";
+import type { PublishResponse } from "../../../shared/src/publish/api";
 import { contentType } from "../../../shared/src/site/content";
 import {
   accessGroupMatches,
@@ -60,13 +61,10 @@ export interface LoadedSite {
   readonly siteFiles: ReturnType<typeof makeObjectSiteFiles>;
 }
 
-/** What publish returns to the CLI. `project` is authoritative: on a random-name server
+/** What publish returns to the CLI: the shared wire response minus the request-scoped
+ * `url`, which the HTTP layer adds. `project` is authoritative: on a random-name server
  * it is how the CLI learns the assigned name. */
-export interface PublishResult {
-  readonly project: string;
-  readonly isPublic: boolean;
-  readonly openPath: string;
-}
+export type PublishResult = Omit<PublishResponse, "url">;
 
 /** A user's effective permission level on one project, from least to greatest. Each
  * level implies the ones below it; `owner` is fixed at creation and cannot be granted. */
