@@ -372,9 +372,15 @@ describe("readServerConfig", () => {
     ).rejects.toThrow('Invalid SCRATCHWORK_AUTH "google": expected "oauth" or "cloudflare-access"');
   });
 
-  test("fails without OAuth credentials", async () => {
+  test("fails when no auth mode is chosen", async () => {
     await expect(Effect.runPromise(readServerConfig({}))).rejects.toThrow(
-      "OAuth is required",
+      'SCRATCHWORK_AUTH is required: set it to "oauth" or "cloudflare-access"',
+    );
+  });
+
+  test("fails without OAuth credentials", async () => {
+    await expect(Effect.runPromise(readServerConfig({ SCRATCHWORK_AUTH: "oauth" }))).rejects.toThrow(
+      "OAuth mode requires",
     );
   });
 
@@ -421,6 +427,7 @@ describe("readServerConfig", () => {
   test("defaults to user-set project names", async () => {
     const config = await Effect.runPromise(
       readServerConfig({
+        SCRATCHWORK_AUTH: "oauth",
         SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
         SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
         SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
@@ -433,6 +440,7 @@ describe("readServerConfig", () => {
   test("reads the configured project-naming setting", async () => {
     const config = await Effect.runPromise(
       readServerConfig({
+        SCRATCHWORK_AUTH: "oauth",
         SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
         SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
         SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
@@ -446,6 +454,7 @@ describe("readServerConfig", () => {
   test("rejects non-boolean project-naming values", async () => {
     await expect(
       Effect.runPromise(readServerConfig({
+        SCRATCHWORK_AUTH: "oauth",
         SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
         SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
         SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",

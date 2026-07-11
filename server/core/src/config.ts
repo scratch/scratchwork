@@ -180,13 +180,21 @@ function readHomepage(
   });
 }
 
-/** Parses auth settings from environment variables. Auth cannot be disabled: a server
- * either runs built-in Google OAuth or sits behind Cloudflare Access. */
+/** Parses auth settings from environment variables. Auth cannot be disabled, and the
+ * mode must be chosen explicitly: a server either runs built-in Google OAuth or sits
+ * behind Cloudflare Access. */
 function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigError> {
   return Effect.gen(function* () {
     const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
-    if (authMode !== "" && authMode !== "oauth" && authMode !== "cloudflare-access") {
-      return yield* Effect.fail(invalidValue("SCRATCHWORK_AUTH", authMode, '"oauth" or "cloudflare-access", or leave it unset for oauth'));
+    if (authMode === "") {
+      return yield* Effect.fail(
+        new ServerConfigError({
+          message: 'SCRATCHWORK_AUTH is required: set it to "oauth" or "cloudflare-access".',
+        }),
+      );
+    }
+    if (authMode !== "oauth" && authMode !== "cloudflare-access") {
+      return yield* Effect.fail(invalidValue("SCRATCHWORK_AUTH", authMode, '"oauth" or "cloudflare-access"'));
     }
     if (authMode === "cloudflare-access") return yield* readCloudflareAccessConfig(env);
     return yield* readOAuthConfig(env);
@@ -208,7 +216,7 @@ function readOAuthConfig(env: EnvVars): Effect.Effect<OAuthAuthConfig, ServerCon
       ].filter((name) => name != null);
       return yield* Effect.fail(
         new ServerConfigError({
-          message: `OAuth is required: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set. Create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
+          message: `OAuth mode requires ${missing.join(", ")}: create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
         }),
       );
     }

@@ -3,13 +3,15 @@ import { serverConfigEnv, validateDeploymentConfig, type ScratchworkServerConfig
 
 describe("serverConfigEnv", () => {
   test("maps usersCanSetProjectNames onto its environment variable", () => {
-    expect(serverConfigEnv({ usersCanSetProjectNames: true }, {})).toEqual({
+    expect(serverConfigEnv({ auth: "oauth", usersCanSetProjectNames: true }, {})).toEqual({
+      SCRATCHWORK_AUTH: "oauth",
       SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES: "true",
     });
-    expect(serverConfigEnv({ usersCanSetProjectNames: false }, {})).toEqual({
+    expect(serverConfigEnv({ auth: "oauth", usersCanSetProjectNames: false }, {})).toEqual({
+      SCRATCHWORK_AUTH: "oauth",
       SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES: "false",
     });
-    expect(serverConfigEnv({}, {})).toEqual({});
+    expect(serverConfigEnv({ auth: "oauth" }, {})).toEqual({ SCRATCHWORK_AUTH: "oauth" });
   });
 
   test("never emits the retired workspace-era variables", () => {
@@ -31,7 +33,8 @@ describe("serverConfigEnv", () => {
   });
 
   test("maps the homepage settings onto their environment variables", () => {
-    expect(serverConfigEnv({ homepageDomains: ["example.com", "www.example.com"], homepageProject: "home" }, {})).toEqual({
+    expect(serverConfigEnv({ auth: "oauth", homepageDomains: ["example.com", "www.example.com"], homepageProject: "home" }, {})).toEqual({
+      SCRATCHWORK_AUTH: "oauth",
       SCRATCHWORK_HOMEPAGE_DOMAINS: "example.com,www.example.com",
       SCRATCHWORK_HOMEPAGE_PROJECT: "home",
     });
@@ -48,6 +51,7 @@ describe("serverConfigEnv", () => {
 
 describe("validateDeploymentConfig", () => {
   const baseEnv = {
+    SCRATCHWORK_AUTH: "oauth",
     SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
     SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
     SCRATCHWORK_SESSION_SECRET: "test-session-secret-test-session-secret",
@@ -56,22 +60,27 @@ describe("validateDeploymentConfig", () => {
   };
 
   test("accepts a config the server can parse", () => {
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "@gmail.com,@koomen.org" }, "Test")).not.toThrow();
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "@gmail.com,@koomen.org" })).not.toThrow();
   });
 
   test("rejects values the deployed server would crash on at runtime", () => {
     // Domains without the leading "@" are not valid group terms.
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "gmail.com,koomen.org" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "gmail.com,koomen.org" }))
       .toThrow("Invalid access group");
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "@example.com" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "@example.com" }))
       .toThrow('expected "public" or "private"');
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_APP_URL: "not a url" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_APP_URL: "not a url" }))
       .toThrow('expected a URL, like "https://example.com"');
   });
 
   test("still enforces the OAuth requirements", () => {
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SESSION_SECRET: undefined }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SESSION_SECRET: undefined }))
       .toThrow("SCRATCHWORK_SESSION_SECRET is required");
+  });
+
+  test("rejects a config that never chooses an auth mode", () => {
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_AUTH: undefined }))
+      .toThrow("SCRATCHWORK_AUTH is required");
   });
 
   test("accepts a Cloudflare Access config without OAuth credentials", () => {
@@ -83,10 +92,10 @@ describe("validateDeploymentConfig", () => {
       SCRATCHWORK_APP_URL: "https://app.example",
       SCRATCHWORK_CONTENT_URL: "https://pages.example",
     };
-    expect(() => validateDeploymentConfig(cfEnv, "Test")).not.toThrow();
-    expect(() => validateDeploymentConfig({ ...cfEnv, SCRATCHWORK_CF_ACCESS_AUD: undefined }, "Test"))
+    expect(() => validateDeploymentConfig(cfEnv)).not.toThrow();
+    expect(() => validateDeploymentConfig({ ...cfEnv, SCRATCHWORK_CF_ACCESS_AUD: undefined }))
       .toThrow("SCRATCHWORK_CF_ACCESS_AUD is required");
-    expect(() => validateDeploymentConfig({ ...cfEnv, SCRATCHWORK_SESSION_SECRET: undefined }, "Test"))
+    expect(() => validateDeploymentConfig({ ...cfEnv, SCRATCHWORK_SESSION_SECRET: undefined }))
       .toThrow("SCRATCHWORK_SESSION_SECRET is required");
   });
 
@@ -95,22 +104,22 @@ describe("validateDeploymentConfig", () => {
       SCRATCHWORK_HOMEPAGE_DOMAINS: "example.com,www.example.com",
       SCRATCHWORK_HOMEPAGE_PROJECT: "home",
     };
-    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage }, "Test")).not.toThrow();
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage })).not.toThrow();
 
     // Set both or neither.
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_HOMEPAGE_PROJECT: "home" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_HOMEPAGE_PROJECT: "home" }))
       .toThrow("must be set together");
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_HOMEPAGE_DOMAINS: "example.com" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_HOMEPAGE_DOMAINS: "example.com" }))
       .toThrow("must be set together");
 
     // The homepage project must be a publishable name.
-    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_PROJECT: "api" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_PROJECT: "api" }))
       .toThrow("a publishable project name");
-    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_PROJECT: "_www" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_PROJECT: "_www" }))
       .toThrow("a publishable project name");
 
     // Home domains cannot collide with the app or content hosts.
-    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_DOMAINS: "app.example" }, "Test"))
+    expect(() => validateDeploymentConfig({ ...baseEnv, ...homepage, SCRATCHWORK_HOMEPAGE_DOMAINS: "app.example" }))
       .toThrow("distinct from the app and content origins");
   });
 });

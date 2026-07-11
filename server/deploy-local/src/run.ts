@@ -19,7 +19,7 @@ import type { ScratchworkServerConfig } from "../../scripts/server-settings";
  * for tests. Using the shared config shape lets a deploy project run one config module
  * both in the cloud and locally. */
 export interface RunLocalServerOptions {
-  readonly server?: ScratchworkServerConfig;
+  readonly server: ScratchworkServerConfig;
   readonly processEnv?: EnvVars;
 }
 
@@ -38,9 +38,9 @@ export interface RunLocalServerOptions {
  * takes over the process (keeps it alive, installs signal handlers) for the lifetime of
  * the server.
  */
-export function runLocalServer(options: RunLocalServerOptions = {}): void {
+export function runLocalServer(options: RunLocalServerOptions): void {
   const processEnv = options.processEnv ?? (process.env as EnvVars);
-  const server = options.server ?? {};
+  const server = options.server;
   const localPort = processEnv.PORT ?? processEnv.SCRATCHWORK_PORT ?? "43118";
   const splitHosts = server.appDomain != null && server.contentDomain != null && server.appDomain !== server.contentDomain;
   const appUrl = processEnv.SCRATCHWORK_APP_URL ?? `http://localhost:${localPort}`;

@@ -105,7 +105,7 @@ export async function deployServer(
   };
 
   await mkdir(dist, { recursive: true });
-  validateDeploymentConfig(env, "AWS");
+  validateDeploymentConfig(env);
   await run("bun", ["run", "build"], { cwd: root });
   await rm(zipPath, { force: true });
   await run("zip", ["-j", zipPath, handlerPath], { cwd: root });

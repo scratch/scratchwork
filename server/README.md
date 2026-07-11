@@ -21,10 +21,10 @@ By default the server listens on `43118` and stores published bundles under `.sc
 
 ## Google OAuth
 
-Every server requires auth — it cannot be disabled. The default mode is built-in Google OAuth; servers running behind Cloudflare Access can use that instead (see below). Configure Google OAuth credentials (including for local development):
+Every server requires auth — it cannot be disabled, and `SCRATCHWORK_AUTH` must choose the mode explicitly: built-in Google OAuth (`oauth`) or Cloudflare Access (`cloudflare-access`, see below). Configure Google OAuth credentials (including for local development):
 
 ```sh
-SCRATCHWORK_AUTH=oauth  # optional; "oauth" is the default mode
+SCRATCHWORK_AUTH=oauth
 SCRATCHWORK_GOOGLE_CLIENT_ID=...
 SCRATCHWORK_GOOGLE_CLIENT_SECRET=...
 SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes

@@ -126,7 +126,7 @@ export async function deployServer(
   const { run } = createRunner(commandEnv);
 
   await mkdir(dist, { recursive: true });
-  validateDeploymentConfig(env, "Cloudflare");
+  validateDeploymentConfig(env);
   await run("bun", ["build", "src/worker.ts", "--target=browser", "--format=esm", `--outfile=${workerPath}`], { cwd: root });
   const routes = cloudflareRoutes(resolvedDeploy);
   await ensureBucket(resolvedDeploy, run);
