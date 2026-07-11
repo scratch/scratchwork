@@ -30,7 +30,7 @@
   --prose-body: var(--gray-700);
   --prose-headings: var(--gray-900);
   --prose-links: var(--gray-900);
-  --prose-max-width: 42rem; /* ~70 characters per line at 1rem */
+  --prose-max-width: 64rem; /* wide column: fluid below this, capped at ~1024px */
   --code-bg: #ffffff;
   --code-fg: #24292e;
 }
@@ -63,7 +63,9 @@ body {
   width: 100%;
   max-width: var(--prose-max-width);
   margin: 0 auto;
-  padding: 4rem 1.5rem 1.5rem;
+  /* Side margins scale with the viewport: 1.5rem on phones up to 5rem on
+     wide screens, so a fluid column never sits flush against the edges. */
+  padding: 4rem clamp(1.5rem, 5vw, 5rem) 1.5rem;
   font-size: 1rem;
   line-height: 1.6;
   color: var(--prose-body);

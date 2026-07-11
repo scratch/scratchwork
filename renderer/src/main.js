@@ -40,7 +40,9 @@ window.SCRATCHWORK.components = window.SCRATCHWORK.components || {};
 
 // Re-render the current page in place (re-fetches its .md, no full reload).
 // Used by `scratchwork dev` for hot-reloading content edits; harmless otherwise.
-window.SCRATCHWORK.refresh = () => renderPage();
+// Keeps the reader's scroll position — a content edit should not yank them
+// back to the top of the page.
+window.SCRATCHWORK.refresh = () => renderPage({ preserveScroll: true });
 
 // Minimal fallback chrome, used only if the editable region didn't define a
 // layout. Renders the markdown inside `.scratchwork-prose` with no footer.
@@ -100,9 +102,17 @@ function scrollAfterRender() {
   });
 }
 
+// After React commits, put the viewport back where it was before the render
+// (the browser clamps if the new content is shorter).
+function restoreScroll(x, y) {
+  requestAnimationFrame(() => window.scrollTo(x, y));
+}
+
 // Fetch the markdown the current URL maps to, parse it, resolve its
-// components, and render it into the page layout.
-async function renderPage() {
+// components, and render it into the page layout. With `preserveScroll`
+// (hot reload), the scroll position survives the re-render instead of the
+// usual jump to the #fragment or the top (navigation).
+async function renderPage({ preserveScroll = false } = {}) {
   // Fetch the first markdown candidate the current URL maps to. The shell is
   // reached for an extensionless route; the actual file is <route>.md or
   // <route>/index.md, resolved absolutely from the origin (not relative to the
@@ -148,8 +158,12 @@ async function renderPage() {
   const ctx = { components, baseUrl: contentBase, linkDefs: collectLinkDefs(blocks) };
   const content = renderBlocks(blocks, ctx);
 
+  // Capture as late as possible: the fetch/parse above is async and the
+  // reader may have kept scrolling while it ran.
+  const { scrollX, scrollY } = window;
   ensureRoot().render(e(Layout, { author: meta.author }, ...content));
-  scrollAfterRender();
+  if (preserveScroll) restoreScroll(scrollX, scrollY);
+  else scrollAfterRender();
 }
 
 // From the current URL path, the ordered absolute .md candidates to try. The
