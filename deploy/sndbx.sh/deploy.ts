@@ -1,25 +1,5 @@
-import {
-  deployServer,
-  type CloudflareDeployServerConfig,
-} from "@scratchwork/server-deploy-cloudflare";
-import { server } from "./server-config";
-
-const config = {
-  server,
-
-  deploy: {
-    workerName: "scratchwork",
-    r2Bucket: "scratchwork-sndbx-sh",
-    d1Database: "scratchwork-sndbx-sh-projects",
-    routes: [
-      { pattern: "sndbx.sh/*" },
-      { pattern: "www.sndbx.sh/*" },
-      { pattern: "app.sndbx.sh/*" },
-      { pattern: "pages.sndbx.sh/*" },
-    ],
-    zoneName: "sndbx.sh",
-  },
-} satisfies CloudflareDeployServerConfig;
+import { deployServer } from "@scratchwork/server-deploy-cloudflare";
+import { config } from "./cloudflare-config";
 
 const result = await deployServer(config, { envFile: ".env" });
 

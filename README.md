@@ -46,6 +46,16 @@ scratchwork dev page.md
 scratchwork dev page.html
 ```
 
+When developing the CLI itself, activate this checkout once in each terminal
+session:
+
+```sh
+source ./cli/activate-scratchwork-alias
+```
+
+After that, `scratchwork` runs `cli/src/index.ts` from this checkout, even after
+changing to another directory.
+
 ## Working with Markdown
 
 Scratchwork renders Markdown with an embedded default renderer, and Markdown files can reference React components from nearby component files. See [`docs/index.md`](docs/index.md) for live examples.
@@ -77,6 +87,13 @@ Run the publishing server locally:
 ```sh
 bun run local:local-dev
 ```
+
+To run the actual Cloudflare Worker with persistent local R2 and D1 simulations (and
+an optional locally signed Cloudflare Access identity), see
+[`server/deploy-cloudflare/README.md`](server/deploy-cloudflare/README.md).
+
+The ready-made Access test deployment is `bun run local:cf-access`; the sndbx.sh
+project's production Worker configuration runs locally with `bun run local:sndbx.sh`.
 
 Then publish a directory or file:
 

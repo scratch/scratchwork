@@ -416,6 +416,17 @@ describe("readServerConfig", () => {
     }
   });
 
+  test("never accepts local Access signing keys on a non-loopback app URL", async () => {
+    await expect(Effect.runPromise(readServerConfig({
+      SCRATCHWORK_AUTH: "cloudflare-access",
+      SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN: "myteam",
+      SCRATCHWORK_CF_ACCESS_AUD: "aud-tag-1",
+      SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+      SCRATCHWORK_APP_URL: "https://app.example.com",
+      SCRATCHWORK_LOCAL_CF_ACCESS_JWKS: JSON.stringify({ keys: [{ kty: "RSA", kid: "local" }] }),
+    }))).rejects.toThrow("only when SCRATCHWORK_APP_URL uses a loopback host");
+  });
+
   test("fails without the Cloudflare Access settings, without demanding OAuth credentials", async () => {
     await expect(
       Effect.runPromise(readServerConfig({ SCRATCHWORK_AUTH: "cloudflare-access" })),

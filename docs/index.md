@@ -1,51 +1,65 @@
 ---
 # Page metadata
-title: "Scratchwork"                                            # Page title and og:title
-description: "Share coding agent artifacts"                     # Meta description and og:description
-keywords: ["MDX", "static site", "React", "Bun", "markdown"]    # Meta keywords
-author: "Scratchwork"                                           # Meta author
-lang: "en"                                                      # HTML lang attribute
+title: "Scratchwork" # Page title and og:title
+description: "Share your agent artifacts" # Meta description and og:description
+keywords: ["MDX", "static site", "React", "Bun", "markdown"] # Meta keywords
+author: "Scratchwork" # Meta author
+lang: "en" # HTML lang attribute
 ---
 
 <img src="/scratchwork-logo.svg" alt="Scratchwork" style="width:80%; display:block; margin:0 auto;" />
 
-Scratchwork is a local development tool for static HTML and Markdown artifacts created by your coding agent.
+Scratchwork is a tool for sharing static websites with your colleagues.
 
-Specifically, Scratchwork is:
+It's designed for sharing agent artifacts like HTML and markdown files, but it's also useful for writing, product specs, mocks, and demos.
 
-1. A CLI for serving static websites locally with hot reload
-2. A Markdown renderer that supports React components
-3. Shared routing/rendering logic for the future server
+Publish your work publicly to share it with the world, or privately to share it with friends and teammates.
 
 ## Quick start
 
-Install `scratchwork`, then start the local development server:
+Just ask your agent:
+
+```
+Create a simple "hello world" website and publish it to scratchwork.dev. Give everyone with an email @example.com permission to read it.
+```
+
+## Slow start
+
+Install the Scratchwork CLI with
 
 ```sh
 curl -fsSL https://scratchwork.dev/install.sh | bash
-
-scratchwork --version
-scratchwork dev [path]
 ```
 
-Publishing and hosted sharing are being rebuilt.
-
-## Local development
+Ask your agent to create an html or markdown file, or use a Scratchwork example project:
 
 ```sh
-# Serve the current directory
-scratchwork dev
-
-# Serve a Markdown file
-scratchwork dev page.md
-
-# Serve an HTML file
-scratchwork dev page.html
+scratchwork example
 ```
 
-## Working with Markdown
+Preview your work locally:
 
-Scratchwork renders Markdown with an embedded default renderer. Markdown files can reference React components from nearby component files, which is useful for interactive demos like this:
+```sh
+scratchwork dev
+```
+
+Publish it privately
+
+```sh
+scratchwork publish --server scratchwork.dev --visibility private
+```
+
+Give your all of your teammates read access:
+
+```sh
+scratchwork share @example.com --role read
+```
+
+## Working with Markdown and React
+
+HTML is great for reading, but it's a terrible medium for writing. Scratchwork renders Markdown with an embedded default renderer. It's not magic; you can see (and edit) it with `scratchwork template`.
+
+Your markdown files can reference React components defined in `./components/`, which is useful for interactive demos like this:
 
 <div style="display:flex; justify-content:center;">
   <Counter />
@@ -53,24 +67,33 @@ Scratchwork renders Markdown with an embedded default renderer. Markdown files c
 
 ...or building custom formatting components <Highlight>like this highlighter</Highlight>.
 
-To use this page as a starting point for your project, run:
+## Publishing on scratchwork.dev
+
+For now, you can publish projects (<5mb) on [scratchwork.dev](https://scratchwork.dev) for free. However, published projects are deleted after 48 hours.
+
+If you'd like to be able to pay for a hosted option, upvote [this Github issue](https://github.com/koomen/scratchwork) (TODO: create an issue)
+
+## Hosting your own server
+
+Scratchwork is open source and can be hosted anywhere. To configure your own server, use:
 
 ```sh
-# Write example Markdown and React content
-scratchwork example [path]
+# Configure for Cloudflare (a worker using R2 and D1)
+npm create scratchwork-server-cloudflare
 ```
 
-To copy the default Markdown renderer into your project, run:
+swap `cloudflare` for your favorite serverless platform: `aws`, `vercel`, `railway`, or `smolmachines`.
+
+Run your server locally with
 
 ```sh
-# Write the default renderer to index.html
-scratchwork template [file]
+node local.ts
 ```
 
-To customize Markdown rendering, add an `index.html` renderer file at or above the Markdown file and start it with Scratchwork's identifying comment:
+and deploy it with
 
-```html
-<!-- scratchwork:markdown-renderer - tells Scratchwork this index.html renders Markdown routes. -->
+```sh
+node deploy.ts
 ```
 
 <MadeWithScratchwork />

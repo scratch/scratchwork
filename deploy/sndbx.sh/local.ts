@@ -1,7 +1,6 @@
-import { runLocalServer } from "@scratchwork/server-deploy-local";
-import { server } from "./server-config";
+import { runLocalCloudflareServer } from "@scratchwork/server-deploy-cloudflare";
+import { config } from "./cloudflare-config";
 
-// Runs the sndbx.sh server settings locally: app on http://localhost:<port>, published
-// content on http://pages.localhost:<port> (mirroring the app./pages. domain split),
-// local file storage, in-memory database.
-runLocalServer({ server });
+// Runs the same Worker and binding names used in production, backed by Wrangler's
+// persistent local R2 and D1 implementations.
+await runLocalCloudflareServer(config, { envFile: ".env" });

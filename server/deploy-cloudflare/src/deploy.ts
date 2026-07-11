@@ -5,7 +5,7 @@
  * Promise-based script code, not Effect: it runs once on a developer's machine.
  */
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyEnv, definedEnv, loadDeployEnv, type DeployEnv } from "../../scripts/env";
 import { createRunner } from "../../scripts/proc";
@@ -64,6 +64,25 @@ export interface CloudflareDeployServerConfig {
   readonly deploy?: CloudflareDeployConfig;
 }
 
+/** One identity for the local Cloudflare Access edge simulator. */
+export interface CloudflareLocalAccessConfig {
+  /** Email asserted by the simulated Access application. */
+  readonly email?: string;
+}
+
+/** Options for running the Worker and its R2/D1 bindings entirely locally. */
+export interface CloudflareLocalOptions extends DeployServerOptions {
+  /** Local listen port. Defaults to 8787. */
+  readonly port?: number;
+  /** Local listen address. Defaults to 127.0.0.1. */
+  readonly ip?: string;
+  /** Wrangler state directory. Defaults to .scratchwork-cloudflare-data in the caller's directory. */
+  readonly persistTo?: string;
+  /** Enable an edge-style Access assertion. `true` uses developer@example.com; an
+   * object can select the email. SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL is another opt-in. */
+  readonly simulateAccess?: boolean | CloudflareLocalAccessConfig;
+}
+
 /** What deployServer reports back after a successful deploy. */
 export interface CloudflareDeployResult {
   readonly workerName: string;
@@ -96,6 +115,13 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
 const workerPath = join(dist, "worker.js");
 const configPath = join(dist, "wrangler.jsonc");
+const localWorkerPath = join(dist, "local-worker.js");
+const localConfigPath = join(dist, "wrangler.local.jsonc");
+const localDevVarsPath = join(dist, ".dev.vars");
+const LOCAL_D1_ID = "00000000-0000-0000-0000-000000000001";
+const LOCAL_ACCESS_TEAM = "scratchwork-local.cloudflareaccess.com";
+const LOCAL_ACCESS_AUDIENCE = "scratchwork-local";
+const LOCAL_SESSION_SECRET = "scratchwork-local-session-secret-not-for-production";
 
 /** Deploys the Scratchwork server as a Cloudflare Worker. */
 export async function deployServer(
@@ -148,6 +174,121 @@ export async function deployServer(
     configPath,
     workerPath,
   };
+}
+
+/** Runs the production Worker entry point under Wrangler's local workerd runtime, with
+ * persistent local R2 and D1 bindings. Cloudflare Access can optionally be simulated by
+ * a local-only wrapper that injects a correctly signed assertion before each request. */
+export async function runLocalCloudflareServer(
+  config: CloudflareDeployServerConfig = {},
+  options: CloudflareLocalOptions = {},
+): Promise<void> {
+  const callerDirectory = process.cwd();
+  const loadedEnv = await loadDeployEnv({
+    packageRoot: root,
+    argv: deployArgv(options),
+    processEnv: options.processEnv ?? process.env,
+    loadDefaultEnvFiles: options.loadPackageEnvFiles === true,
+    explicitEnvRoots: options.loadPackageEnvFiles === true ? undefined : [callerDirectory],
+  });
+  const serverConfig: Partial<ScratchworkServerConfig> = config.server ?? {};
+  const resolvedDeploy = resolveDeployConfig(config.deploy ?? {}, loadedEnv.env);
+  const port = localPort(options.port, loadedEnv.env.PORT ?? loadedEnv.env.SCRATCHWORK_PORT);
+  const appUrl = `http://localhost:${port}`;
+  const splitHosts = serverConfig.appDomain != null
+    && serverConfig.contentDomain != null
+    && serverConfig.appDomain !== serverConfig.contentDomain;
+  const localServer: ResolvedScratchworkServerConfig = {
+    appUrl,
+    contentUrl: splitHosts ? `http://pages.localhost:${port}` : appUrl,
+  };
+  const localServerEnv = serverConfigEnv(serverConfig, localServer);
+  if (serverConfig.homepageProject != null) {
+    localServerEnv.SCRATCHWORK_HOMEPAGE_DOMAINS = `http://home.localhost:${port}`;
+  }
+  const env: DeployEnv = {
+    ...loadedEnv.env,
+    ...localServerEnv,
+    ...deployConfigEnv(resolvedDeploy),
+  };
+
+  const access = localAccessSimulation(options.simulateAccess, env.SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL);
+  if (access != null) Object.assign(env, await localAccessEnv(access.email, env.SCRATCHWORK_SESSION_SECRET));
+
+  await mkdir(dist, { recursive: true });
+  validateDeploymentConfig(env);
+  const source = access == null ? "src/worker.ts" : "src/local-worker.ts";
+  const output = access == null ? workerPath : localWorkerPath;
+  await createRunner(definedEnv(env)).run(
+    "bun",
+    ["build", source, "--target=browser", "--format=esm", `--outfile=${output}`],
+    { cwd: root },
+  );
+
+  await writeLocalDevVars(env);
+  const localVars: Record<string, string> = {};
+  copyEnv(localVars, env, "SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL");
+  await writeConfig(
+    { ...resolvedDeploy, d1DatabaseId: LOCAL_D1_ID },
+    localServer,
+    env,
+    [],
+    {
+      outputPath: localConfigPath,
+      main: access == null ? "worker.js" : "local-worker.js",
+      extraVars: localVars,
+    },
+  );
+
+  const persistTo = resolve(callerDirectory, options.persistTo ?? ".scratchwork-cloudflare-data");
+  console.log([
+    "scratchwork local Cloudflare deploy",
+    `app      ${localServer.appUrl}`,
+    `content  ${localServer.contentUrl}`,
+    ...(serverConfig.homepageProject == null ? [] : [`home     http://home.localhost:${port} (project "${serverConfig.homepageProject}")`]),
+    `storage  R2 + D1 (${persistTo})`,
+    ...(access == null ? [] : [`access   ${access.email}`]),
+  ].join("\n"));
+
+  await createRunner(definedEnv(env)).run(
+    "wrangler",
+    [
+      "dev",
+      "--config",
+      localConfigPath,
+      "--local",
+      "--persist-to",
+      persistTo,
+      "--ip",
+      options.ip ?? "127.0.0.1",
+      "--port",
+      String(port),
+    ],
+    { cwd: root },
+  );
+}
+
+/** Writes local secrets in Wrangler's dev-only secret file instead of ordinary vars.
+ * Wrangler prints vars in its startup binding table; .dev.vars values stay hidden. */
+async function writeLocalDevVars(env: DeployEnv): Promise<void> {
+  const lines: Array<string> = [];
+  for (const key of [
+    "SCRATCHWORK_GOOGLE_CLIENT_SECRET",
+    "SCRATCHWORK_SESSION_SECRET",
+    "SCRATCHWORK_LOCAL_CF_ACCESS_PRIVATE_JWK",
+    "SCRATCHWORK_LOCAL_CF_ACCESS_JWKS",
+  ]) {
+    const value = env[key];
+    if (value == null || value === "") continue;
+    // The generated JWK documents contain many double quotes. Wrangler's dotenv
+    // parser preserves backslashes inside a JSON-stringified value, so use a
+    // single-quoted dotenv value for these machine-generated JSON documents.
+    const encoded = key.endsWith("_JWK") || key.endsWith("_JWKS")
+      ? `'${value}'`
+      : JSON.stringify(value);
+    lines.push(`${key}=${encoded}`);
+  }
+  await writeFile(localDevVarsPath, `${lines.join("\n")}\n`);
 }
 
 /** Applies env-var and default fallbacks to the Cloudflare deploy settings. */
@@ -215,6 +356,11 @@ async function writeConfig(
   server: ResolvedScratchworkServerConfig,
   env: DeployEnv,
   routes: ReadonlyArray<Record<string, string | boolean>>,
+  options: {
+    readonly outputPath?: string;
+    readonly main?: string;
+    readonly extraVars?: Readonly<Record<string, string>>;
+  } = {},
 ): Promise<void> {
   const vars: Record<string, string> = {};
   copyEnv(vars, env, "SCRATCHWORK_AUTH");
@@ -233,12 +379,13 @@ async function writeConfig(
   copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_PROJECT");
   if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;
   if (server.contentUrl != null && server.contentUrl !== "") vars.SCRATCHWORK_CONTENT_URL = server.contentUrl;
+  Object.assign(vars, options.extraVars);
   await writeFile(
-    configPath,
+    options.outputPath ?? configPath,
     JSON.stringify(
       {
         name: config.workerName,
-        main: "worker.js",
+        main: options.main ?? "worker.js",
         compatibility_date: config.compatibilityDate,
         r2_buckets: [
           {
@@ -260,6 +407,60 @@ async function writeConfig(
       2,
     ),
   );
+}
+
+/** Resolves and validates the local listen port. */
+function localPort(configured: number | undefined, fromEnv: string | undefined): number {
+  const value = configured ?? (fromEnv == null || fromEnv === "" ? 8787 : Number(fromEnv));
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+    throw new Error(`Invalid local Cloudflare port "${configured ?? fromEnv}": expected an integer between 1 and 65535`);
+  }
+  return value;
+}
+
+/** Decides whether Access simulation was requested through code or the environment. */
+function localAccessSimulation(
+  configured: boolean | CloudflareLocalAccessConfig | undefined,
+  envEmail: string | undefined,
+): { readonly email: string } | null {
+  if (configured === false) return null;
+  const requested = configured === true || typeof configured === "object" || (envEmail != null && envEmail !== "");
+  if (!requested) return null;
+  const email = (typeof configured === "object" ? configured.email : undefined) ?? envEmail ?? "developer@example.com";
+  const normalized = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    throw new Error(`Invalid local Cloudflare Access email "${email}"`);
+  }
+  return { email: normalized };
+}
+
+/** Generates the throwaway key material and config values used only by the local Access
+ * wrapper. The private key is written to dist/wrangler.local.jsonc, which is ignored. */
+async function localAccessEnv(email: string, sessionSecret: string | undefined): Promise<DeployEnv> {
+  const pair = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  ) as CryptoKeyPair;
+  const [privateJwk, publicJwk] = await Promise.all([
+    crypto.subtle.exportKey("jwk", pair.privateKey),
+    crypto.subtle.exportKey("jwk", pair.publicKey),
+  ]);
+  const keyMetadata = { kid: "scratchwork-local-access", alg: "RS256", use: "sig" } as const;
+  return {
+    SCRATCHWORK_AUTH: "cloudflare-access",
+    SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN: LOCAL_ACCESS_TEAM,
+    SCRATCHWORK_CF_ACCESS_AUD: LOCAL_ACCESS_AUDIENCE,
+    SCRATCHWORK_SESSION_SECRET: sessionSecret ?? LOCAL_SESSION_SECRET,
+    SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL: email,
+    SCRATCHWORK_LOCAL_CF_ACCESS_PRIVATE_JWK: JSON.stringify({ ...privateJwk, ...keyMetadata }),
+    SCRATCHWORK_LOCAL_CF_ACCESS_JWKS: JSON.stringify({ keys: [{ ...publicJwk, ...keyMetadata }] }),
+  };
 }
 
 /** Builds optional custom-domain and route entries for Wrangler. */

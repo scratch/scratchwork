@@ -17,7 +17,30 @@ These packages are libraries. Actual deployments live as projects under `deploy/
 bun run local:local-dev
 ```
 
-By default the server listens on `43118` and stores published bundles under `.scratchwork-local-data/`. Every deploy project can also run its own server config locally via `deploy-local`'s `runLocalServer` (for example `bun run local:sndbx.sh`) — see `server/deploy-local/README.md`.
+By default the generic local server listens on `43118` and stores published bundles under `.scratchwork-local-data/`. Deploy projects can choose the local adapter matching their platform: `bun run local:sndbx.sh` now runs its production Worker configuration with Wrangler-backed R2 and D1, while the generic AWS project uses `deploy-local`'s `runLocalServer` — see the deploy project's README.
+
+To exercise the actual Cloudflare Worker adapter with locally simulated R2 and D1
+bindings instead, run:
+
+```sh
+bun run local:cloudflare
+```
+
+Wrangler persists those resources under `.scratchwork-cloudflare-data/`. To simulate
+an already-authenticated Cloudflare Access edge as well, set a local identity:
+
+```sh
+SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL=developer@example.com bun run local:cloudflare
+```
+
+See `server/deploy-cloudflare/README.md` for the deploy-project API and the exact
+Access behavior that is simulated.
+
+For a ready-made local-only Access deployment, run:
+
+```sh
+bun run local:cf-access
+```
 
 ## Google OAuth
 
@@ -148,7 +171,7 @@ Deploy to Cloudflare Workers + R2 via a deploy project, such as `deploy/sndbx.sh
 bun run deploy:sndbx.sh
 ```
 
-The deploy command uses the `wrangler` CLI credentials in your environment. It creates the R2 bucket if needed, writes a generated Wrangler config under `server/deploy-cloudflare/dist/`, and deploys the Worker.
+The deploy command uses the `wrangler` CLI credentials in your environment. It creates the R2 bucket if needed, writes a generated Wrangler config under `server/deploy-cloudflare/dist/`, and deploys the Worker. The package pins Wrangler as a development dependency, so neither deployment nor local development requires a separate global install.
 
 Optional environment variables:
 

@@ -47,6 +47,42 @@ const keyCache = new Map<string, CachedKey>();
  * only; the caller validates the claims. Throws plain Errors on any failure.
  */
 export async function verifyRs256Jwt(token: string, jwksUrl: string): Promise<Record<string, unknown>> {
+  const decoded = decodeRs256Jwt(token);
+  const key = await getJwksKey(decoded.header.kid, jwksUrl);
+  await verifySignature(decoded, key);
+  return decoded.payload;
+}
+
+/** Verifies a compact RS256 JWT against an already-loaded JWKS document. This is used
+ * by local platform simulators, where fetching a provider-owned JWKS endpoint would
+ * defeat an otherwise fully offline development environment. */
+export async function verifyRs256JwtWithJwks(
+  token: string,
+  keys: ReadonlyArray<JsonWebKey & { readonly kid?: string }>,
+): Promise<Record<string, unknown>> {
+  const decoded = decodeRs256Jwt(token);
+  const jwk = keys.find((candidate) => candidate.kid === decoded.header.kid && candidate.kty === "RSA");
+  if (jwk == null) throw new Error("Unknown signing key");
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  await verifySignature(decoded, key);
+  return decoded.payload;
+}
+
+interface DecodedRs256Jwt {
+  readonly header: JwtHeader;
+  readonly payload: Record<string, unknown>;
+  readonly signed: Uint8Array;
+  readonly signature: Uint8Array;
+}
+
+/** Parses and validates the provider-neutral parts of one RS256 token. */
+function decodeRs256Jwt(token: string): DecodedRs256Jwt {
   const parts = token.split(".");
   if (parts.length !== 3) throw new Error("Token must have 3 parts");
   const [encodedHeader, encodedPayload, encodedSignature] = parts;
@@ -58,16 +94,23 @@ export async function verifyRs256Jwt(token: string, jwksUrl: string): Promise<Re
   const payload = decodeJwtJson<Record<string, unknown>>(encodedPayload);
   const signature = base64UrlToBytes(encodedSignature);
   if (signature == null) throw new Error("Invalid token signature encoding");
+  return {
+    header,
+    payload,
+    signed: new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+    signature,
+  };
+}
 
-  const key = await getJwksKey(header.kid, jwksUrl);
+/** Checks one decoded token signature with an imported RSA verification key. */
+async function verifySignature(decoded: DecodedRs256Jwt, key: CryptoKey): Promise<void> {
   const ok = await crypto.subtle.verify(
     "RSASSA-PKCS1-v1_5",
     key,
-    toArrayBuffer(signature),
-    toArrayBuffer(new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`)),
+    toArrayBuffer(decoded.signature),
+    toArrayBuffer(decoded.signed),
   );
   if (!ok) throw new Error("Invalid token signature");
-  return payload;
 }
 
 /** Decodes one base64url JWT part as JSON. */

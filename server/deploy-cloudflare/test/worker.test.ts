@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { makeKeyPair } from "../../core/test/jwt-helpers";
+import localWorker from "../src/local-worker";
 import worker, { envVarsFromCloudflare } from "../src/worker";
 
 /** Minimal R2/D1 binding stubs; requests that die in config never reach them. */
@@ -65,6 +67,38 @@ describe("worker fetch", () => {
       waitUntil: () => {},
       passThroughOnException: () => {},
     });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+});
+
+describe("local Cloudflare Access worker", () => {
+  test("injects a signed Access assertion that the production auth path verifies", async () => {
+    const keyPair = await makeKeyPair();
+    const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+    const keyMetadata = { kid: "scratchwork-local-access", alg: "RS256", use: "sig" } as const;
+    const env = {
+      ...bindings,
+      SCRATCHWORK_AUTH: "cloudflare-access",
+      SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN: "scratchwork-local.cloudflareaccess.com",
+      SCRATCHWORK_CF_ACCESS_AUD: "scratchwork-local",
+      SCRATCHWORK_APP_URL: "http://localhost:8787",
+      SCRATCHWORK_SESSION_SECRET: "test-session-secret-test-session-secret",
+      SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL: "Developer@Example.com",
+      SCRATCHWORK_LOCAL_CF_ACCESS_PRIVATE_JWK: JSON.stringify({ ...privateJwk, ...keyMetadata }),
+      SCRATCHWORK_LOCAL_CF_ACCESS_JWKS: JSON.stringify({
+        keys: [{ ...keyPair.publicJwk, ...keyMetadata }],
+      }),
+    };
+
+    const response = await localWorker.fetch(
+      new Request("http://localhost:8787/health", {
+        headers: { "cf-access-jwt-assertion": "client-cannot-forge-this" },
+      }),
+      env,
+      { waitUntil: () => {}, passThroughOnException: () => {} },
+    );
+
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
   });
