@@ -1,5 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import { serverConfigEnv, validateDeploymentConfig, type ScratchworkServerConfig } from "./server-settings";
+import { serverConfigEnv, serverConfigEnvNames, validateDeploymentConfig, type ScratchworkServerConfig } from "./server-settings";
+
+describe("serverConfigEnvNames", () => {
+  test("pins the exact non-secret variable set forwarded to cloud deploys", () => {
+    // Cloud deploys pass every name in this list as a plaintext platform variable, so
+    // this list must never grow a secret (SCRATCHWORK_GOOGLE_CLIENT_SECRET,
+    // SCRATCHWORK_SESSION_SECRET). Update it deliberately when a setting is added.
+    expect([...serverConfigEnvNames].sort()).toEqual([
+      "SCRATCHWORK_ALLOWED_SHARE_DOMAINS",
+      "SCRATCHWORK_ALLOWED_USERS",
+      "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS",
+      "SCRATCHWORK_AUTH",
+      "SCRATCHWORK_AUTH_ALLOWED_DOMAINS",
+      "SCRATCHWORK_AUTH_ALLOWED_EMAILS",
+      "SCRATCHWORK_AUTH_SESSION_SECONDS",
+      "SCRATCHWORK_CF_ACCESS_AUD",
+      "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN",
+      "SCRATCHWORK_GOOGLE_CLIENT_ID",
+      "SCRATCHWORK_HOMEPAGE_DOMAINS",
+      "SCRATCHWORK_HOMEPAGE_PROJECT",
+      "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES",
+    ]);
+  });
+});
 
 describe("serverConfigEnv", () => {
   test("maps usersCanSetProjectNames onto its environment variable", () => {
@@ -18,9 +41,8 @@ describe("serverConfigEnv", () => {
     const config: ScratchworkServerConfig = {
       auth: "oauth",
       allowedUsers: "public",
-      maxVisibility: "public",
+      allowPublicProjects: true,
       usersCanSetProjectNames: true,
-      defaultVisibility: "private",
     };
     const env = serverConfigEnv(config, { appUrl: "https://app.example", contentUrl: "https://pages.example" });
 
@@ -60,17 +82,22 @@ describe("validateDeploymentConfig", () => {
   };
 
   test("accepts a config the server can parse", () => {
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "@gmail.com,@koomen.org" })).not.toThrow();
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOWED_USERS: "@gmail.com,@koomen.org" })).not.toThrow();
   });
 
   test("rejects values the deployed server would crash on at runtime", () => {
     // Domains without the leading "@" are not valid group terms.
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_MAX_VISIBILITY: "gmail.com,koomen.org" }))
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOWED_USERS: "gmail.com,koomen.org" }))
       .toThrow("Invalid access group");
-    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_DEFAULT_VISIBILITY: "@example.com" }))
-      .toThrow('expected "public" or "private"');
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_ALLOW_PUBLIC_PROJECTS: "@example.com" }))
+      .toThrow('expected "true" or "false"');
     expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_APP_URL: "not a url" }))
       .toThrow('expected a URL, like "https://example.com"');
+  });
+
+  test("rejects retired variable names", () => {
+    expect(() => validateDeploymentConfig({ ...baseEnv, SCRATCHWORK_SHARE_ALLOWED_DOMAINS: "example.com" }))
+      .toThrow("SCRATCHWORK_ALLOWED_SHARE_DOMAINS");
   });
 
   test("still enforces the OAuth requirements", () => {

@@ -77,10 +77,10 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
       "If the server returns 401, the CLI starts scratchwork login and retries.",
     ],
     examples: [
-      "scratchwork publish . --server sndbx.sh --visibility public",
+      "scratchwork publish . --server sndbx.sh --public",
       "scratchwork publish notes.md --server sndbx.sh",
       "scratchwork publish docs --server https://app.sndbx.sh --project hello-world",
-      "scratchwork publish --visibility private",
+      "scratchwork publish --private",
     ],
   },
   login: {
@@ -115,9 +115,9 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
   },
   share: {
     notes: [
-      "Roles: read (view), write (read + publish updates), admin (write + manage sharing, visibility, and unpublish). The project creator is the owner (admin + delete); ownership cannot be granted.",
+      "Roles: read (view), write (read + publish updates), admin (write + manage sharing, the public/private toggle, and unpublish). The project creator is the owner (admin + delete); ownership cannot be granted.",
       "Sharing sets the targets' role — a target holding another role is moved, and other grants are kept.",
-      "Requires admin access. Grants are independent of the public/private visibility toggle and work on public projects too.",
+      "Requires admin access. Grants are independent of the public/private toggle and work on public projects too.",
     ],
     examples: [
       "scratchwork share alice@example.com",
@@ -128,7 +128,7 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
   revoke: {
     notes: [
       "Strips every role (read, write, admin) the exact email/@domain targets hold.",
-      "Warns when a revoked address still has access through a remaining domain grant, public visibility, or ownership.",
+      "Warns when a revoked address still has access through a remaining domain grant, the project being public, or ownership.",
     ],
     examples: [
       "scratchwork revoke alice@example.com",
@@ -136,7 +136,7 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
     ],
   },
   unpublish: {
-    notes: ["This does not delete files or project metadata; it resets the project to owner-only, setting visibility to private and clearing every share grant."],
+    notes: ["This does not delete files or project metadata; it resets the project to owner-only, making it private and clearing every share grant."],
     examples: [
       "scratchwork unpublish https://pages.sndbx.sh/hello-world/",
       "scratchwork unpublish --server sndbx.sh --project hello-world",
@@ -287,7 +287,7 @@ function renderRootHelp(version: string, commands: ReadonlyArray<CommandInfo>): 
     "Examples:",
     formatExamples([
       "scratchwork dev",
-      "scratchwork publish . --server sndbx.sh --visibility public",
+      "scratchwork publish . --server sndbx.sh --public",
       "scratchwork projects --server sndbx.sh",
       "scratchwork help publish",
     ]),

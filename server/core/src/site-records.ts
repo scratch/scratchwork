@@ -32,15 +32,12 @@ const SiteFileObjectSchema = Schema.Struct({
   contentType: Schema.String,
 });
 
-/** Validates a stored project pointer. `visibility` is the public/private toggle; the
- * three access groups (`readers`, `writers`, `admins`) grade per-account roles — each
- * level implies the ones below, and the owner holds every role. The grant groups default
- * to "private" so records written before roles existed decode unchanged; records that
- * still carry read grants inside `visibility` are migrated at load (see site-store). */
-const SiteRecordSchema = Schema.Struct({
-  version: Schema.Literal(4),
+/** The pointer fields of a stored project record. The three access groups
+ * (`readers`, `writers`, `admins`) grade per-account roles — each level implies the ones
+ * below, and the owner holds every role. The grant groups default to "private" when
+ * absent. */
+const siteRecordCommonFields = {
   project: Schema.String.pipe(Schema.filter((value) => isSafeProjectIdentifier(value) || "Invalid project")),
-  visibility: Schema.String,
   readers: Schema.optionalWith(Schema.String, { default: () => "private" }),
   writers: Schema.optionalWith(Schema.String, { default: () => "private" }),
   admins: Schema.optionalWith(Schema.String, { default: () => "private" }),
@@ -51,6 +48,13 @@ const SiteRecordSchema = Schema.Struct({
   currentOpenPath: Schema.String,
   fileCount: Schema.Number.pipe(Schema.filter((count) => Number.isInteger(count) && count >= 0 || "Invalid file count")),
   totalBytes: Schema.Number.pipe(Schema.filter((bytes) => Number.isInteger(bytes) && bytes >= 0 || "Invalid total bytes")),
+} as const;
+
+/** Validates a stored project pointer. `isPublic` is the public/private toggle. */
+const SiteRecordSchema = Schema.Struct({
+  version: Schema.Literal(5),
+  isPublic: Schema.Boolean,
+  ...siteRecordCommonFields,
 });
 
 /** Validates a stored owner-index entry. */
@@ -81,7 +85,7 @@ export {
 export type SiteOwner = typeof SiteOwnerSchema.Type;
 /** One published file: its site path and content-addressed blob location. */
 export type SiteFileObject = typeof SiteFileObjectSchema.Type;
-/** The mutable project pointer: current revision, visibility, and owner metadata. */
+/** The mutable project pointer: current revision, public toggle, and owner metadata. */
 export type SiteRecord = typeof SiteRecordSchema.Type;
 /** Owner-index entry naming one project the owner has published. */
 export type OwnerProjectRecord = typeof OwnerProjectRecordSchema.Type;

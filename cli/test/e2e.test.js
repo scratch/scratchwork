@@ -353,6 +353,55 @@ describe("path argument → open URL → served content", () => {
     );
   });
 
+  test("(2) a directory without an index opens the first page file's route", async () => {
+    await withServer(
+      { "zebra.md": "# zebra\n", "notes.html": staticPage("notes") },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/notes"); // alphabetically first page file at the root
+        expect((await get(openPath)).body).toContain("static@notes");
+      },
+    );
+  });
+
+  test("(2) a directory whose only pages are nested opens the shallowest one", async () => {
+    await withServer(
+      { "docs/guide.md": "# guide\n", "styles.css": "body {}" },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/docs/guide");
+        expect((await get("/docs/guide.md")).body).toBe("# guide\n");
+      },
+    );
+  });
+
+  test("(2) a nested index file opens its directory route", async () => {
+    await withServer(
+      { "docs/index.html": staticPage("docs") },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/docs/");
+        expect((await get(openPath)).body).toContain("static@docs");
+      },
+    );
+  });
+
+  test("(2) a marked renderer shell without index.md is not treated as the index", async () => {
+    await withServer(
+      { "index.html": fakeShell("root"), "notes.md": "# notes\n" },
+      async ({ openPath, get }) => {
+        expect(openPath).toBe("/notes"); // "/" would 404: the shell only renders .md routes
+        expect((await get(openPath)).body).toContain("shell@root");
+      },
+    );
+  });
+
+  test("(2) a directory with no page files still opens /", async () => {
+    await withServer(
+      { "styles.css": "body {}" },
+      async ({ openPath }) => {
+        expect(openPath).toBe("/");
+      },
+    );
+  });
+
   test("(1) `scratchwork dev dir/index.html` opens /", async () => {
     await withServer(
       { "index.html": staticPage("root") },
@@ -660,7 +709,7 @@ describe("scratchwork publish", () => {
         publishBody = await request.json();
         return Response.json({
           project: publishBody.project,
-          visibility: publishBody.visibility,
+          isPublic: publishBody.isPublic ?? true,
           openPath: publishBody.openPath,
           url: `${serverUrl}/${publishBody.project}/`,
         });
@@ -693,7 +742,7 @@ describe("scratchwork publish", () => {
           {
             server: serverUrl,
             project: "site",
-            visibility: "public",
+            isPublic: true,
             url: `${serverUrl}/site/`,
             updatedAt: "2026-06-29T00:00:00.000Z",
           },
@@ -712,8 +761,47 @@ describe("scratchwork publish", () => {
       expect(authorization).toBe(`Bearer ${authToken}`);
       expect("workspace" in publishBody).toBe(false);
       expect(publishBody.project).toBe("site");
-      expect(publishBody.visibility).toBe("public");
+      expect(publishBody.isPublic).toBe(true);
       expect(publishBody.bundle.files.map((file) => file.path)).toEqual(["index.html"]);
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("publishing a directory without an index sends the first page file's route as openPath", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-publish-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-config-"));
+    const port = nextPort++;
+    const serverUrl = `http://localhost:${port}`;
+    let publishBody;
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        publishBody = await request.json();
+        return Response.json({
+          project: publishBody.project,
+          isPublic: true,
+          openPath: publishBody.openPath,
+          url: `${serverUrl}/${publishBody.project}${publishBody.openPath}`,
+        });
+      },
+    });
+
+    try {
+      writeFileSync(join(dir, "notes.md"), "# notes\n");
+      writeFileSync(join(dir, "styles.css"), "body {}");
+
+      const { code, stdout, stderr } = await runCli(["publish", ".", "--server", serverUrl], dir, {
+        env: { SCRATCHWORK_HOME: configDir },
+      });
+
+      expect(code).toBe(0);
+      expect(stderr).toBe("");
+      expect(publishBody.openPath).toBe("/notes");
+      expect(stdout).toContain("/notes"); // the printed (and opened) URL points at a real page
     } finally {
       server.stop(true);
       rmSync(dir, { recursive: true, force: true });
@@ -731,9 +819,14 @@ describe("scratchwork project commands", () => {
     const shareBodies = [];
     const project = {
       project: "site",
-      visibility: "public",
+      isPublic: true,
       url: `${serverUrl}/site/`,
+      owner: { id: "owner-1", email: "owner@example.com" },
+      createdAt: "2026-06-28T00:00:00.000Z",
       updatedAt: "2026-06-29T00:00:00.000Z",
+      currentOpenPath: "/",
+      fileCount: 1,
+      totalBytes: 5,
     };
 
     const server = Bun.serve({
@@ -747,7 +840,7 @@ describe("scratchwork project commands", () => {
         }
         if (url.pathname === "/api/projects/site" && request.method === "GET") return Response.json({ project });
         if (url.pathname === "/api/projects/site/unpublish" && request.method === "POST") {
-          return Response.json({ project: { ...project, visibility: "private" } });
+          return Response.json({ project: { ...project, isPublic: false } });
         }
         if (url.pathname === "/api/projects/site/share" && request.method === "POST") {
           const body = await request.json();
@@ -774,7 +867,7 @@ describe("scratchwork project commands", () => {
     try {
       expect((await runCli(["projects", "--server", serverUrl], dir)).stdout).toContain(`site\tpublic\t${serverUrl}/site/`);
       expect((await runCli(["info", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"project": "site"');
-      expect((await runCli(["unpublish", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["unpublish", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain('"isPublic": false');
       expect((await runCli(["share", "alice@example.com", "@example.com", "--server", serverUrl, "--project", "site"], dir)).stdout)
         .toContain('"alice@example.com"');
       expect((await runCli(["share", "--role", "write", "bob@example.com", "--server", serverUrl, "--project", "site"], dir)).code)
@@ -795,7 +888,7 @@ describe("scratchwork project commands", () => {
       expect(noTargets.stderr).toContain("pass at least one email address or @domain group");
       expect((await runCli(["delete", "--server", serverUrl, "--project", "site"], dir)).stdout).toContain("Deleted site");
       expect((await runCli(["info", `${serverUrl}/site/`], dir)).stdout).toContain('"project": "site"');
-      expect((await runCli(["unpublish", `${serverUrl}/site/`], dir)).stdout).toContain('"visibility": "private"');
+      expect((await runCli(["unpublish", `${serverUrl}/site/`], dir)).stdout).toContain('"isPublic": false');
       expect((await runCli(["delete", `${serverUrl}/site/`], dir)).stdout).toContain("Deleted site");
       expect((await runCli(["clone", `${serverUrl}/site/`], dir)).stdout).toContain("Cloned site");
       expect(readFileSync(join(dir, "site", "index.html"), "utf8")).toBe("<h1>cloned</h1>");
@@ -879,7 +972,18 @@ describe("scratchwork project commands", () => {
       async fetch(request) {
         const url = new URL(request.url);
         if (url.pathname === "/api/resolve") {
-          return Response.json({ project: { project: "site" } });
+          return Response.json({
+            project: {
+              project: "site",
+              isPublic: true,
+              owner: { id: "owner-1", email: "owner@example.com" },
+              createdAt: "2026-06-28T00:00:00.000Z",
+              updatedAt: "2026-06-29T00:00:00.000Z",
+              currentOpenPath: "/",
+              fileCount: 2,
+              totalBytes: 30,
+            },
+          });
         }
         if (url.pathname === "/api/projects/site/bundle") {
           return Response.json({
@@ -935,7 +1039,7 @@ describe("scratchwork stream", () => {
         publishes.push(await request.json());
         return Response.json({
           project: "site",
-          visibility: "public",
+          isPublic: true,
           openPath: "/",
           url: `${serverUrl}/site/`,
         });
@@ -998,7 +1102,7 @@ describe("publish and auth safety", () => {
         publishBody = await request.json();
         return Response.json({
           project: publishBody.project,
-          visibility: "public",
+          isPublic: true,
           openPath: "/",
           url: `${serverUrl}/${publishBody.project}/`,
         });
@@ -1074,7 +1178,7 @@ describe("project naming", () => {
         const project = assignedName ?? body.project;
         return Response.json({
           project,
-          visibility: "public",
+          isPublic: true,
           openPath: body.openPath ?? "/",
           url: `${serverUrl}/${project}/`,
         });

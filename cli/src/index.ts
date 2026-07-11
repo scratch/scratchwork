@@ -80,9 +80,17 @@ const publishCommand = Command.make(
     path: pathArg("path", ".", "File or directory to publish. Default: current directory. Directories are uploaded recursively, excluding .git, node_modules, and .scratchwork-data."),
     server: textOption("server", "url", "Scratchwork app server, such as sndbx.sh or https://app.sndbx.sh. Required on first publish; later publishes read it from .scratchwork.json."),
     project: textOption("project", "name", "Project name for the published URL. Default: saved config, the directory name, or the file name without its extension. Servers in random-naming mode assign a name on first publish."),
-    visibility: textOption("visibility", "scope", "Visibility toggle: private or public. Default: saved config, the project's current visibility, or the server default. Grant per-account or per-domain access with scratchwork share."),
+    isPublicFlag: Options.boolean("public").pipe(
+      Options.withDescription("Make the project readable by everyone. Default: saved config, the project's current setting, or private for a new project. Grant per-account or per-domain access with scratchwork share."),
+    ),
+    isPrivateFlag: Options.boolean("private").pipe(
+      Options.withDescription("Make the project readable only by its owner and share grants."),
+    ),
   },
-  runPublish,
+  ({ path, server, project, isPublicFlag, isPrivateFlag }) =>
+    isPublicFlag && isPrivateFlag
+      ? Effect.fail(new CliError({ code: 1, message: "scratchwork publish: pass at most one of --public and --private" }))
+      : runPublish({ path, server, project, isPublic: isPublicFlag ? true : isPrivateFlag ? false : undefined }),
 ).pipe(Command.withDescription("Publish a static Scratchwork project to a server"));
 
 const projectRefOptions = {
@@ -141,7 +149,7 @@ const shareCommand = Command.make(
     ...shareOptions("grant access"),
     role: Options.choice("role", ["read", "write", "admin"]).pipe(
       Options.withDefault("read" as const),
-      Options.withDescription("Permission level to assign: read (view the project), write (read + publish updates), or admin (write + manage sharing, visibility, and unpublish). Default: read. Sharing again with a different role moves the target; ownership stays with the project creator."),
+      Options.withDescription("Permission level to assign: read (view the project), write (read + publish updates), or admin (write + manage sharing, the public/private toggle, and unpublish). Default: read. Sharing again with a different role moves the target; ownership stays with the project creator."),
     ),
   },
   runShare,

@@ -40,10 +40,9 @@ export async function appHandler(options: {
     port: 3001,
     appUrl: "https://scratch.test",
     contentUrl: "https://scratch.test",
-    maxVisibility: "public",
-    shareAllowedDomains: new Set(),
+    allowPublicProjects: true,
+    allowedShareDomains: new Set(),
     usersCanSetProjectNames: true,
-    defaultVisibility: "public",
     auth: {
       mode: "oauth",
       clientId: "test-client-id",

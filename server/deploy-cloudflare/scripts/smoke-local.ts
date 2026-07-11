@@ -30,7 +30,7 @@ const publish = await fetch(`${origin}/api/publish`, {
     },
     openPath: "/",
     project,
-    visibility: "public",
+    isPublic: true,
   }),
 });
 const published = await publish.json() as { readonly project?: string; readonly error?: string };

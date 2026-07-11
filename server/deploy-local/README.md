@@ -24,7 +24,6 @@ Useful environment variables:
 PORT=43118
 SCRATCHWORK_STORAGE_DIR=/tmp/scratchwork-local-storage
 SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES=true  # false: server assigns random names
-SCRATCHWORK_DEFAULT_VISIBILITY=public
 SCRATCHWORK_APP_URL=http://localhost:43118
 SCRATCHWORK_CONTENT_URL=http://localhost:43118
 ```
@@ -34,7 +33,7 @@ SCRATCHWORK_CONTENT_URL=http://localhost:43118
 The package exports `runLocalServer`, which accepts the `server` section of a
 Cloudflare/AWS deploy config and runs it locally (environment variables still
 win over config values). Deploy projects use it to share one config module
-between their cloud deploy and a local run — see `deploy/sndbx.sh/local.ts`:
+between their cloud deploy and a local run — see `deploy/cloudflare-vanilla/local.ts`:
 
 ```ts
 import { runLocalServer } from "@scratchwork/server-deploy-local";

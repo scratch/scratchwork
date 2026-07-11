@@ -22,7 +22,7 @@ describe("server app", () => {
       }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
 
     expect(publish.status).toBe(200);
@@ -61,7 +61,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "old", "old.css": "old" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(first.status).toBe(200);
 
@@ -69,7 +69,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "new" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(second.status).toBe(200);
 
@@ -85,7 +85,7 @@ describe("server app", () => {
       bundle: bundle({ "index.md": "# Hello", "evil.svg": "<svg><script>alert(1)</script></svg>" }),
       openPath: "/",
       project: "docs",
-      visibility: "public",
+      isPublic: true,
     }))) as { project: string };
 
     const html = await handler(new Request(`https://scratch.test/${published.project}/`));
@@ -102,13 +102,32 @@ describe("server app", () => {
     expect(svg.headers.get("content-security-policy")).toBeNull();
   });
 
-  test("republishing without visibility preserves the project's visibility", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { defaultVisibility: "private" } });
+  test("publishing a new project without isPublic creates it private", async () => {
+    const db = MemoryPrimitiveDbLive();
+    const storage = new Map<string, MemoryStoredObject>();
+    const handler = await appHandler({ db, storage, auth: testAuth(user) });
+    const response = await handler(post("/api/publish", {
+      bundle: bundle({ "index.html": "hello" }),
+      openPath: "/",
+      project: "site",
+    }));
+    expect(response.status).toBe(200);
+    expect(((await json(response)) as { isPublic: boolean }).isPublic).toBe(false);
+
+    // Anonymous viewers are sent to login instead of the private site.
+    const anonymous = await appHandler({ db, storage, auth: testAuth(null) });
+    const page = await anonymous(new Request("https://scratch.test/site/", { redirect: "manual" }));
+    expect(page.status).toBe(302);
+    expect(page.headers.get("location")).toContain("/auth/");
+  });
+
+  test("republishing without isPublic preserves the project's setting", async () => {
+    const handler = await appHandler({ auth: testAuth(user) });
     const first = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "v1" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(first.status).toBe(200);
 
@@ -118,7 +137,7 @@ describe("server app", () => {
       project: "site",
     }));
     expect(second.status).toBe(200);
-    expect(((await json(second)) as { visibility: string }).visibility).toBe("public");
+    expect(((await json(second)) as { isPublic: boolean }).isPublic).toBe(true);
 
     const html = await handler(new Request("https://scratch.test/site/"));
     expect(html.status).toBe(200);
@@ -132,7 +151,7 @@ describe("server app", () => {
         bundle: bundle({ "index.html": "hello" }),
         openPath: "/",
         project,
-        visibility: "public",
+        isPublic: true,
       }));
       expect(response.status).toBe(400);
       expect(await response.text()).toContain(`Project name is reserved: ${project}`);
@@ -144,7 +163,7 @@ describe("server app", () => {
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("project name is required (pass --project)");
@@ -156,7 +175,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "Docs",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("Invalid project");
@@ -169,7 +188,7 @@ describe("server app", () => {
       openPath: "/",
       workspace: "demo",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("workspace");
@@ -189,7 +208,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "mine" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(first.status).toBe(200);
 
@@ -197,7 +216,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "theirs" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(taken.status).toBe(409);
     expect((await json(taken) as { error: string }).error).toBe(TAKEN("site"));
@@ -207,7 +226,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "mine v2" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(republish.status).toBe(200);
   });
@@ -218,17 +237,17 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
     expect(publish.status).toBe(200);
 
     const share = await handler(post("/api/projects/site/share", { add: ["Alice@Example.com", "@team.example.com"] }));
     expect(share.status).toBe(200);
     const shared = await json(share) as {
-      project: { visibility: string; permissions: { read: string[]; write: string[]; admin: string[] } };
+      project: { isPublic: boolean; permissions: { read: string[]; write: string[]; admin: string[] } };
       warnings: string[];
     };
-    expect(shared.project.visibility).toBe("private");
+    expect(shared.project.isPublic).toBe(false);
     expect(shared.project.permissions).toEqual({ read: ["alice@example.com", "@team.example.com"], write: [], admin: [] });
     expect(shared.warnings).toEqual([]);
 
@@ -242,8 +261,8 @@ describe("server app", () => {
       .toEqual(["@team.example.com"]);
 
     const last = await handler(post("/api/projects/site/share", { remove: ["@team.example.com"] }));
-    const cleared = await json(last) as { project: { visibility: string; permissions: { read: string[] } } };
-    expect(cleared.project.visibility).toBe("private");
+    const cleared = await json(last) as { project: { isPublic: boolean; permissions: { read: string[] } } };
+    expect(cleared.project.isPublic).toBe(false);
     expect(cleared.project.permissions.read).toEqual([]);
   });
 
@@ -253,7 +272,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
     await handler(post("/api/projects/site/share", { add: ["alice@corp.example.com", "@corp.example.com"] }));
 
@@ -275,15 +294,15 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
 
     const write = await handler(post("/api/projects/site/share", { add: ["alice@example.com"], role: "write" }));
     expect(write.status).toBe(200);
     const written = await json(write) as {
-      project: { visibility: string; permissions: { read: string[]; write: string[]; admin: string[] } };
+      project: { isPublic: boolean; permissions: { read: string[]; write: string[]; admin: string[] } };
     };
-    expect(written.project.visibility).toBe("private");
+    expect(written.project.isPublic).toBe(false);
     expect(written.project.permissions).toEqual({ read: [], write: ["alice@example.com"], admin: [] });
 
     // Re-sharing with a different role moves the target, never duplicates it.
@@ -317,12 +336,12 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "v1" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
     await ownerHandler(post("/api/projects/site/share", { add: ["writer@example.com"], role: "write" }));
     await ownerHandler(post("/api/projects/site/share", { add: ["admin@example.com"], role: "admin" }));
 
-    // The writer can push a new revision without changing visibility.
+    // The writer can push a new revision without changing the public/private setting.
     const republish = await writerHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "v2 by writer" }),
       openPath: "/",
@@ -330,12 +349,12 @@ describe("server app", () => {
     }));
     expect(republish.status).toBe(200);
 
-    // Changing visibility on publish is an admin action.
+    // Changing the public/private setting on publish is an admin action.
     const escalate = await writerHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "v3" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(escalate.status).toBe(403);
     expect(await escalate.text()).toContain("admin access");
@@ -345,14 +364,14 @@ describe("server app", () => {
     const writerUnpublish = await writerHandler(post("/api/projects/site/unpublish", {}));
     expect(writerUnpublish.status).toBe(403);
 
-    // The admin can share, change visibility on publish, and unpublish — but not delete.
+    // The admin can share, flip public/private on publish, and unpublish — but not delete.
     const adminShare = await adminHandler(post("/api/projects/site/share", { add: ["friend@example.com"] }));
     expect(adminShare.status).toBe(200);
     const adminPublish = await adminHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "v4" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(adminPublish.status).toBe(200);
     const adminUnpublish = await adminHandler(post("/api/projects/site/unpublish", {}));
@@ -371,17 +390,17 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     await handler(post("/api/projects/site/share", { add: ["alice@example.com"], role: "write" }));
 
     const revoke = await handler(post("/api/projects/site/share", { remove: ["alice@example.com"] }));
     expect(revoke.status).toBe(200);
     const body = await json(revoke) as {
-      project: { visibility: string; permissions: { write: string[] } };
+      project: { isPublic: boolean; permissions: { write: string[] } };
       warnings: string[];
     };
-    expect(body.project.visibility).toBe("public");
+    expect(body.project.isPublic).toBe(true);
     expect(body.project.permissions.write).toEqual([]);
     // The write role is gone, but the site is still publicly readable.
     expect(body.warnings).toEqual(["alice@example.com still has read access because the project is public"]);
@@ -397,20 +416,20 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
     await ownerHandler(post("/api/projects/site/share", { add: ["reader@example.com"] }));
 
     const ownerInfo = await json(await ownerHandler(new Request("https://scratch.test/api/projects/site"))) as {
       project: Record<string, unknown>;
     };
-    expect(ownerInfo.project.visibility).toBe("private");
+    expect(ownerInfo.project.isPublic).toBe(false);
     expect(ownerInfo.project.permissions).toEqual({ read: ["reader@example.com"], write: [], admin: [] });
 
     const readerInfo = await json(await readerHandler(new Request("https://scratch.test/api/projects/site"))) as {
       project: Record<string, unknown>;
     };
-    expect(readerInfo.project.visibility).toBe("private");
+    expect(readerInfo.project.isPublic).toBe(false);
     expect("permissions" in readerInfo.project).toBe(false);
   });
 
@@ -420,7 +439,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     await handler(post("/api/projects/site/share", { add: ["alice@example.com"] }));
     await handler(post("/api/projects/site/share", { add: ["bob@example.com"], role: "write" }));
@@ -428,9 +447,9 @@ describe("server app", () => {
     const unpublish = await handler(post("/api/projects/site/unpublish", {}));
     expect(unpublish.status).toBe(200);
     const body = await json(unpublish) as {
-      project: { visibility: string; permissions: { read: string[]; write: string[]; admin: string[] } };
+      project: { isPublic: boolean; permissions: { read: string[]; write: string[]; admin: string[] } };
     };
-    expect(body.project.visibility).toBe("private");
+    expect(body.project.isPublic).toBe(false);
     expect(body.project.permissions).toEqual({ read: [], write: [], admin: [] });
   });
 
@@ -440,27 +459,27 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
     // The grant is stored alongside the public toggle, so alice keeps read access
     // when the project later goes private.
     const response = await handler(post("/api/projects/site/share", { add: ["alice@example.com"] }));
     expect(response.status).toBe(200);
-    const body = await json(response) as { project: { visibility: string; permissions: { read: string[] } } };
-    expect(body.project.visibility).toBe("public");
+    const body = await json(response) as { project: { isPublic: boolean; permissions: { read: string[] } } };
+    expect(body.project.isPublic).toBe(true);
     expect(body.project.permissions.read).toEqual(["alice@example.com"]);
   });
 
-  test("publish rejects grant-list visibilities in favor of share", async () => {
+  test("publish rejects unknown fields", async () => {
     const handler = await appHandler({ auth: testAuth(user) });
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "alice@example.com",
+      audience: "alice@example.com",
     }));
     expect(response.status).toBe(400);
-    expect(await response.text()).toContain("scratchwork share");
+    expect(await response.text()).toContain("audience");
   });
 
   test("share is owner-only and 404s for missing projects", async () => {
@@ -476,7 +495,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
 
     const forbidden = await otherHandler(post("/api/projects/site/share", { add: ["other@example.com"] }));
@@ -496,7 +515,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
 
     const empty = await handler(post("/api/projects/site/share", {}));
@@ -518,20 +537,20 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }));
     await openHandler(post("/api/projects/site/share", { add: ["alice@old.example.com", "bob@old.example.com"] }));
 
-    // The same server, after tightening shareAllowedDomains.
+    // The same server, after tightening allowedShareDomains.
     const restricted = await appHandler({
       db,
       storage,
       auth: testAuth(user),
-      config: { shareAllowedDomains: new Set(["example.com"]) },
+      config: { allowedShareDomains: new Set(["example.com"]) },
     });
     const grant = await restricted(post("/api/projects/site/share", { add: ["carol@old.example.com"] }));
     expect(grant.status).toBe(403);
-    expect(await grant.text()).toContain("shareAllowedDomains");
+    expect(await grant.text()).toContain("allowedShareDomains");
 
     // Revoking still works even though the remaining grants predate the policy.
     const revoke = await restricted(post("/api/projects/site/share", { remove: ["alice@old.example.com"] }));
@@ -546,7 +565,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "private",
+      isPublic: false,
     }))) as { project: string };
     expect(published.project).toBe("site");
 
@@ -569,7 +588,7 @@ describe("server app", () => {
     const published = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
-      visibility: "public",
+      isPublic: true,
     }))) as { project: string; url: string };
 
     expect(published.project).toMatch(/^[a-z2-9]{10}$/);
@@ -584,14 +603,14 @@ describe("server app", () => {
     const first = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "v1" }),
       openPath: "/",
-      visibility: "public",
+      isPublic: true,
     }))) as { project: string };
 
     const second = await json(await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "v2" }),
       openPath: "/",
       project: first.project,
-      visibility: "public",
+      isPublic: true,
     }))) as { project: string };
     expect(second.project).toBe(first.project);
 
@@ -605,7 +624,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "my-notes",
-      visibility: "public",
+      isPublic: true,
     }))) as { project: string };
 
     expect(published.project).toMatch(/^[a-z2-9]{10}$/);
@@ -627,14 +646,14 @@ describe("server app", () => {
     const first = await json(await ownerHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "mine" }),
       openPath: "/",
-      visibility: "public",
+      isPublic: true,
     }))) as { project: string };
 
     const taken = await otherHandler(post("/api/publish", {
       bundle: bundle({ "index.html": "theirs" }),
       openPath: "/",
       project: first.project,
-      visibility: "public",
+      isPublic: true,
     }));
     expect(taken.status).toBe(409);
     expect((await json(taken) as { error: string }).error).toBe(TAKEN(first.project));
@@ -647,7 +666,7 @@ describe("server app", () => {
         bundle: bundle({ "index.html": "hello" }),
         openPath: "/",
         project: `site-${String(index).padStart(3, "0")}`,
-        visibility: "public",
+        isPublic: true,
       }));
       expect(published.status).toBe(200);
     }
@@ -670,28 +689,17 @@ describe("server app", () => {
     expect(response.status).toBe(401);
   });
 
-  test("rejects visibility above the server ceiling", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { maxVisibility: "@example.com" } });
+  test("rejects public publishes when the server forbids public projects", async () => {
+    const handler = await appHandler({ auth: testAuth(user), config: { allowPublicProjects: false } });
     const response = await handler(post("/api/publish", {
       bundle: bundle({ "index.html": "hello" }),
       openPath: "/",
       project: "site",
-      visibility: "public",
+      isPublic: true,
     }));
 
     expect(response.status).toBe(403);
-  });
-
-  test("rejects public visibility when shareAllowedDomains is set", async () => {
-    const handler = await appHandler({ auth: testAuth(user), config: { shareAllowedDomains: new Set(["example.com"]) } });
-    const response = await handler(post("/api/publish", {
-      bundle: bundle({ "index.html": "hello" }),
-      openPath: "/",
-      project: "site",
-      visibility: "public",
-    }));
-
-    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("allowPublicProjects");
   });
 
   test("rejects garbage project identifiers with client errors, never 500", async () => {
@@ -720,7 +728,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "private" }),
       openPath: "/",
       project: "secret",
-      visibility: "private",
+      isPublic: false,
     }));
     expect(publish.status).toBe(200);
 
@@ -783,7 +791,7 @@ describe("server app", () => {
       }),
       openPath: "/",
       project: "secret",
-      visibility: "private",
+      isPublic: false,
     }));
     expect(publish.status).toBe(200);
 
@@ -825,7 +833,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "private page body", "data.json": "{\"secret\":true}" }),
       openPath: "/",
       project: "secret",
-      visibility: "private",
+      isPublic: false,
     }, token));
     expect(publish.status).toBe(200);
 
@@ -910,7 +918,7 @@ describe("server app", () => {
         bundle: bundle({ "index.html": `${project} body`, "data.json": "{}" }),
         openPath: "/",
         project,
-        visibility: "private",
+        isPublic: false,
       }, token));
       expect(publish.status).toBe(200);
     }
@@ -974,7 +982,7 @@ describe("server app", () => {
       bundle: bundle({ "index.html": "private" }),
       openPath: "/",
       project: "secret",
-      visibility: "private",
+      isPublic: false,
     }));
     expect(publish.status).toBe(200);
 
@@ -1168,7 +1176,7 @@ describe("server homepage", () => {
       }),
       openPath: "/",
       project: "www",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(publish.status).toBe(200);
     // The publish response reports the canonical home origin, not the content route.
@@ -1204,7 +1212,7 @@ describe("server homepage", () => {
 
   test("answers home domains with setup instructions until the homepage is published", async () => {
     const handler = await appHandler({ auth: testAuth(user), config: homepageConfig });
-    const command = "scratchwork publish --server https://app.scratch.test --project www --visibility public";
+    const command = "scratchwork publish --server https://app.scratch.test --project www --public";
 
     const plain = await handler(homeRequest("https://scratch.test/"));
     expect(plain.status).toBe(404);
@@ -1222,7 +1230,7 @@ describe("server homepage", () => {
       bundle: bundle({ "index.html": "home", "api/index.html": "unreachable", "health": "unreachable" }),
       openPath: "/",
       project: "www",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(publish.status).toBe(200);
 
@@ -1254,7 +1262,7 @@ describe("server homepage", () => {
       bundle: bundle({ "index.html": "private homepage", "data.json": "{}" }),
       openPath: "/",
       project: "www",
-      visibility: "private",
+      isPublic: false,
     }, token));
     expect(publish.status).toBe(200);
 
@@ -1310,7 +1318,7 @@ describe("server homepage", () => {
       bundle: bundle({ "index.html": "home" }),
       openPath: "/",
       project: "www",
-      visibility: "public",
+      isPublic: true,
     }));
     expect(publish.status).toBe(200);
 

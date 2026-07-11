@@ -9,6 +9,13 @@ import type * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
+import type {
+  ProjectInfo,
+  ProjectResponse,
+  ProjectsListResponse,
+  PublishResponse,
+  ShareResponse,
+} from "../../../shared/src/publish/api";
 import { SiteFiles } from "../../../shared/src/site/files";
 import { servePath } from "../../../shared/src/site/serve";
 import { isLoopbackHost } from "../../../shared/src/util/url";
@@ -170,7 +177,7 @@ function publish(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const siteStore = yield* SiteStore;
     const result = yield* siteStore.publish(publishRequest, user, config);
     const url = publishedUrl(contentBaseUrl(request, config), result.project, result.openPath, config);
-    return jsonResponse({ ...result, url }, 200);
+    return jsonResponse({ ...result, url } satisfies PublishResponse, 200);
   });
 }
 
@@ -186,7 +193,7 @@ function listProjects(request: HttpServerRequest.HttpServerRequest): AppEffect {
     const contentBase = contentBaseUrl(request, config);
     return jsonResponse({
       projects: projects.map((project) => projectSummary(project, contentBase, projectRole(project, user, config), config)),
-    }, 200);
+    } satisfies ProjectsListResponse, 200);
   });
 }
 
@@ -205,7 +212,7 @@ function resolveProjectPath(request: HttpServerRequest.HttpServerRequest, url: U
     const site = yield* requireReadableSite(yield* loadSiteForPath(path), user, config);
     return jsonResponse({
       project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config), config),
-    }, 200);
+    } satisfies ProjectResponse, 200);
   });
 }
 
@@ -219,7 +226,7 @@ function projectInfo(request: HttpServerRequest.HttpServerRequest, project: stri
     const site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
     return jsonResponse({
       project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config), config),
-    }, 200);
+    } satisfies ProjectResponse, 200);
   });
 }
 
@@ -237,7 +244,7 @@ function projectBundle(request: HttpServerRequest.HttpServerRequest, project: st
   });
 }
 
-/** Makes a project owner-only by setting visibility to private. */
+/** Makes a project owner-only: private and with every grant cleared. */
 function unpublishProject(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
@@ -248,11 +255,11 @@ function unpublishProject(request: HttpServerRequest.HttpServerRequest, project:
     const record = yield* siteStore.unpublish(project, user, config);
     return jsonResponse({
       project: projectSummary(record, contentBaseUrl(request, config), projectRole(record, user, config), config),
-    }, 200);
+    } satisfies ProjectResponse, 200);
   });
 }
 
-/** Grants or revokes email/@domain access by editing the project's visibility group. */
+/** Grants or revokes email/@domain access by editing the project's grant groups. */
 function shareProject(request: HttpServerRequest.HttpServerRequest, project: string): AppEffect {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
@@ -265,7 +272,7 @@ function shareProject(request: HttpServerRequest.HttpServerRequest, project: str
     return jsonResponse({
       project: projectSummary(result.record, contentBaseUrl(request, config), projectRole(result.record, user, config), config),
       warnings: result.warnings,
-    }, 200);
+    } satisfies ShareResponse, 200);
   });
 }
 
@@ -312,11 +319,11 @@ function rejectCrossOriginApiRequest(
   return Effect.void;
 }
 
-/** Shapes one project record for API responses. `visibility` is the public/private
- * toggle; `permissions` lists the per-role grants and names other users' emails, so it
- * is shown only to admins and the owner (the caller's role decides, never appears in
- * the payload). */
-function projectSummary(record: SiteRecord, contentBase: string, callerRole: ProjectRole, config: ServerConfigShape): Record<string, unknown> {
+/** Shapes one project record for API responses (the shared ProjectInfo contract).
+ * `isPublic` is the public/private toggle; `permissions` lists the per-role grants and
+ * names other users' emails, so it is shown only to admins and the owner (the caller's
+ * role decides, never appears in the payload). */
+function projectSummary(record: SiteRecord, contentBase: string, callerRole: ProjectRole, config: ServerConfigShape): ProjectInfo {
   const permissions = roleAtLeast(callerRole, "admin")
     ? {
         permissions: {
@@ -328,7 +335,7 @@ function projectSummary(record: SiteRecord, contentBase: string, callerRole: Pro
     : {};
   return {
     project: record.project,
-    visibility: record.visibility,
+    isPublic: record.isPublic,
     ...permissions,
     url: projectUrl(record.project, contentBase, config),
     owner: record.owner,
@@ -508,7 +515,7 @@ function projectAccessUser(
       const user = yield* auth
         .verifyProjectAccessToken(value, site.record.project, "cookie")
         .pipe(Effect.orElseSucceed(() => null));
-      // Re-check visibility on every request so revocation applies immediately even
+      // Re-check read access on every request so revocation applies immediately even
       // though the cookie itself is long-lived.
       if (user != null && canReadProject(site.record, user, config)) return user;
     }
@@ -769,7 +776,7 @@ function homepageSetupResponse(
   project: string,
   appBase: string,
 ): HttpServerResponse.HttpServerResponse {
-  const command = `scratchwork publish --server ${appBase} --project ${project} --visibility public`;
+  const command = `scratchwork publish --server ${appBase} --project ${project} --public`;
   if (!acceptsHtmlPage(request)) {
     return HttpServerResponse.text(
       `This server's homepage is the project "${project}", which has not been published yet.\nPublish it with:\n\n  ${command}\n`,

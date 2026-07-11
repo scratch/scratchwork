@@ -92,8 +92,8 @@ To run the actual Cloudflare Worker with persistent local R2 and D1 simulations 
 an optional locally signed Cloudflare Access identity), see
 [`server/deploy-cloudflare/README.md`](server/deploy-cloudflare/README.md).
 
-The ready-made Access test deployment is `bun run local:cf-access`; the sndbx.sh
-project's production Worker configuration runs locally with `bun run local:sndbx.sh`.
+The ready-made Access test deployment is `bun run local:cloudflare-access`; the sndbx.sh
+project's production Worker configuration runs locally with `bun run local:cloudflare-vanilla`.
 
 Then publish a directory or file:
 
@@ -102,7 +102,7 @@ scratchwork login --server http://localhost:43118
 scratchwork publish index.html
 ```
 
-The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `project`, `visibility`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
+The server stores immutable file blobs in object storage and mutable project metadata in its database. The CLI saves `server`, `project`, `isPublic`, and the latest URL in `.scratchwork.json` so the next `scratchwork publish` updates the same project.
 
 Share a published project with specific accounts or a whole domain — as readers, writers (can publish updates), or admins (can also manage sharing) — or take access away again:
 
@@ -115,7 +115,7 @@ scratchwork revoke alice@example.com
 Deployments live as projects under `deploy/`, one per domain, each deployable with one command:
 
 ```sh
-bun run deploy:sndbx.sh
+bun run deploy:cloudflare-vanilla
 ```
 
 Cloud runtime dependencies live in `server/deploy-aws` and `server/deploy-cloudflare`. See `server/README.md` for cloud setup details.
@@ -123,8 +123,8 @@ Cloud runtime dependencies live in `server/deploy-aws` and `server/deploy-cloudf
 Deploy secrets load from the project's `.env`:
 
 ```sh
-cp deploy/sndbx.sh/.env.example deploy/sndbx.sh/.env
-bun run deploy:sndbx.sh
+cp deploy/cloudflare-vanilla/.env.example deploy/cloudflare-vanilla/.env
+bun run deploy:cloudflare-vanilla
 ```
 
 ---

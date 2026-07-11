@@ -1,10 +1,13 @@
 /**
  * Deploys the Scratchwork server as a Cloudflare Worker backed by R2 + D1, by building
- * the worker bundle, generating a Wrangler config under dist/, and shelling out to the
- * `wrangler` CLI. Like all deploy tooling under server/, this is deliberately plain
- * Promise-based script code, not Effect: it runs once on a developer's machine.
+ * the worker bundle and driving the Cloudflare REST API through the official
+ * `cloudflare` SDK. The local runtime still shells out to `wrangler dev`, which is the
+ * only way to run workerd locally. Like all deploy tooling under server/, this is
+ * deliberately plain Promise-based script code, not Effect: it runs once on a
+ * developer's machine.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import Cloudflare, { APIError, toFile } from "cloudflare";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyEnv, definedEnv, loadDeployEnv, type DeployEnv } from "../../scripts/env";
@@ -15,6 +18,7 @@ import {
   optional,
   resolveServerConfig,
   serverConfigEnv,
+  serverConfigEnvNames,
   validateDeploymentConfig,
   type DeployServerOptions,
   type ResolvedScratchworkServerConfig,
@@ -110,7 +114,15 @@ interface ResolvedCloudflareDeployConfig {
   readonly skipDatabaseCreate: boolean;
 }
 
-/** Build artifacts written under dist/ for Wrangler to consume. */
+/** One resolved route in Wrangler's config shape, also used to drive the routes API. */
+type CloudflareRouteEntry = {
+  readonly pattern: string;
+  readonly custom_domain?: boolean;
+  readonly zone_name?: string;
+};
+
+/** Build artifacts written under dist/: the worker bundles uploaded by deploys, plus
+ * the Wrangler configs consumed by the local runtime and kept as deploy records. */
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const dist = join(root, "dist");
 const workerPath = join(dist, "worker.js");
@@ -155,13 +167,19 @@ export async function deployServer(
   validateDeploymentConfig(env);
   await run("bun", ["build", "src/worker.ts", "--target=browser", "--format=esm", `--outfile=${workerPath}`], { cwd: root });
   const routes = cloudflareRoutes(resolvedDeploy);
-  await ensureBucket(resolvedDeploy, run);
-  const databaseId = await ensureDatabase(resolvedDeploy, run);
+  const { client, accountId } = await createCloudflareClient(env);
+  await ensureBucket(client, accountId, resolvedDeploy);
+  const databaseId = await ensureDatabase(client, accountId, resolvedDeploy);
   const deployWithDatabase = { ...resolvedDeploy, d1DatabaseId: databaseId };
-  await writeConfig(deployWithDatabase, resolvedServer, env, routes);
-  await run("wrangler", ["deploy", "--config", configPath, "--no-bundle"], { cwd: root });
-  await putSecret(commandEnv, env, "SCRATCHWORK_GOOGLE_CLIENT_SECRET");
-  await putSecret(commandEnv, env, "SCRATCHWORK_SESSION_SECRET");
+  const vars = workerVars(resolvedServer, env);
+  await writeConfig(deployWithDatabase, vars, routes);
+  await uploadWorker(client, accountId, deployWithDatabase, databaseId, vars);
+  console.log(`Uploaded worker ${resolvedDeploy.workerName} (R2 ${resolvedDeploy.bucketName}, D1 ${resolvedDeploy.d1DatabaseName})`);
+  await applyRoutes(client, accountId, resolvedDeploy.workerName, routes);
+  if (routes.length > 0) console.log(`Routed ${routes.map((route) => route.pattern).join(", ")}`);
+  await setWorkersDevSubdomain(client, accountId, resolvedDeploy.workerName, routes.length === 0);
+  await putSecret(client, accountId, resolvedDeploy.workerName, env, "SCRATCHWORK_GOOGLE_CLIENT_SECRET");
+  await putSecret(client, accountId, resolvedDeploy.workerName, env, "SCRATCHWORK_SESSION_SECRET");
 
   const homepageHint = homepagePublishHint(serverConfig, resolvedServer);
   if (homepageHint != null) console.log(homepageHint);
@@ -230,13 +248,11 @@ export async function runLocalCloudflareServer(
   copyEnv(localVars, env, "SCRATCHWORK_LOCAL_CF_ACCESS_EMAIL");
   await writeConfig(
     { ...resolvedDeploy, d1DatabaseId: LOCAL_D1_ID },
-    localServer,
-    env,
+    workerVars(localServer, env, localVars),
     [],
     {
       outputPath: localConfigPath,
       main: access == null ? "worker.js" : "local-worker.js",
-      extraVars: localVars,
     },
   );
 
@@ -350,36 +366,36 @@ function deployConfigEnv(resolved: ResolvedCloudflareDeployConfig): DeployEnv {
   return env;
 }
 
-/** Writes the generated Wrangler config consumed by the deploy command. */
-async function writeConfig(
-  config: ResolvedCloudflareDeployConfig,
+/** Collects the non-secret configuration variables passed to the Worker. */
+function workerVars(
   server: ResolvedScratchworkServerConfig,
   env: DeployEnv,
-  routes: ReadonlyArray<Record<string, string | boolean>>,
+  extraVars?: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const vars: Record<string, string> = {};
+  // Every config-backed setting; the shared table holds no secrets, so these are safe
+  // to pass as plaintext Worker vars.
+  for (const name of serverConfigEnvNames) {
+    copyEnv(vars, env, name);
+  }
+  if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;
+  if (server.contentUrl != null && server.contentUrl !== "") vars.SCRATCHWORK_CONTENT_URL = server.contentUrl;
+  Object.assign(vars, extraVars);
+  return vars;
+}
+
+/** Writes a Wrangler-format config under dist/. Remote deploys go through the API and
+ * only keep this file as a record of what was deployed; the local runtime's config is
+ * what `wrangler dev` actually reads. */
+async function writeConfig(
+  config: ResolvedCloudflareDeployConfig,
+  vars: Readonly<Record<string, string>>,
+  routes: ReadonlyArray<CloudflareRouteEntry>,
   options: {
     readonly outputPath?: string;
     readonly main?: string;
-    readonly extraVars?: Readonly<Record<string, string>>;
   } = {},
 ): Promise<void> {
-  const vars: Record<string, string> = {};
-  copyEnv(vars, env, "SCRATCHWORK_AUTH");
-  copyEnv(vars, env, "SCRATCHWORK_GOOGLE_CLIENT_ID");
-  copyEnv(vars, env, "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN");
-  copyEnv(vars, env, "SCRATCHWORK_CF_ACCESS_AUD");
-  copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_EMAILS");
-  copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_ALLOWED_USERS");
-  copyEnv(vars, env, "SCRATCHWORK_AUTH_SESSION_SECONDS");
-  copyEnv(vars, env, "SCRATCHWORK_MAX_VISIBILITY");
-  copyEnv(vars, env, "SCRATCHWORK_SHARE_ALLOWED_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES");
-  copyEnv(vars, env, "SCRATCHWORK_DEFAULT_VISIBILITY");
-  copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_DOMAINS");
-  copyEnv(vars, env, "SCRATCHWORK_HOMEPAGE_PROJECT");
-  if (server.appUrl != null && server.appUrl !== "") vars.SCRATCHWORK_APP_URL = server.appUrl;
-  if (server.contentUrl != null && server.contentUrl !== "") vars.SCRATCHWORK_CONTENT_URL = server.contentUrl;
-  Object.assign(vars, options.extraVars);
   await writeFile(
     options.outputPath ?? configPath,
     JSON.stringify(
@@ -463,114 +479,211 @@ async function localAccessEnv(email: string, sessionSecret: string | undefined):
   };
 }
 
-/** Builds optional custom-domain and route entries for Wrangler. */
-function cloudflareRoutes(config: ResolvedCloudflareDeployConfig): ReadonlyArray<Record<string, string | boolean>> {
+/** Builds optional custom-domain and route entries in Wrangler's config shape. */
+function cloudflareRoutes(config: ResolvedCloudflareDeployConfig): ReadonlyArray<CloudflareRouteEntry> {
   if (config.routes != null) {
-    return config.routes.map((route) => ({
-      pattern: route.pattern,
-      ...(route.customDomain === true ? { custom_domain: true } : {}),
-      ...zoneFor(route.pattern, route.zoneName ?? config.zoneName),
-    }));
+    return config.routes.map((route) => routeEntry(route.pattern, route.customDomain === true, route.zoneName ?? config.zoneName));
   }
 
-  const routes: Array<Record<string, string | boolean>> = [];
+  const routes: Array<CloudflareRouteEntry> = [];
   if (config.customDomain != null) {
-    routes.push({ pattern: config.customDomain, custom_domain: true, ...zoneFor(config.customDomain, config.zoneName) });
+    routes.push(routeEntry(config.customDomain, true, config.zoneName));
   }
   if (config.route != null) {
-    routes.push({ pattern: config.route, ...zoneFor(config.route, config.zoneName) });
+    routes.push(routeEntry(config.route, false, config.zoneName));
   }
   return routes;
 }
 
+/** Builds one route entry with its zone name resolved. */
+function routeEntry(pattern: string, customDomain: boolean, zoneName: string | undefined): CloudflareRouteEntry {
+  const zone = zoneFor(pattern, zoneName);
+  return {
+    pattern,
+    ...(customDomain ? { custom_domain: true } : {}),
+    ...(zone == null ? {} : { zone_name: zone }),
+  };
+}
+
 /** Infers the Cloudflare zone name from a route pattern unless configured. */
-function zoneFor(pattern: string, configured: string | undefined): Record<string, string> {
-  if (configured != null && configured.trim() !== "") return { zone_name: configured };
+function zoneFor(pattern: string, configured: string | undefined): string | undefined {
+  if (configured != null && configured.trim() !== "") return configured;
   const host = pattern.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^\*\./, "");
   const labels = host.split(".").filter(Boolean);
-  return labels.length >= 2 ? { zone_name: labels.slice(-2).join(".") } : {};
+  return labels.length >= 2 ? labels.slice(-2).join(".") : undefined;
 }
 
-/** Uploads one configured secret to Wrangler without printing its value. */
-async function putSecret(commandEnv: Record<string, string>, env: DeployEnv, key: string): Promise<void> {
-  const value = env[key];
-  if (value == null || value === "") return;
-  const proc = Bun.spawn(["wrangler", "secret", "put", key, "--config", configPath], {
-    cwd: root,
-    env: commandEnv,
-    stdin: "pipe",
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  proc.stdin.write(value);
-  proc.stdin.end();
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) throw new Error(`wrangler secret put ${key} failed with exit code ${exitCode}`);
+/** Builds an authenticated API client and resolves the Cloudflare account to deploy to. */
+async function createCloudflareClient(env: DeployEnv): Promise<{ client: Cloudflare; accountId: string }> {
+  const apiToken = optional(env.CLOUDFLARE_API_TOKEN);
+  const apiKey = optional(env.CLOUDFLARE_API_KEY);
+  const apiEmail = optional(env.CLOUDFLARE_EMAIL);
+  if (apiToken == null && (apiKey == null || apiEmail == null)) {
+    throw new Error(
+      "Cloudflare deploys need CLOUDFLARE_API_TOKEN (or CLOUDFLARE_API_KEY and CLOUDFLARE_EMAIL) in the environment or an env file",
+    );
+  }
+  const client = new Cloudflare({ apiToken: apiToken ?? null, apiKey: apiKey ?? null, apiEmail: apiEmail ?? null });
+
+  const configured = optional(env.CLOUDFLARE_ACCOUNT_ID);
+  if (configured != null) return { client, accountId: configured };
+  const accounts: Array<{ id: string; name: string }> = [];
+  for await (const account of client.accounts.list()) {
+    accounts.push({ id: account.id, name: account.name });
+  }
+  if (accounts.length === 1) return { client, accountId: accounts[0].id };
+  const names = accounts.map((account) => `${account.name} (${account.id})`).join(", ");
+  throw new Error(
+    accounts.length === 0
+      ? "The Cloudflare API token has no visible accounts; set CLOUDFLARE_ACCOUNT_ID"
+      : `The Cloudflare API token can see multiple accounts; set CLOUDFLARE_ACCOUNT_ID to one of: ${names}`,
+  );
 }
 
-/** Creates the configured R2 bucket unless bucket creation is explicitly skipped. */
-async function ensureBucket(
+/** Uploads the built worker bundle with its R2, D1, and configuration bindings. The
+ * upload replaces all bindings, so secrets set by earlier deploys are explicitly kept. */
+async function uploadWorker(
+  client: Cloudflare,
+  accountId: string,
   config: ResolvedCloudflareDeployConfig,
-  run: ReturnType<typeof createRunner>["run"],
+  databaseId: string,
+  vars: Readonly<Record<string, string>>,
 ): Promise<void> {
-  if (config.skipBucketCreate) return;
-  const result = await run("wrangler", ["r2", "bucket", "create", config.bucketName], {
-    allowFailure: true,
-    capture: true,
-    cwd: root,
+  const bundle = await readFile(workerPath);
+  await client.workers.scripts.update(config.workerName, {
+    account_id: accountId,
+    metadata: {
+      main_module: "worker.js",
+      compatibility_date: config.compatibilityDate,
+      bindings: [
+        { type: "r2_bucket", name: config.bucketBinding, bucket_name: config.bucketName },
+        { type: "d1", name: config.d1DatabaseBinding, database_id: databaseId },
+        ...Object.entries(vars).map(([name, text]) => ({ type: "plain_text" as const, name, text })),
+      ],
+      keep_bindings: ["secret_text", "secret_key"],
+    },
+    files: [await toFile(bundle, "worker.js", { type: "application/javascript+module" })],
   });
-  if (result.ok || alreadyExists(result.stderr) || alreadyExists(result.stdout)) return;
-  process.stderr.write(result.stderr || result.stdout);
-  throw new Error(`Could not create R2 bucket ${config.bucketName}`);
 }
 
-/** Creates or finds the configured D1 database and returns its Wrangler database ID. */
-async function ensureDatabase(
-  config: ResolvedCloudflareDeployConfig,
-  run: ReturnType<typeof createRunner>["run"],
-): Promise<string | undefined> {
-  if (config.d1DatabaseId != null) return config.d1DatabaseId;
-
-  const listed = await run("wrangler", ["d1", "list", "--json"], {
-    allowFailure: true,
-    capture: true,
-    cwd: root,
-  });
-  const existing = listed.ok ? databaseIdFromList(listed.stdout, config.d1DatabaseName) : undefined;
-  if (existing != null) return existing;
-  if (config.skipDatabaseCreate) return undefined;
-
-  const created = await run("wrangler", ["d1", "create", config.d1DatabaseName], {
-    capture: true,
-    cwd: root,
-  });
-  return databaseIdFromText(created.stdout) ?? databaseIdFromText(created.stderr);
-}
-
-/** Detects Wrangler's resource-already-exists message. */
-function alreadyExists(value: string): boolean {
-  return value.toLowerCase().includes("already exists");
-}
-
-/** Finds the database ID for a name in `wrangler d1 list --json` output. */
-function databaseIdFromList(text: string, name: string): string | undefined {
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (!Array.isArray(parsed)) return undefined;
-    for (const item of parsed) {
-      if (typeof item !== "object" || item == null) continue;
-      const record = item as Record<string, unknown>;
-      if (record.name !== name) continue;
-      const id = record.uuid ?? record.id ?? record.database_id;
-      return typeof id === "string" && id !== "" ? id : undefined;
+/** Points the configured custom domains and zone routes at the deployed Worker. */
+async function applyRoutes(
+  client: Cloudflare,
+  accountId: string,
+  workerName: string,
+  routes: ReadonlyArray<CloudflareRouteEntry>,
+): Promise<void> {
+  const zones = new Map<string, string>();
+  const zoneId = async (entry: CloudflareRouteEntry): Promise<string> => {
+    if (entry.zone_name == null) {
+      throw new Error(`Cannot infer the Cloudflare zone for route "${entry.pattern}"; set zoneName`);
     }
-    return undefined;
-  } catch {
-    return undefined;
+    const cached = zones.get(entry.zone_name);
+    if (cached != null) return cached;
+    for await (const zone of client.zones.list({ name: entry.zone_name })) {
+      if (zone.name === entry.zone_name) {
+        zones.set(entry.zone_name, zone.id);
+        return zone.id;
+      }
+    }
+    throw new Error(`Cloudflare zone "${entry.zone_name}" not found for route "${entry.pattern}"`);
+  };
+
+  for (const entry of routes) {
+    if (entry.custom_domain === true) {
+      await client.workers.domains.update({
+        account_id: accountId,
+        hostname: entry.pattern,
+        service: workerName,
+        environment: "production",
+        zone_id: await zoneId(entry),
+      });
+      continue;
+    }
+    const zone = await zoneId(entry);
+    let existing: { id: string; script?: string } | undefined;
+    for await (const route of client.workers.routes.list({ zone_id: zone })) {
+      if (route.pattern === entry.pattern) {
+        existing = route;
+        break;
+      }
+    }
+    if (existing == null) {
+      await client.workers.routes.create({ zone_id: zone, pattern: entry.pattern, script: workerName });
+    } else if (existing.script !== workerName) {
+      await client.workers.routes.update(existing.id, { zone_id: zone, pattern: entry.pattern, script: workerName });
+    }
   }
 }
 
-/** Extracts the first UUID in Wrangler's `d1 create` output. */
-function databaseIdFromText(text: string): string | undefined {
-  return /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i.exec(text)?.[1];
+/** Matches Wrangler's workers.dev behavior: the subdomain serves the Worker only when
+ * no routes or custom domains are configured. */
+async function setWorkersDevSubdomain(
+  client: Cloudflare,
+  accountId: string,
+  workerName: string,
+  enabled: boolean,
+): Promise<void> {
+  await client.workers.scripts.subdomain.create(workerName, {
+    account_id: accountId,
+    enabled,
+    previews_enabled: enabled,
+  });
+}
+
+/** Uploads one configured secret through the API without printing its value. */
+async function putSecret(
+  client: Cloudflare,
+  accountId: string,
+  workerName: string,
+  env: DeployEnv,
+  key: string,
+): Promise<void> {
+  const value = env[key];
+  if (value == null || value === "") return;
+  await client.workers.scripts.secrets.update(workerName, {
+    account_id: accountId,
+    name: key,
+    text: value,
+    type: "secret_text",
+  });
+}
+
+/** Creates the configured R2 bucket unless bucket creation is explicitly skipped. */
+async function ensureBucket(client: Cloudflare, accountId: string, config: ResolvedCloudflareDeployConfig): Promise<void> {
+  if (config.skipBucketCreate) return;
+  try {
+    await client.r2.buckets.create({ account_id: accountId, name: config.bucketName });
+  } catch (error) {
+    if (alreadyExists(error)) return;
+    throw error;
+  }
+}
+
+/** Creates or finds the configured D1 database and returns its database ID. */
+async function ensureDatabase(client: Cloudflare, accountId: string, config: ResolvedCloudflareDeployConfig): Promise<string> {
+  if (config.d1DatabaseId != null) return config.d1DatabaseId;
+
+  for await (const database of client.d1.database.list({ account_id: accountId, name: config.d1DatabaseName })) {
+    if (database.name === config.d1DatabaseName && database.uuid != null && database.uuid !== "") {
+      return database.uuid;
+    }
+  }
+  if (config.skipDatabaseCreate) {
+    throw new Error(
+      `D1 database ${config.d1DatabaseName} not found and creation is disabled; set SCRATCHWORK_D1_DATABASE_ID`,
+    );
+  }
+
+  const created = await client.d1.database.create({ account_id: accountId, name: config.d1DatabaseName });
+  if (created.uuid == null || created.uuid === "") {
+    throw new Error(`Cloudflare did not return a database ID for D1 database ${config.d1DatabaseName}`);
+  }
+  return created.uuid;
+}
+
+/** Detects Cloudflare's resource-already-exists API error. */
+function alreadyExists(error: unknown): boolean {
+  return error instanceof APIError
+    && error.errors.some((item) => item.code === 10004 || /already exists/i.test(item.message ?? ""));
 }

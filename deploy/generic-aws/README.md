@@ -3,7 +3,7 @@
 > **Placeholder.** This project is only here in case we want to spend more time
 > developing our AWS deploy capabilities. It is not attached to a domain and is
 > not part of any production setup — real deployments live in sibling projects
-> like `deploy/sndbx.sh`.
+> like `deploy/cloudflare-vanilla`.
 
 Deploys the Scratchwork server as an AWS Lambda Function URL backed by S3 and
 DynamoDB, using the `@scratchwork/server-deploy-aws` adapter with generic,

@@ -22,8 +22,10 @@ export interface ScratchworkServerConfig {
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
   readonly allowedUsers?: string;
-  readonly maxVisibility?: string;
-  readonly shareAllowedDomains?: string;
+  /** false: no project on this server may be public. Default: true. */
+  readonly allowPublicProjects?: boolean;
+  /** When non-empty, share grants must fall inside these domains (comma-separated). */
+  readonly allowedShareDomains?: string;
   readonly appDomain?: string;
   readonly contentDomain?: string;
   /** Hostnames served from the homepage project; the first is canonical, the rest 308 to
@@ -33,7 +35,6 @@ export interface ScratchworkServerConfig {
   /** Globally unique name of the project served on the homepage domains. */
   readonly homepageProject?: string;
   readonly usersCanSetProjectNames?: boolean;
-  readonly defaultVisibility?: string;
 }
 
 /** Options shared by every deployServer entry point. */
@@ -68,27 +69,58 @@ export function resolveServerConfig(
   };
 }
 
+/** One config-backed SCRATCHWORK_* variable: the env var name paired with the function
+ * that extracts and stringifies its value from the server config. Returning undefined
+ * omits the variable. Entries read a partial config so env-driven deploys with no
+ * `server` section can compose an environment too. */
+export interface ServerConfigEnvEntry {
+  readonly name: string;
+  readonly value: (config: Partial<ScratchworkServerConfig>) => string | undefined;
+}
+
+/** The single source of truth mapping ScratchworkServerConfig fields onto their
+ * SCRATCHWORK_* environment variables. The resolved app/content origins are handled
+ * separately (see serverConfigEnv). Only non-secret settings belong here: cloud deploys
+ * forward every name in this table as a plaintext platform variable, so secrets like
+ * SCRATCHWORK_GOOGLE_CLIENT_SECRET and SCRATCHWORK_SESSION_SECRET must never be added. */
+export const serverConfigEnvEntries: ReadonlyArray<ServerConfigEnvEntry> = [
+  { name: "SCRATCHWORK_AUTH", value: (config) => config.auth },
+  { name: "SCRATCHWORK_GOOGLE_CLIENT_ID", value: (config) => config.googleClientId },
+  { name: "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN", value: (config) => config.cfAccessTeamDomain },
+  { name: "SCRATCHWORK_CF_ACCESS_AUD", value: (config) => config.cfAccessAud },
+  { name: "SCRATCHWORK_AUTH_ALLOWED_EMAILS", value: (config) => config.authAllowedEmails },
+  { name: "SCRATCHWORK_AUTH_ALLOWED_DOMAINS", value: (config) => config.authAllowedDomains },
+  { name: "SCRATCHWORK_AUTH_SESSION_SECONDS", value: (config) => stringified(config.authSessionSeconds) },
+  { name: "SCRATCHWORK_ALLOWED_USERS", value: (config) => config.allowedUsers },
+  { name: "SCRATCHWORK_ALLOW_PUBLIC_PROJECTS", value: (config) => stringified(config.allowPublicProjects) },
+  { name: "SCRATCHWORK_ALLOWED_SHARE_DOMAINS", value: (config) => config.allowedShareDomains },
+  { name: "SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES", value: (config) => stringified(config.usersCanSetProjectNames) },
+  {
+    name: "SCRATCHWORK_HOMEPAGE_DOMAINS",
+    value: (config) => config.homepageDomains == null || config.homepageDomains.length === 0
+      ? undefined
+      : config.homepageDomains.join(","),
+  },
+  { name: "SCRATCHWORK_HOMEPAGE_PROJECT", value: (config) => config.homepageProject },
+];
+
+/** The SCRATCHWORK_* names of every config-backed (non-secret) server setting. */
+export const serverConfigEnvNames: ReadonlyArray<string> = serverConfigEnvEntries.map((entry) => entry.name);
+
+/** Serializes an optional number or boolean setting with String(), keeping undefined. */
+function stringified(value: number | boolean | undefined): string | undefined {
+  return value == null ? undefined : String(value);
+}
+
 /** Maps the server settings and resolved origins onto SCRATCHWORK_* environment variables.
  * Accepts a partial config for env-driven deploys with no `server` section; those must
  * supply SCRATCHWORK_AUTH through the environment, which validateDeploymentAuth enforces. */
 export function serverConfigEnv(config: Partial<ScratchworkServerConfig>, resolved: ResolvedScratchworkServerConfig): DeployEnv {
   const env: DeployEnv = {};
-  if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
-  if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
-  if (config.cfAccessTeamDomain != null) env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN = config.cfAccessTeamDomain;
-  if (config.cfAccessAud != null) env.SCRATCHWORK_CF_ACCESS_AUD = config.cfAccessAud;
-  if (config.authAllowedEmails != null) env.SCRATCHWORK_AUTH_ALLOWED_EMAILS = config.authAllowedEmails;
-  if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
-  if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
-  if (config.allowedUsers != null) env.SCRATCHWORK_ALLOWED_USERS = config.allowedUsers;
-  if (config.maxVisibility != null) env.SCRATCHWORK_MAX_VISIBILITY = config.maxVisibility;
-  if (config.shareAllowedDomains != null) env.SCRATCHWORK_SHARE_ALLOWED_DOMAINS = config.shareAllowedDomains;
-  if (config.usersCanSetProjectNames != null) env.SCRATCHWORK_USERS_CAN_SET_PROJECT_NAMES = String(config.usersCanSetProjectNames);
-  if (config.defaultVisibility != null) env.SCRATCHWORK_DEFAULT_VISIBILITY = config.defaultVisibility;
-  if (config.homepageDomains != null && config.homepageDomains.length > 0) {
-    env.SCRATCHWORK_HOMEPAGE_DOMAINS = config.homepageDomains.join(",");
+  for (const entry of serverConfigEnvEntries) {
+    const value = entry.value(config);
+    if (value != null) env[entry.name] = value;
   }
-  if (config.homepageProject != null) env.SCRATCHWORK_HOMEPAGE_PROJECT = config.homepageProject;
   if (resolved.appUrl != null) env.SCRATCHWORK_APP_URL = resolved.appUrl;
   if (resolved.contentUrl != null) env.SCRATCHWORK_CONTENT_URL = resolved.contentUrl;
   return env;
@@ -104,7 +136,7 @@ export function homepagePublishHint(
 ): string | null {
   if (config.homepageProject == null) return null;
   const server = resolved.appUrl ?? "<app url>";
-  return `publish the homepage with: scratchwork publish --server ${server} --project ${config.homepageProject} --visibility public`;
+  return `publish the homepage with: scratchwork publish --server ${server} --project ${config.homepageProject} --public`;
 }
 
 /** Validates required auth settings before a deploy. Auth cannot be disabled, and the
@@ -138,7 +170,7 @@ export function validateDeploymentAuth(env: DeployEnv): void {
 
 /** Validates the composed environment before a deploy by parsing it exactly as the
  * deployed server will at runtime. A value the server would reject (a malformed
- * maxVisibility group, a bad URL, a short session secret) must fail the deploy command,
+ * allowedShareDomains list, a bad URL, a short session secret) must fail the deploy command,
  * not take the deployed server down on its first request. */
 export function validateDeploymentConfig(env: DeployEnv): void {
   validateDeploymentAuth(env);
