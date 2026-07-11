@@ -52,6 +52,22 @@ describe("worker fetch", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
   });
+
+  test("a Cloudflare Access worker serves /health without OAuth credentials", async () => {
+    const env = {
+      ...bindings,
+      SCRATCHWORK_AUTH: "cloudflare-access",
+      SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN: "myteam",
+      SCRATCHWORK_CF_ACCESS_AUD: "aud-tag-1",
+      SCRATCHWORK_SESSION_SECRET: "test-session-secret-test-session-secret",
+    };
+    const response = await worker.fetch(new Request("https://scratch.test/health"), env as never, {
+      waitUntil: () => {},
+      passThroughOnException: () => {},
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
 });
 
 describe("envVarsFromCloudflare", () => {

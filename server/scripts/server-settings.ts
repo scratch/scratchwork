@@ -11,8 +11,13 @@ import type { DeployEnv } from "./env";
 
 /** The `server` section of a deploy project's config, mapped onto SCRATCHWORK_* env vars. */
 export interface ScratchworkServerConfig {
-  readonly auth?: "oauth";
+  /** How users authenticate. Required: a deploy must choose its auth mode explicitly. */
+  readonly auth: "oauth" | "cloudflare-access";
   readonly googleClientId?: string;
+  /** Cloudflare Access team domain, like "myteam" or "myteam.cloudflareaccess.com". */
+  readonly cfAccessTeamDomain?: string;
+  /** Audience (AUD) tag of the Cloudflare Access application protecting this server. */
+  readonly cfAccessAud?: string;
   readonly authAllowedEmails?: string;
   readonly authAllowedDomains?: string;
   readonly authSessionSeconds?: number;
@@ -46,9 +51,10 @@ export interface ResolvedScratchworkServerConfig {
 }
 
 /** Resolves the app and content origins: configured domain, then env value, then the
- * optional platform fallback (e.g. a Cloudflare custom domain). */
+ * optional platform fallback (e.g. a Cloudflare custom domain). Accepts a partial
+ * config so env-driven deploys (no `server` section) can resolve from env alone. */
 export function resolveServerConfig(
-  config: ScratchworkServerConfig,
+  config: Partial<ScratchworkServerConfig>,
   env: DeployEnv,
   fallbackUrl?: string,
 ): ResolvedScratchworkServerConfig {
@@ -62,11 +68,15 @@ export function resolveServerConfig(
   };
 }
 
-/** Maps the server settings and resolved origins onto SCRATCHWORK_* environment variables. */
-export function serverConfigEnv(config: ScratchworkServerConfig, resolved: ResolvedScratchworkServerConfig): DeployEnv {
+/** Maps the server settings and resolved origins onto SCRATCHWORK_* environment variables.
+ * Accepts a partial config for env-driven deploys with no `server` section; those must
+ * supply SCRATCHWORK_AUTH through the environment, which validateDeploymentAuth enforces. */
+export function serverConfigEnv(config: Partial<ScratchworkServerConfig>, resolved: ResolvedScratchworkServerConfig): DeployEnv {
   const env: DeployEnv = {};
   if (config.auth != null) env.SCRATCHWORK_AUTH = config.auth;
   if (config.googleClientId != null) env.SCRATCHWORK_GOOGLE_CLIENT_ID = config.googleClientId;
+  if (config.cfAccessTeamDomain != null) env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN = config.cfAccessTeamDomain;
+  if (config.cfAccessAud != null) env.SCRATCHWORK_CF_ACCESS_AUD = config.cfAccessAud;
   if (config.authAllowedEmails != null) env.SCRATCHWORK_AUTH_ALLOWED_EMAILS = config.authAllowedEmails;
   if (config.authAllowedDomains != null) env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS = config.authAllowedDomains;
   if (config.authSessionSeconds != null) env.SCRATCHWORK_AUTH_SESSION_SECONDS = String(config.authSessionSeconds);
@@ -89,7 +99,7 @@ export function serverConfigEnv(config: ScratchworkServerConfig, resolved: Resol
  * the terminal; until the project is published, home-domain requests serve the same
  * instructions. */
 export function homepagePublishHint(
-  config: ScratchworkServerConfig,
+  config: Partial<ScratchworkServerConfig>,
   resolved: ResolvedScratchworkServerConfig,
 ): string | null {
   if (config.homepageProject == null) return null;
@@ -97,16 +107,30 @@ export function homepagePublishHint(
   return `publish the homepage with: scratchwork publish --server ${server} --project ${config.homepageProject} --visibility public`;
 }
 
-/** Validates required OAuth secrets before a deploy. Auth cannot be disabled. */
-export function validateDeploymentAuth(env: DeployEnv, platform: string): void {
+/** Validates required auth settings before a deploy. Auth cannot be disabled, and the
+ * mode must be chosen explicitly. */
+export function validateDeploymentAuth(env: DeployEnv): void {
   const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
-  if (authMode !== "" && authMode !== "oauth") {
-    throw new Error(`Invalid SCRATCHWORK_AUTH "${env.SCRATCHWORK_AUTH}": expected "oauth" (the only supported mode), or leave it unset`);
+  if (authMode === "") {
+    throw new Error('SCRATCHWORK_AUTH is required: set it to "oauth" or "cloudflare-access".');
+  }
+  if (authMode !== "oauth" && authMode !== "cloudflare-access") {
+    throw new Error(`Invalid SCRATCHWORK_AUTH "${env.SCRATCHWORK_AUTH}": expected "oauth" or "cloudflare-access"`);
+  }
+  if (authMode === "cloudflare-access") {
+    for (const key of ["SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN", "SCRATCHWORK_CF_ACCESS_AUD", "SCRATCHWORK_SESSION_SECRET"]) {
+      if (!env[key]) {
+        throw new Error(
+          `${key} is required for Cloudflare Access auth: copy the team domain and application Audience (AUD) tag from the Cloudflare Zero Trust dashboard, and generate a session secret with "openssl rand -hex 32".`,
+        );
+      }
+    }
+    return;
   }
   for (const key of ["SCRATCHWORK_GOOGLE_CLIENT_ID", "SCRATCHWORK_GOOGLE_CLIENT_SECRET", "SCRATCHWORK_SESSION_SECRET"]) {
     if (!env[key]) {
       throw new Error(
-        `${key} is required: ${platform} deploys always use OAuth. Create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
+        `${key} is required for OAuth auth: create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
       );
     }
   }
@@ -116,8 +140,8 @@ export function validateDeploymentAuth(env: DeployEnv, platform: string): void {
  * deployed server will at runtime. A value the server would reject (a malformed
  * maxVisibility group, a bad URL, a short session secret) must fail the deploy command,
  * not take the deployed server down on its first request. */
-export function validateDeploymentConfig(env: DeployEnv, platform: string): void {
-  validateDeploymentAuth(env, platform);
+export function validateDeploymentConfig(env: DeployEnv): void {
+  validateDeploymentAuth(env);
   const parsed = Effect.runSync(Effect.either(readServerConfig(env)));
   if (Either.isLeft(parsed)) {
     throw new Error(`Invalid server config: ${parsed.left.message}`);

@@ -13,7 +13,7 @@ import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
 import type * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import { isRecord, parseJson } from "../../shared/src/util/json";
-import { readAuthToken, serverApiUrl } from "./auth";
+import { readAuthToken, readCfToken, serverApiUrl } from "./auth";
 import { CliError, errorMessage } from "./errors";
 
 /** A completed API exchange: HTTP status plus the raw and JSON-decoded body. */
@@ -40,21 +40,30 @@ export interface ResolvedProjectRef {
 /**
  * Executes one JSON API request. Transport failures (unreachable server,
  * aborted response) fail with a context-prefixed CliError; HTTP error statuses
- * are returned in the ApiResponse for the caller to interpret. Requests are
- * interruption-safe: Ctrl-C aborts the in-flight request.
+ * are returned in the ApiResponse for the caller to interpret — except a
+ * Cloudflare Access edge block, which fails with a re-auth hint since no
+ * caller can act on it. Requests are interruption-safe: Ctrl-C aborts the
+ * in-flight request.
  */
 export function apiRequest(
   context: string,
   url: URL | string,
   options: ApiRequestOptions = {},
-): Effect.Effect<ApiResponse, CliError, HttpClient.HttpClient> {
+): Effect.Effect<ApiResponse, CliError, HttpClient.HttpClient | FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
     let request = HttpClientRequest.make(options.method ?? "GET")(url);
     if (options.token != null) request = HttpClientRequest.bearerToken(request, options.token);
+    request = yield* attachCloudflareAccess(request, url);
     if (options.body !== undefined) request = HttpClientRequest.bodyUnsafeJson(request, options.body);
     const response = yield* client.execute(request);
     const text = yield* response.text;
+    if (edgeBlocked(response.status, response.headers, text)) {
+      return yield* apiFail(
+        context,
+        "Cloudflare Access blocked this request. Run `scratchwork login` again (your Access session may have expired), or set SCRATCHWORK_CF_ACCESS_CLIENT_ID and SCRATCHWORK_CF_ACCESS_CLIENT_SECRET for automation.",
+      );
+    }
     return {
       status: response.status,
       ok: response.status >= 200 && response.status < 300,
@@ -74,12 +83,58 @@ export function apiJson(
   context: string,
   url: URL | string,
   options: ApiRequestOptions = {},
-): Effect.Effect<unknown, CliError, HttpClient.HttpClient> {
+): Effect.Effect<unknown, CliError, HttpClient.HttpClient | FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const response = yield* apiRequest(context, url, options);
     if (!response.ok) return yield* apiFail(context, apiErrorText(response));
     return response.json;
   });
+}
+
+/**
+ * Attaches Cloudflare Access credentials so requests pass an Access-protected
+ * edge: the Access JWT the server relayed at login (stored per origin, sent as
+ * `cf-access-token`), and the service-token headers from
+ * SCRATCHWORK_CF_ACCESS_CLIENT_ID/SECRET for CI and headless automation.
+ * Cloudflare validates either at the edge; the server still identifies the
+ * user by the bearer token. Servers without Access ignore the extra headers.
+ */
+function attachCloudflareAccess(
+  request: HttpClientRequest.HttpClientRequest,
+  url: URL | string,
+): Effect.Effect<HttpClientRequest.HttpClientRequest, CliError, FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    let result = request;
+    const cfToken = yield* readCfToken(new URL(url).origin);
+    if (cfToken != null) result = HttpClientRequest.setHeader(result, "cf-access-token", cfToken);
+    const clientId = process.env.SCRATCHWORK_CF_ACCESS_CLIENT_ID;
+    const clientSecret = process.env.SCRATCHWORK_CF_ACCESS_CLIENT_SECRET;
+    if (clientId != null && clientId !== "" && clientSecret != null && clientSecret !== "") {
+      result = HttpClientRequest.setHeaders(result, {
+        "CF-Access-Client-Id": clientId,
+        "CF-Access-Client-Secret": clientSecret,
+      });
+    }
+    return result;
+  });
+}
+
+/** Matches Cloudflare Access artifacts in an HTML body where JSON was expected. */
+const ACCESS_PAGE_MARKERS = /cloudflareaccess|CF_Authorization/i;
+
+/**
+ * Detects a request Cloudflare's edge blocked before it reached the server: a
+ * 403 the edge tags with `cf-mitigated`, or an Access login page — HTML with
+ * Access markers — where the API would have answered with JSON (the shape a
+ * 302 to the login page takes after redirect following).
+ */
+function edgeBlocked(
+  status: number,
+  headers: Readonly<Record<string, string | undefined>>,
+  text: string,
+): boolean {
+  if (status === 403 && headers["cf-mitigated"] != null) return true;
+  return /^\s*<(!doctype|html)/i.test(text) && ACCESS_PAGE_MARKERS.test(text);
 }
 
 /** Extracts the most useful error text from a failed response: the JSON `error` field

@@ -126,7 +126,7 @@ export async function deployServer(
   const { run } = createRunner(commandEnv);
 
   await mkdir(dist, { recursive: true });
-  validateDeploymentConfig(env, "Cloudflare");
+  validateDeploymentConfig(env);
   await run("bun", ["build", "src/worker.ts", "--target=browser", "--format=esm", `--outfile=${workerPath}`], { cwd: root });
   const routes = cloudflareRoutes(resolvedDeploy);
   await ensureBucket(resolvedDeploy, run);
@@ -219,6 +219,8 @@ async function writeConfig(
   const vars: Record<string, string> = {};
   copyEnv(vars, env, "SCRATCHWORK_AUTH");
   copyEnv(vars, env, "SCRATCHWORK_GOOGLE_CLIENT_ID");
+  copyEnv(vars, env, "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN");
+  copyEnv(vars, env, "SCRATCHWORK_CF_ACCESS_AUD");
   copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_EMAILS");
   copyEnv(vars, env, "SCRATCHWORK_AUTH_ALLOWED_DOMAINS");
   copyEnv(vars, env, "SCRATCHWORK_ALLOWED_USERS");

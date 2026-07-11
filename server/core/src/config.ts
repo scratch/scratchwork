@@ -33,14 +33,32 @@ export interface ServerConfigShape {
   readonly auth: AuthConfig;
 }
 
-/** Google OAuth and session-signing settings. Auth cannot be disabled. */
-export interface AuthConfig {
-  readonly clientId: string;
-  readonly clientSecret: string;
+/** Session-signing and allow-list settings shared by every auth mode. */
+export interface AuthConfigCommon {
   readonly sessionSecret: string;
   readonly allowedUsers: AccessGroup;
   readonly sessionTtlSeconds: number;
 }
+
+/** Built-in Google OAuth: the server runs the login flow itself. */
+export interface OAuthAuthConfig extends AuthConfigCommon {
+  readonly mode: "oauth";
+  readonly clientId: string;
+  readonly clientSecret: string;
+}
+
+/** Cloudflare Access: the server sits behind an Access application that authenticates
+ * users at the edge and injects a signed Cf-Access-Jwt-Assertion header. */
+export interface CloudflareAccessAuthConfig extends AuthConfigCommon {
+  /** Team origin the assertions are issued by, like "https://myteam.cloudflareaccess.com". */
+  readonly teamDomain: string;
+  /** Audience (AUD) tag of the Access application protecting this server. */
+  readonly audience: string;
+  readonly mode: "cloudflare-access";
+}
+
+/** Auth settings. Auth cannot be disabled. */
+export type AuthConfig = OAuthAuthConfig | CloudflareAccessAuthConfig;
 
 /** Service tag for server configuration. */
 export class ServerConfig extends Context.Tag("@scratchwork/server/Config")<
@@ -162,17 +180,34 @@ function readHomepage(
   });
 }
 
-/** Parses required OAuth settings from environment variables. Auth cannot be disabled. */
+/** Parses auth settings from environment variables. Auth cannot be disabled, and the
+ * mode must be chosen explicitly: a server either runs built-in Google OAuth or sits
+ * behind Cloudflare Access. */
 function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigError> {
   return Effect.gen(function* () {
     const authMode = (env.SCRATCHWORK_AUTH ?? "").toLowerCase();
+    if (authMode === "") {
+      return yield* Effect.fail(
+        new ServerConfigError({
+          message: 'SCRATCHWORK_AUTH is required: set it to "oauth" or "cloudflare-access".',
+        }),
+      );
+    }
+    if (authMode !== "oauth" && authMode !== "cloudflare-access") {
+      return yield* Effect.fail(invalidValue("SCRATCHWORK_AUTH", authMode, '"oauth" or "cloudflare-access"'));
+    }
+    if (authMode === "cloudflare-access") return yield* readCloudflareAccessConfig(env);
+    return yield* readOAuthConfig(env);
+  });
+}
+
+/** Parses required Google OAuth settings from environment variables. */
+function readOAuthConfig(env: EnvVars): Effect.Effect<OAuthAuthConfig, ServerConfigError> {
+  return Effect.gen(function* () {
     const clientId = env.SCRATCHWORK_GOOGLE_CLIENT_ID ?? env.GOOGLE_CLIENT_ID;
     const clientSecret = env.SCRATCHWORK_GOOGLE_CLIENT_SECRET ?? env.GOOGLE_CLIENT_SECRET;
     const sessionSecret = env.SCRATCHWORK_SESSION_SECRET;
 
-    if (authMode !== "" && authMode !== "oauth") {
-      return yield* Effect.fail(invalidValue("SCRATCHWORK_AUTH", authMode, '"oauth" (the only supported mode), or leave it unset'));
-    }
     if (!clientId || !clientSecret || !sessionSecret) {
       const missing = [
         clientId ? null : "SCRATCHWORK_GOOGLE_CLIENT_ID",
@@ -181,10 +216,60 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
       ].filter((name) => name != null);
       return yield* Effect.fail(
         new ServerConfigError({
-          message: `OAuth is required: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set. Create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
+          message: `OAuth mode requires ${missing.join(", ")}: create OAuth credentials at https://console.cloud.google.com/apis/credentials and generate a session secret with "openssl rand -hex 32".`,
         }),
       );
     }
+
+    return {
+      mode: "oauth",
+      clientId,
+      clientSecret,
+      ...(yield* readCommonAuthConfig(env, sessionSecret)),
+    } as const;
+  });
+}
+
+/** Parses required Cloudflare Access settings from environment variables. */
+function readCloudflareAccessConfig(env: EnvVars): Effect.Effect<CloudflareAccessAuthConfig, ServerConfigError> {
+  return Effect.gen(function* () {
+    const teamDomainValue = nonEmpty(env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN?.trim());
+    const audience = nonEmpty(env.SCRATCHWORK_CF_ACCESS_AUD?.trim());
+    const sessionSecret = env.SCRATCHWORK_SESSION_SECRET;
+
+    if (teamDomainValue == null || audience == null || !sessionSecret) {
+      const missing = [
+        teamDomainValue != null ? null : "SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN",
+        audience != null ? null : "SCRATCHWORK_CF_ACCESS_AUD",
+        sessionSecret ? null : "SCRATCHWORK_SESSION_SECRET",
+      ].filter((name) => name != null);
+      return yield* Effect.fail(
+        new ServerConfigError({
+          message: `Cloudflare Access mode requires ${missing.join(", ")}: copy the team domain and the application Audience (AUD) tag from the Cloudflare Zero Trust dashboard, and generate a session secret with "openssl rand -hex 32".`,
+        }),
+      );
+    }
+
+    const teamDomain = normalizeCfTeamDomain(teamDomainValue);
+    if (teamDomain == null) {
+      return yield* Effect.fail(
+        invalidValue("SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN", teamDomainValue, 'a Cloudflare Access team domain, like "myteam" or "myteam.cloudflareaccess.com"'),
+      );
+    }
+
+    return {
+      mode: "cloudflare-access",
+      teamDomain,
+      audience,
+      ...(yield* readCommonAuthConfig(env, sessionSecret)),
+    } as const;
+  });
+}
+
+/** Parses the auth settings every mode shares: the session-signing secret (validated
+ * for length), the allow-list, and the session lifetime. */
+function readCommonAuthConfig(env: EnvVars, sessionSecret: string): Effect.Effect<AuthConfigCommon, ServerConfigError> {
+  return Effect.gen(function* () {
     if (new TextEncoder().encode(sessionSecret).byteLength < 32) {
       return yield* Effect.fail(
         new ServerConfigError({
@@ -192,10 +277,7 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
         }),
       );
     }
-
     return {
-      clientId,
-      clientSecret,
       sessionSecret,
       allowedUsers: yield* readAccessGroup(
         env.SCRATCHWORK_ALLOWED_USERS ?? groupFromLegacyAuthAllowLists(env.SCRATCHWORK_AUTH_ALLOWED_EMAILS, env.SCRATCHWORK_AUTH_ALLOWED_DOMAINS),
@@ -209,6 +291,17 @@ function readAuthConfig(env: EnvVars): Effect.Effect<AuthConfig, ServerConfigErr
       ),
     } as const;
   });
+}
+
+/** Normalizes the configured Cloudflare Access team domain — "myteam",
+ * "myteam.cloudflareaccess.com", or a full https URL — to its https origin. */
+function normalizeCfTeamDomain(value: string): string | null {
+  const host = value
+    .toLowerCase()
+    .replace(/^https:\/\//, "")
+    .replace(/[/?#].*$/, "");
+  const domain = host.includes(".") ? host : `${host}.cloudflareaccess.com`;
+  return safeDomain(domain) ? `https://${domain}` : null;
 }
 
 /** Parses a visibility-toggle environment value: project visibility is only ever public
