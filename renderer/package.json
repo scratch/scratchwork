@@ -8,7 +8,7 @@
     "build": "bun build.js",
     "ci": "bun run typecheck && bun run test && bun run build",
     "dev": "bun build.js --watch",
-    "test": "bun test",
+    "test": "bun test && node test/redos-v8.check.js",
     "typecheck": "echo 'renderer: deliberately plain browser JS — nothing to typecheck'"
   },
   "dependencies": {

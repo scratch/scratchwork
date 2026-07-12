@@ -51,9 +51,9 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ### Phase 2 — CI on every PR
 
-`[ ]` Add `.github/workflows/ci.yml`: setup the repo-pinned Bun version, `bun install --frozen-lockfile`, `bun run ci`, on PRs and pushes to `main`. The workflow stays honest by construction — it runs exactly the one gate. Give it minimal GitHub-token permissions, a job timeout, and concurrency cancellation for superseded commits; make the resulting check required in branch protection.
+`[x]` Add `.github/workflows/ci.yml`: setup the repo-pinned Bun version, `bun install --frozen-lockfile`, `bun run ci`, on PRs and pushes to `main`. The workflow stays honest by construction — it runs exactly the one gate. Give it minimal GitHub-token permissions, a job timeout, and concurrency cancellation for superseded commits; make the resulting check required in branch protection.
 
-`[ ]` Generated-artifact freshness is part of `ci`, not an occasional cleanup: rebuild `shared/src/site/default-renderer.generated.js` and every embedded CLI asset, then fail if the worktree is dirty. Add a Node/V8 adversarial regex timing check — this is new work, not an existing check (today the rule exists only as the design comment at `renderer/src/render.js:73`): Bun/JSC passing does not rule out catastrophic V8 backtracking in renderer code consumed elsewhere, and this is the only ci item guarding renderer code beyond its unit tests.
+`[x]` Generated-artifact freshness is part of `ci`, not an occasional cleanup: rebuild `shared/src/site/default-renderer.generated.js` and every embedded CLI asset, then fail if the worktree is dirty. Add a Node/V8 adversarial regex timing check — this is new work, not an existing check (today the rule exists only as the design comment at `renderer/src/render.js:73`): Bun/JSC passing does not rule out catastrophic V8 backtracking in renderer code consumed elsewhere, and this is the only ci item guarding renderer code beyond its unit tests.
 
 ### Phase 3 — Full-loop publish e2e
 
