@@ -55,7 +55,7 @@ const safe = (js) => js.replace(/<\/script>/gi, "<\\/script>");
 function rendererSourceFiles() {
   const files = [
     r("build.js"),
-    r("bun.lock"),
+    r("../bun.lock"), // workspace lockfile — renderer deps are pinned at the root
     r("package.json"),
     r("shell.js"),
   ];

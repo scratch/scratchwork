@@ -12,7 +12,8 @@
     "./storage": "./src/storage.ts"
   },
   "scripts": {
-    "check": "bun run typecheck && bun test",
+    "ci": "bun run typecheck && bun run test",
+    "test": "bun test",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

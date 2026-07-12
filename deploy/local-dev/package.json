@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "ci": "bun run typecheck && bun run test",
     "local": "bun local.ts",
+    "test": "bun test",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
