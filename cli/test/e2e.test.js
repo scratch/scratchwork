@@ -908,7 +908,10 @@ describe("scratchwork project commands", () => {
       server.stop(true);
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+    // Explicit timeout: this test spawns ~14 sequential CLI processes, which
+    // takes ~7s on CI runners — bun's 5s default kills it mid-run and the
+    // leaked assertions fail the next test too.
+  }, 15000);
 
   test("share against a server without the /share API explains the version gap", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-share-old-server-"));
