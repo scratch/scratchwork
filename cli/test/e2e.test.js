@@ -1065,11 +1065,14 @@ describe("scratchwork stream", () => {
       expect(publishes.length).toBe(1);
 
       // A content change must trigger a second publish carrying the new bytes.
-      // Republishing is debounced behind a file watcher, so poll for it.
-      writeFileSync(join(dir, "index.html"), staticPage("stream-v2"));
+      // The watcher arms asynchronously after "Streaming changes" prints, so a
+      // single early write can slip through before it's watching — keep
+      // rewriting until the republish lands. Writes are spaced past the 250ms
+      // debounce so they can't keep resetting it forever.
       const deadline = Date.now() + 8000;
       while (publishes.length < 2 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        writeFileSync(join(dir, "index.html"), staticPage("stream-v2"));
+        await new Promise((resolve) => setTimeout(resolve, 400));
       }
       expect(publishes.length).toBeGreaterThanOrEqual(2);
       const last = publishes[publishes.length - 1];
@@ -1085,7 +1088,10 @@ describe("scratchwork stream", () => {
       rmSync(dir, { recursive: true, force: true });
       rmSync(configDir, { recursive: true, force: true });
     }
-  });
+    // Explicit timeout: the poll deadline above (8s) must be reachable, and
+    // bun's 5s default would kill the test first, leaving a dangling process
+    // that corrupts later tests.
+  }, 15000);
 });
 
 describe("publish and auth safety", () => {

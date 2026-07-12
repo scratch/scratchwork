@@ -11,10 +11,11 @@
     "./worker": "./src/worker.ts"
   },
   "scripts": {
-    "check": "bun run typecheck && bun test",
+    "ci": "bun run typecheck && bun run test",
     "dev": "bun scripts/dev.ts",
     "deploy": "bun scripts/deploy.ts",
     "smoke:local": "bun scripts/smoke-local.ts",
+    "test": "bun test",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

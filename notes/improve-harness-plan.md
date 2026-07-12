@@ -38,16 +38,16 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ### Phase 1 — One command that runs everything
 
-`[ ]` One name, one meaning — three scripts at root and in every workspace:
+`[x]` One name, one meaning — three scripts at root and in every workspace:
 
 - `typecheck` → static checks only; `test` → test suites only; `ci` → the single gate (`typecheck` + `test` + builds). Root scripts only aggregate; each workspace owns its own three. No `check` script anywhere — the name is retired rather than redefined (in the wider ecosystem `check` reads as static-only: `cargo check`, `deno check`, `biome check`).
 - Aggregation can't silently drop a workspace (enumerate workspaces, or a meta-test that the list matches `package.json`).
 - Also fixes `cli`'s aliasing where `test` → `check` → typecheck + tests, so "run only cli tests" doesn't exist today.
 - Acceptance: fresh clone + the pinned Bun version + `bun install --frozen-lockfile` + `bun run ci` passes, touches every suite, rebuilds every generated artifact, and leaves `git diff --exit-code` clean.
 
-`[ ]` Pin the Bun version: add a `packageManager` field (or `.bun-version`) — no pin exists today, and both this phase's acceptance and the Phase 2 workflow reference it. One pin, read by both.
+`[x]` Pin the Bun version: add a `packageManager` field (or `.bun-version`) — no pin exists today, and both this phase's acceptance and the Phase 2 workflow reference it. One pin, read by both.
 
-`[ ]` Make `shared/` a real workspace with its own `typecheck`/`test`/`ci` and a package name. It's currently imported by relative path (`../../shared/src/...`) and isn't in the gate at all. This belongs here, not in housekeeping: "every workspace owns its three scripts" must include shared, invariant 2 makes it the contract layer, and a package name makes Phase 5's import-boundary test trivial.
+`[x]` Make `shared/` a real workspace with its own `typecheck`/`test`/`ci` and a package name. It's currently imported by relative path (`../../shared/src/...`) and isn't in the gate at all. This belongs here, not in housekeeping: "every workspace owns its three scripts" must include shared, invariant 2 makes it the contract layer, and a package name makes Phase 5's import-boundary test trivial.
 
 ### Phase 2 — CI on every PR
 

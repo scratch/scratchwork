@@ -6,8 +6,10 @@
   "description": "Build-once pipeline that produces the single-file Scratchwork universal renderer (index.html). The output renders any .md/.mdx file at runtime — content is never rebuilt.",
   "scripts": {
     "build": "bun build.js",
+    "ci": "bun run typecheck && bun run test && bun run build",
     "dev": "bun build.js --watch",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "echo 'renderer: deliberately plain browser JS — nothing to typecheck'"
   },
   "dependencies": {
     "htm": "^3.1.1",

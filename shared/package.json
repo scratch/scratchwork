@@ -1,11 +1,11 @@
 {
-  "name": "@scratchwork/server-deploy-local",
+  "name": "@scratchwork/shared",
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Local Bun deploy target for the Scratchwork server.",
+  "description": "Code shared between the Scratchwork CLI and server: the publish API contract, site serving helpers, and small utilities.",
   "exports": {
-    ".": "./src/index.ts"
+    "./*": "./src/*"
   },
   "scripts": {
     "ci": "bun run typecheck && bun run test",
@@ -14,8 +14,6 @@
   },
   "dependencies": {
     "@effect/platform": "0.96.2",
-    "@effect/platform-bun": "0.90.0",
-    "@scratchwork/server-core": "workspace:*",
     "effect": "3.21.4"
   },
   "devDependencies": {

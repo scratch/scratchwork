@@ -5,8 +5,10 @@
   "type": "module",
   "description": "Scratchwork — the single-file Markdown renderer (renderer/) and the scratchwork dev CLI (cli/).",
   "workspaces": [
-    "cli",
     "renderer",
+    "shared",
+    "cli",
+    "server",
     "server/core",
     "server/deploy-aws",
     "server/deploy-cloudflare",
@@ -14,9 +16,9 @@
     "deploy/*"
   ],
   "scripts": {
-    "build": "cd renderer && bun install && cd ../cli && bun run build",
-    "build:renderer": "cd renderer && bun install && bun run build",
-    "check": "cd cli && bun run check && cd ../server && bun run check",
+    "build": "cd cli && bun run build",
+    "build:renderer": "cd renderer && bun run build",
+    "ci": "bun scripts/each-workspace.ts ci",
     "deploy:generic-aws": "cd deploy/generic-aws && bun run deploy",
     "deploy:cloudflare-vanilla": "cd deploy/cloudflare-vanilla && bun run deploy",
     "deploy:cloudflare-access": "cd deploy/cloudflare-access && bun run deploy",
@@ -26,9 +28,8 @@
     "local:local-dev": "cd deploy/local-dev && bun run local",
     "local:cloudflare-vanilla": "cd deploy/cloudflare-vanilla && bun run local",
     "dev:renderer": "cd renderer && bun run dev",
-    "lint": "cd cli && bun run lint",
-    "test": "cd renderer && bun test && cd ../cli && bun run test",
-    "typecheck": "cd cli && bun run typecheck && cd ../server && bun run typecheck && cd ../deploy/generic-aws && bun run typecheck && cd ../local-dev && bun run typecheck && cd ../cloudflare-vanilla && bun run typecheck && cd ../cloudflare-access && bun run typecheck"
+    "test": "bun scripts/each-workspace.ts test",
+    "typecheck": "bun scripts/each-workspace.ts typecheck"
   },
   "dependencies": {
     "@effect/platform": "0.96.2",

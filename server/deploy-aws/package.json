@@ -12,8 +12,9 @@
   },
   "scripts": {
     "build": "bun build src/handler.ts --target=node --format=esm --outfile=dist/handler.mjs",
-    "check": "bun run typecheck && bun test",
+    "ci": "bun run typecheck && bun run test && bun run build",
     "deploy": "bun scripts/deploy.ts",
+    "test": "bun test",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
