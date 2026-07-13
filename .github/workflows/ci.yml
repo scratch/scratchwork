@@ -1,0 +1,34 @@
+# The one gate, run on every PR and push to main. This workflow stays honest
+# by construction: it installs pinned dependencies and runs exactly `bun run ci`
+# — the same command a fresh clone runs locally. Anything the gate should cover
+# belongs in `bun run ci` (see notes/improve-harness-plan.md), not in extra
+# workflow steps.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only token: the gate only checks out and runs code.
+permissions:
+  contents: read
+
+# Cancel superseded runs on PR branches; never cancel main.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # Node (preinstalled on the runner) is also required: the renderer's
+      # adversarial regex check runs under V8 via `node`.
+      - run: bun install --frozen-lockfile
+      - run: bun run ci

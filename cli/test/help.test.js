@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const TEST_DIR = dirname(fileURLToPath(import.meta.url));
-const CLI_DIR = join(TEST_DIR, "..");
-const SCRATCHWORK = join(CLI_DIR, "src", "index.ts");
+import { CLI } from "./e2e-helpers.js";
 
 const COMMANDS = [
   "clone",
@@ -23,7 +18,7 @@ const COMMANDS = [
 ];
 
 async function runCli(args) {
-  const proc = Bun.spawn(["bun", SCRATCHWORK, ...args], {
+  const proc = Bun.spawn([...CLI, ...args], {
     env: { ...process.env, SCRATCHWORK_NO_OPEN: "1" },
     stdout: "pipe",
     stderr: "pipe",

@@ -18,7 +18,7 @@
   "scripts": {
     "build": "cd cli && bun run build",
     "build:renderer": "cd renderer && bun run build",
-    "ci": "bun scripts/each-workspace.ts ci",
+    "ci": "bun scripts/each-workspace.ts ci && bun scripts/check-generated-fresh.ts",
     "deploy:generic-aws": "cd deploy/generic-aws && bun run deploy",
     "deploy:cloudflare-vanilla": "cd deploy/cloudflare-vanilla && bun run deploy",
     "deploy:cloudflare-access": "cd deploy/cloudflare-access && bun run deploy",

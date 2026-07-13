@@ -12,18 +12,20 @@ import Prism from "prismjs";
 // Don't auto-highlight the whole document; we highlight on demand per block.
 Prism.manual = true;
 
-import "prismjs/components/prism-bash";
-import "prismjs/components/prism-json";
-import "prismjs/components/prism-python";
-import "prismjs/components/prism-yaml";
-import "prismjs/components/prism-sql";
-import "prismjs/components/prism-go";
-import "prismjs/components/prism-rust";
-import "prismjs/components/prism-markdown";
-import "prismjs/components/prism-diff";
-import "prismjs/components/prism-typescript";
-import "prismjs/components/prism-jsx";
-import "prismjs/components/prism-tsx";
+// Include the extension so these package subpaths also resolve in Node's ESM
+// loader (the V8 regression check imports the renderer sources directly).
+import "prismjs/components/prism-bash.js";
+import "prismjs/components/prism-json.js";
+import "prismjs/components/prism-python.js";
+import "prismjs/components/prism-yaml.js";
+import "prismjs/components/prism-sql.js";
+import "prismjs/components/prism-go.js";
+import "prismjs/components/prism-rust.js";
+import "prismjs/components/prism-markdown.js";
+import "prismjs/components/prism-diff.js";
+import "prismjs/components/prism-typescript.js";
+import "prismjs/components/prism-jsx.js";
+import "prismjs/components/prism-tsx.js";
 
 // A few friendly aliases so common fence labels resolve.
 const ALIASES = {

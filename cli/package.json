@@ -10,7 +10,7 @@
   "scripts": {
     "build": "bun build.js",
     "ci": "bun run typecheck && bun run test && bun run build",
-    "test": "bun test",
+    "test": "bun test/run.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
