@@ -5,7 +5,7 @@
  * hosts, and allow-list removal revoking live sessions. Deterministic: the
  * only substituted component is Google (the hermetic provider).
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -39,6 +39,15 @@ describe("auth negative lanes [local-dev]", () => {
   const siteA = tempDir("scratchwork-e2e-neg-a-");
   const siteB = tempDir("scratchwork-e2e-neg-b-");
   const ownerBrowser = new Browser();
+  const loginProcesses = new Set<Bun.Subprocess>();
+
+  afterEach(async () => {
+    await Promise.all([...loginProcesses].map(async (proc) => {
+      if (proc.exitCode == null) proc.kill();
+      await proc.exited;
+      loginProcesses.delete(proc);
+    }));
+  });
 
   beforeAll(async () => {
     const port = nextPort();
@@ -72,6 +81,7 @@ describe("auth negative lanes [local-dev]", () => {
   /** Spawns `scratchwork login` and returns its printed login URL. */
   async function startCliLogin(home: string) {
     const proc = spawnCli(["login", context.appUrl], siteA.path, { SCRATCHWORK_HOME: home });
+    loginProcesses.add(proc);
     const output = await readOutputUntil(proc, "cli_redirect=");
     const match = output.match(/https?:\/\/\S+\/auth\/login\?\S+/);
     if (match == null) throw new Error(`no login URL in output:\n${output}`);
@@ -139,13 +149,13 @@ describe("auth negative lanes [local-dev]", () => {
     });
     const callbackUrl = new URL(toCallback.hops.at(-1)?.location as string);
     callbackUrl.searchParams.set("state", "tampered-state");
-    const tokenRequestsBefore = provider.authorizeRequests.length;
+    const tokenRequestsBefore = provider.tokenRequests.length;
 
     const response = await browser.request(callbackUrl.toString());
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("Invalid or expired OAuth state");
     // No further round trip to the provider happened.
-    expect(provider.authorizeRequests.length).toBe(tokenRequestsBefore);
+    expect(provider.tokenRequests.length).toBe(tokenRequestsBefore);
   }, 60_000);
 
   test("a malformed provider token response fails the login", async () => {

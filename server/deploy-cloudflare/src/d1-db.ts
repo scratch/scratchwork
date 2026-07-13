@@ -28,7 +28,7 @@ export interface D1DatabaseBinding {
 
 /** One prepared D1 statement. */
 export interface D1PreparedStatementBinding {
-  readonly bind: (...values: ReadonlyArray<string | number>) => D1PreparedStatementBinding;
+  readonly bind: (...values: ReadonlyArray<string | number | null>) => D1PreparedStatementBinding;
   readonly first: <A = unknown>() => Promise<A | null>;
   readonly all: <A = unknown>() => Promise<{ readonly results: ReadonlyArray<A> }>;
   readonly run: () => Promise<{ readonly meta?: { readonly changes?: number } }>;
@@ -47,6 +47,7 @@ interface D1RecordRow {
   readonly value: string;
   readonly version: number;
   readonly updated_at: string;
+  readonly expires_at: number | null;
 }
 
 const DEFAULT_TABLE = "scratchwork_records";
@@ -73,7 +74,7 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
     Effect.gen(function* () {
       yield* requireSafeDbNamespace(namespace);
       yield* requireSafeDbKey(key);
-      const row = yield* d1First<D1RecordRow>(database, `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE namespace = ? AND key = ?`, [namespace, key]);
+      const row = yield* d1First<D1RecordRow>(database, `SELECT namespace, key, value, version, updated_at, expires_at FROM ${quotedTableName} WHERE namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)`, [namespace, key, epochSeconds()]);
       return row == null ? null : yield* rowToRecord<A>(row);
     });
 
@@ -82,14 +83,19 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
       yield* requireSafeDbNamespace(namespace);
       yield* requireSafeDbKey(key);
       yield* validatePutOptions(options);
+      // D1 has no native TTL, so every write prunes elapsed records before a
+      // conditional create. This keeps the one-time-code namespace bounded and
+      // makes an expired key immediately reusable.
+      yield* d1Run(database, `DELETE FROM ${quotedTableName} WHERE namespace = ? AND expires_at IS NOT NULL AND expires_at <= ?`, [namespace, epochSeconds()]);
       const encoded = yield* encodePrimitiveDbValue(value);
       const updatedAt = new Date().toISOString();
+      const expiresAt = options?.expiresAt ?? null;
 
       if (options?.ifNoneMatch === "*") {
         const row = yield* d1First<D1RecordRow>(
           database,
-          `INSERT INTO ${quotedTableName} (namespace, key, value, version, updated_at) VALUES (?, ?, ?, 1, ?) RETURNING namespace, key, value, version, updated_at`,
-          [namespace, key, encoded, updatedAt],
+          `INSERT INTO ${quotedTableName} (namespace, key, value, version, updated_at, expires_at) VALUES (?, ?, ?, 1, ?, ?) RETURNING namespace, key, value, version, updated_at, expires_at`,
+          [namespace, key, encoded, updatedAt, expiresAt],
           (cause) => isConstraintError(cause) ? new PrimitiveDbConflict({ namespace, key, message: `Record already exists: ${namespace}/${key}` }) : undefined,
         );
         if (row == null) {
@@ -101,8 +107,8 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
       if (options?.ifMatch != null) {
         const row = yield* d1First<D1RecordRow>(
           database,
-          `UPDATE ${quotedTableName} SET value = ?, version = version + 1, updated_at = ? WHERE namespace = ? AND key = ? AND version = ? RETURNING namespace, key, value, version, updated_at`,
-          [encoded, updatedAt, namespace, key, options.ifMatch],
+          `UPDATE ${quotedTableName} SET value = ?, version = version + 1, updated_at = ?, expires_at = ? WHERE namespace = ? AND key = ? AND version = ? RETURNING namespace, key, value, version, updated_at, expires_at`,
+          [encoded, updatedAt, expiresAt, namespace, key, options.ifMatch],
         );
         if (row == null) {
           return yield* Effect.fail(new PrimitiveDbConflict({ namespace, key, message: `Record version mismatch: ${namespace}/${key}` }));
@@ -112,8 +118,8 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
 
       const row = yield* d1First<D1RecordRow>(
         database,
-        `INSERT INTO ${quotedTableName} (namespace, key, value, version, updated_at) VALUES (?, ?, ?, 1, ?) ON CONFLICT(namespace, key) DO UPDATE SET value = excluded.value, version = version + 1, updated_at = excluded.updated_at RETURNING namespace, key, value, version, updated_at`,
-        [namespace, key, encoded, updatedAt],
+        `INSERT INTO ${quotedTableName} (namespace, key, value, version, updated_at, expires_at) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(namespace, key) DO UPDATE SET value = excluded.value, version = version + 1, updated_at = excluded.updated_at, expires_at = excluded.expires_at RETURNING namespace, key, value, version, updated_at, expires_at`,
+        [namespace, key, encoded, updatedAt, expiresAt],
       );
       if (row == null) {
         return yield* Effect.fail(new PrimitiveDbError({ message: `D1 did not return record: ${namespace}/${key}` }));
@@ -145,8 +151,9 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
       yield* requireSafeDbKeyPrefix(prefix);
       const startAfter = yield* normalizeListStartAfter(options?.startAfter);
       const limit = yield* normalizeListLimit(options?.limit);
-      const where = ["namespace = ?"];
-      const values: Array<string | number> = [namespace];
+      yield* d1Run(database, `DELETE FROM ${quotedTableName} WHERE namespace = ? AND expires_at IS NOT NULL AND expires_at <= ?`, [namespace, epochSeconds()]);
+      const where = ["namespace = ?", "(expires_at IS NULL OR expires_at > ?)"];
+      const values: Array<string | number | null> = [namespace, epochSeconds()];
       if (prefix !== "") {
         where.push("substr(key, 1, length(?)) = ?");
         values.push(prefix, prefix);
@@ -157,7 +164,7 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
       }
       const rows = yield* d1All<D1RecordRow>(
         database,
-        `SELECT namespace, key, value, version, updated_at FROM ${quotedTableName} WHERE ${where.join(" AND ")} ORDER BY key LIMIT ?`,
+        `SELECT namespace, key, value, version, updated_at, expires_at FROM ${quotedTableName} WHERE ${where.join(" AND ")} ORDER BY key LIMIT ?`,
         [...values, limit],
       );
       return {
@@ -171,14 +178,21 @@ export function makeD1PrimitiveDb(database: D1DatabaseBinding, quotedTableName =
 
 /** Creates the records table when it does not already exist. */
 function ensureTable(database: D1DatabaseBinding, quotedTableName: string): Effect.Effect<void, PrimitiveDbError> {
-  return d1Run(database, `CREATE TABLE IF NOT EXISTS ${quotedTableName} (
-    namespace TEXT NOT NULL,
-    key TEXT NOT NULL,
-    value TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (namespace, key)
-  )`).pipe(Effect.asVoid);
+  return Effect.gen(function* () {
+    yield* d1Run(database, `CREATE TABLE IF NOT EXISTS ${quotedTableName} (
+      namespace TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      expires_at INTEGER,
+      PRIMARY KEY (namespace, key)
+    )`);
+    const columns = yield* d1All<{ readonly name: string }>(database, `PRAGMA table_info(${quotedTableName})`, []);
+    if (!columns.some((column) => column.name === "expires_at")) {
+      yield* d1Run(database, `ALTER TABLE ${quotedTableName} ADD COLUMN expires_at INTEGER`);
+    }
+  });
 }
 
 /** Converts a table row back into the public record shape. */
@@ -192,18 +206,18 @@ function rowToRecord<A extends JsonValue>(row: D1RecordRow): Effect.Effect<Primi
 function d1First<A>(
   database: D1DatabaseBinding,
   query: string,
-  values?: ReadonlyArray<string | number>,
+  values?: ReadonlyArray<string | number | null>,
 ): Effect.Effect<A | null, PrimitiveDbError>;
 function d1First<A>(
   database: D1DatabaseBinding,
   query: string,
-  values: ReadonlyArray<string | number>,
+  values: ReadonlyArray<string | number | null>,
   mapCause: (cause: unknown) => PrimitiveDbError | PrimitiveDbConflict | undefined,
 ): Effect.Effect<A | null, PrimitiveDbError | PrimitiveDbConflict>;
 function d1First<A>(
   database: D1DatabaseBinding,
   query: string,
-  values: ReadonlyArray<string | number> = [],
+  values: ReadonlyArray<string | number | null> = [],
   mapCause?: (cause: unknown) => PrimitiveDbError | PrimitiveDbConflict | undefined,
 ): Effect.Effect<A | null, PrimitiveDbError | PrimitiveDbConflict> {
   return Effect.tryPromise({
@@ -213,7 +227,7 @@ function d1First<A>(
 }
 
 /** Runs one D1 query and returns every result row. */
-function d1All<A>(database: D1DatabaseBinding, query: string, values: ReadonlyArray<string | number>): Effect.Effect<ReadonlyArray<A>, PrimitiveDbError> {
+function d1All<A>(database: D1DatabaseBinding, query: string, values: ReadonlyArray<string | number | null>): Effect.Effect<ReadonlyArray<A>, PrimitiveDbError> {
   return Effect.tryPromise({
     try: async () => (await database.prepare(query).bind(...values).all<A>()).results,
     catch: (cause) => new PrimitiveDbError({ message: "D1 query failed", cause }),
@@ -221,7 +235,7 @@ function d1All<A>(database: D1DatabaseBinding, query: string, values: ReadonlyAr
 }
 
 /** Runs one D1 statement for its side effect and change count. */
-function d1Run(database: D1DatabaseBinding, query: string, values: ReadonlyArray<string | number> = []): Effect.Effect<{ readonly meta?: { readonly changes?: number } }, PrimitiveDbError> {
+function d1Run(database: D1DatabaseBinding, query: string, values: ReadonlyArray<string | number | null> = []): Effect.Effect<{ readonly meta?: { readonly changes?: number } }, PrimitiveDbError> {
   return Effect.tryPromise({
     try: () => database.prepare(query).bind(...values).run(),
     catch: (cause) => new PrimitiveDbError({ message: "D1 query failed", cause }),
@@ -238,4 +252,9 @@ function sqlIdentifier(name: string): Effect.Effect<string, PrimitiveDbError> {
 /** Detects D1 unique-constraint failures from their error message. */
 function isConstraintError(cause: unknown): boolean {
   return String((cause as { readonly message?: unknown }).message ?? cause).toLowerCase().includes("constraint");
+}
+
+/** Current Unix timestamp in seconds, the unit used by storage TTLs. */
+function epochSeconds(): number {
+  return Math.floor(Date.now() / 1000);
 }

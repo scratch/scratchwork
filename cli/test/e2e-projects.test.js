@@ -298,6 +298,9 @@ describe("scratchwork login", () => {
           if (exchange === "fail") {
             return Response.json({ error: "Authorization code already redeemed" }, { status: 400 });
           }
+          if (exchange === "cloudflare-block") {
+            return new Response("Forbidden", { status: 403, headers: { "cf-mitigated": "challenge" } });
+          }
           return Response.json({ token: "login-token", server: serverUrl, email: "founder@example.com" });
         }
         return new Response("Not found", { status: 404 });
@@ -362,6 +365,62 @@ describe("scratchwork login", () => {
     }
   });
 
+  test("preserves the exchange POST while a content origin canonicalizes to the app origin", async () => {
+    const appPort = nextPort();
+    const contentPort = nextPort();
+    const appUrl = `http://localhost:${appPort}`;
+    const contentUrl = `http://localhost:${contentPort}`;
+    const appRequests = [];
+    const appServer = Bun.serve({
+      port: appPort,
+      async fetch(request) {
+        if (new URL(request.url).pathname === "/auth/cli/token" && request.method === "POST") {
+          appRequests.push(await request.json());
+          return Response.json({ token: "canonical-token", server: appUrl, email: "founder@example.com" });
+        }
+        return new Response("Not found", { status: 404 });
+      },
+    });
+    const contentServer = Bun.serve({
+      port: contentPort,
+      fetch(request) {
+        if (new URL(request.url).pathname === "/auth/cli/token") {
+          return Response.redirect(`${appUrl}/auth/cli/token`, 307);
+        }
+        return new Response("Not found", { status: 404 });
+      },
+    });
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-login-content-origin-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-login-content-config-"));
+    const proc = Bun.spawn([...CLI, "login", contentUrl], {
+      cwd: dir,
+      env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", SCRATCHWORK_HOME: configDir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    try {
+      const output = await readOutputUntil(proc, "cli_redirect=");
+      const login = new URL(output.match(/https?:\/\/\S+\/auth\/login\?\S+/)[0]);
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      callback.searchParams.set("code", "one-time-code");
+      callback.searchParams.set("state", login.searchParams.get("cli_state"));
+      expect((await fetch(callback)).status).toBe(200);
+      expect(await proc.exited).toBe(0);
+      expect(appRequests).toHaveLength(1);
+      expect(appRequests[0].code).toBe("one-time-code");
+      const auth = JSON.parse(readFileSync(join(configDir, "auth.json"), "utf8"));
+      expect(auth.servers[appUrl].token).toBe("canonical-token");
+      expect(auth.servers[contentUrl]).toBeUndefined();
+    } finally {
+      if (proc.exitCode == null) proc.kill();
+      await proc.exited;
+      appServer.stop(true);
+      contentServer.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   test("rejects a competing callback with the wrong state and keeps waiting", async () => {
     const { requests, proc, login, cleanup } = await startLogin();
     try {
@@ -415,6 +474,28 @@ describe("scratchwork login", () => {
       expect(code).not.toBe(0);
       expect(stderr).toContain("already redeemed");
       expect(existsSync(join(configDir, "auth.json"))).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("a Cloudflare-blocked exchange tells the administrator how to enable first login", async () => {
+    const { proc, login, cleanup } = await startLogin({ exchange: "cloudflare-block" });
+    try {
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      callback.searchParams.set("code", "one-time-code");
+      callback.searchParams.set("state", login.searchParams.get("cli_state"));
+
+      const response = await fetch(callback);
+      expect(response.status).toBe(400);
+      const [stderr, code] = await Promise.all([
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(code).not.toBe(0);
+      expect(stderr).toContain("Bypass / Everyone");
+      expect(stderr).toContain("/auth/cli/token");
+      expect(stderr).not.toContain("Access session may have expired");
     } finally {
       await cleanup();
     }

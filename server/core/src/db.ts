@@ -30,10 +30,12 @@ export interface PrimitiveDbRecord<A extends JsonValue = JsonValue> {
   readonly updatedAt: string;
 }
 
-/** Write preconditions: `ifNoneMatch: "*"` requires a new key, `ifMatch` pins the version. */
+/** Write preconditions plus an optional Unix-second expiry. Expired records are
+ * treated as absent by every backend and are eligible for physical deletion. */
 export interface PutPrimitiveDbRecordOptions {
   readonly ifNoneMatch?: "*";
   readonly ifMatch?: number;
+  readonly expiresAt?: number;
 }
 
 /** Delete precondition: `ifMatch` pins the version. */
@@ -90,6 +92,7 @@ interface MemoryRecord {
   readonly encoded: string;
   readonly version: number;
   readonly updatedAt: string;
+  readonly expiresAt?: number;
 }
 
 /** Provides an in-memory PrimitiveDb implementation for tests and local composition. */
@@ -105,7 +108,8 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
     Effect.gen(function* () {
       yield* requireSafeDbNamespace(namespace);
       yield* requireSafeDbKey(key);
-      const record = records.get(memoryKey(namespace, key));
+      const mapKey = memoryKey(namespace, key);
+      const record = liveMemoryRecord(records, mapKey);
       return record == null ? null : yield* materializeRecord<A>(namespace, key, record);
     });
 
@@ -116,7 +120,7 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
       yield* validatePutOptions(options);
       const encoded = yield* encodePrimitiveDbValue(value);
       const mapKey = memoryKey(namespace, key);
-      const existing = records.get(mapKey);
+      const existing = liveMemoryRecord(records, mapKey);
       if (options?.ifNoneMatch === "*" && existing != null) {
         return yield* Effect.fail(new PrimitiveDbConflict({ namespace, key, message: `Record already exists: ${namespace}/${key}` }));
       }
@@ -128,6 +132,7 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
         encoded,
         version: existing == null ? 1 : existing.version + 1,
         updatedAt: new Date().toISOString(),
+        expiresAt: options?.expiresAt,
       };
       records.set(mapKey, record);
       return yield* materializeRecord<A>(namespace, key, record);
@@ -138,7 +143,7 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
       yield* requireSafeDbNamespace(namespace);
       yield* requireSafeDbKey(key);
       const mapKey = memoryKey(namespace, key);
-      const existing = records.get(mapKey);
+      const existing = liveMemoryRecord(records, mapKey);
       yield* validateDeleteOptions(options);
       if (options?.ifMatch != null && existing?.version !== options.ifMatch) {
         return yield* Effect.fail(new PrimitiveDbConflict({ namespace, key, message: `Record version mismatch: ${namespace}/${key}` }));
@@ -154,6 +159,7 @@ export function makeMemoryPrimitiveDb(records = new Map<string, MemoryRecord>())
       const startAfter = yield* normalizeListStartAfter(options?.startAfter);
       const limit = yield* normalizeListLimit(options?.limit);
       const namespacePrefix = `${namespace}\0`;
+      pruneExpiredMemoryRecords(records);
       const matches = [...records.entries()]
         .filter(([key]) => key.startsWith(namespacePrefix))
         .map(([key, record]) => [key.slice(namespacePrefix.length), record] as const)
@@ -245,6 +251,9 @@ export function validatePutOptions(options: PutPrimitiveDbRecordOptions | undefi
   if (options?.ifNoneMatch === "*" && options.ifMatch != null) {
     return Effect.fail(new PrimitiveDbError({ message: "Use only one database write precondition" }));
   }
+  if (options?.expiresAt != null && (!Number.isInteger(options.expiresAt) || options.expiresAt < 1)) {
+    return Effect.fail(new PrimitiveDbError({ message: "Database expiry must be a positive Unix timestamp" }));
+  }
   return validateVersionPrecondition(options?.ifMatch);
 }
 
@@ -293,6 +302,24 @@ function materializeRecord<A extends JsonValue>(
 /** Joins namespace and key with a separator no valid key can contain. */
 function memoryKey(namespace: string, key: string): string {
   return `${namespace}\0${key}`;
+}
+
+/** Returns a live memory record, deleting it synchronously when its TTL elapsed. */
+function liveMemoryRecord(records: Map<string, MemoryRecord>, key: string): MemoryRecord | undefined {
+  const record = records.get(key);
+  if (record?.expiresAt != null && record.expiresAt <= Math.floor(Date.now() / 1000)) {
+    records.delete(key);
+    return undefined;
+  }
+  return record;
+}
+
+/** Prevents expired records from surviving indefinitely when callers only list. */
+function pruneExpiredMemoryRecords(records: Map<string, MemoryRecord>): void {
+  const now = Math.floor(Date.now() / 1000);
+  for (const [key, record] of records) {
+    if (record.expiresAt != null && record.expiresAt <= now) records.delete(key);
+  }
 }
 
 const utf8Encoder = new TextEncoder();

@@ -31,10 +31,18 @@ export default {
       if (new URL(request.url).pathname === "/cdn-cgi/access/logout") {
         return Response.redirect(new URL("/", request.url), 302);
       }
-      const assertion = await issueLocalAccessAssertion(env);
+      const pathname = new URL(request.url).pathname;
       const headers = new Headers(request.headers);
-      // Access owns this header at the edge. Always overwrite a client-supplied value.
-      headers.set("Cf-Access-Jwt-Assertion", assertion);
+      // Production Access must bypass this one PKCE exchange path so a first login
+      // does not need the credential it is trying to acquire. Model that edge rule
+      // locally; every other route receives an authoritative Access assertion.
+      if (!shouldInjectAccessAssertion(pathname)) {
+        headers.delete("Cf-Access-Jwt-Assertion");
+      } else {
+        const assertion = await issueLocalAccessAssertion(env);
+        // Access owns this header at the edge. Always overwrite a client value.
+        headers.set("Cf-Access-Jwt-Assertion", assertion);
+      }
       return worker.fetch(new Request(request, { headers }), env as never, context);
     } catch (error) {
       console.error("scratchwork local Access simulator: unhandled error", error);
@@ -45,6 +53,11 @@ export default {
     }
   },
 };
+
+/** Mirrors the production Access policy's one deliberately bypassed route. */
+export function shouldInjectAccessAssertion(pathname: string): boolean {
+  return pathname !== "/auth/cli/token";
+}
 
 /** Issues one short-lived, Cloudflare-shaped application token for the configured local
  * identity. The production verifier still checks its RS256 signature and all claims. */

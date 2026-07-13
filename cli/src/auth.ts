@@ -169,9 +169,15 @@ export function generateLoginProof(): Effect.Effect<LoginProof, CliError> {
 export function decodeLoginCallback(url: URL, expectedState: string): LoginCallback | null {
   if (url.searchParams.get("state") !== expectedState) return null;
   const error = nonEmpty(url.searchParams.get("error") ?? undefined);
-  if (error != null) return { error };
+  if (error != null) return { error: sanitizeLoginError(error) };
   const code = nonEmpty(url.searchParams.get("code") ?? undefined);
   return code == null ? null : { code };
+}
+
+/** Keeps a hostile server from injecting terminal controls through the browser
+ * callback while preserving conventional OAuth error identifiers. */
+function sanitizeLoginError(error: string): string {
+  return /^[A-Za-z0-9_.-]{1,64}$/.test(error) ? error : "provider_error";
 }
 
 /** Generates base64url-encoded Web Crypto randomness. */

@@ -107,6 +107,9 @@ export function tempDir(prefix: string): { readonly path: string; readonly remov
 interface StoredCookie {
   readonly value: string;
   readonly path: string;
+  readonly domain: string;
+  readonly hostOnly: boolean;
+  readonly expiresAt?: number;
 }
 
 /** One observed hop of a browser navigation. */
@@ -177,9 +180,10 @@ export class Browser {
 
   /** Returns the cookie header this browser would send to a URL. */
   cookieHeader(target: URL): string {
-    const cookies = this.jar.get(target.hostname);
-    if (cookies == null) return "";
-    return [...cookies.entries()]
+    const now = Date.now();
+    return [...this.jar.values()].flatMap((cookies) => [...cookies.entries()])
+      .filter(([, stored]) => stored.expiresAt == null || stored.expiresAt > now)
+      .filter(([, stored]) => stored.hostOnly ? target.hostname === stored.domain : domainMatches(target.hostname, stored.domain))
       .filter(([, stored]) => target.pathname === stored.path || target.pathname.startsWith(stored.path.endsWith("/") ? stored.path : `${stored.path}/`) || stored.path === "/")
       .map(([name, stored]) => `${name}=${stored.value}`)
       .join("; ");
@@ -188,24 +192,31 @@ export class Browser {
   /** Injects a cookie, as an attacker-controlled or cross-host test would. */
   setCookie(hostname: string, name: string, value: string, path = "/"): void {
     const cookies = this.jar.get(hostname) ?? new Map<string, StoredCookie>();
-    cookies.set(name, { value, path });
+    cookies.set(name, { value, path, domain: hostname, hostOnly: true });
     this.jar.set(hostname, cookies);
   }
 
   /** Reads one stored cookie value. */
   getCookie(hostname: string, name: string): string | undefined {
-    return this.jar.get(hostname)?.get(name)?.value;
+    const exact = this.jar.get(hostname)?.get(name);
+    if (exact != null) return exact.value;
+    for (const cookies of this.jar.values()) {
+      const stored = cookies.get(name);
+      if (stored != null && !stored.hostOnly && domainMatches(hostname, stored.domain)) return stored.value;
+    }
+    return undefined;
   }
 
   /** Lists stored cookie names for a host. */
   cookieNames(hostname: string): ReadonlyArray<string> {
-    return [...(this.jar.get(hostname)?.keys() ?? [])];
+    return [...new Set([...this.jar.values()].flatMap((cookies) => [...cookies.entries()])
+      .filter(([, stored]) => stored.hostOnly ? hostname === stored.domain : domainMatches(hostname, stored.domain))
+      .map(([name]) => name))];
   }
 
   private storeCookies(target: URL, response: Response): void {
     const setCookies = response.headers.getSetCookie?.() ?? [];
     if (setCookies.length === 0) return;
-    const cookies = this.jar.get(target.hostname) ?? new Map<string, StoredCookie>();
     for (const header of setCookies) {
       const [pair, ...attributes] = header.split(";");
       const eq = pair.indexOf("=");
@@ -214,15 +225,33 @@ export class Browser {
       const value = pair.slice(eq + 1).trim();
       const pathAttr = attributes.map((a) => a.trim()).find((a) => a.toLowerCase().startsWith("path="));
       const path = pathAttr == null ? "/" : pathAttr.slice(5);
+      const domainAttr = attributes.map((a) => a.trim()).find((a) => a.toLowerCase().startsWith("domain="));
+      const domain = (domainAttr == null ? target.hostname : domainAttr.slice(7).replace(/^\./, "")).toLowerCase();
+      if (!domainMatches(target.hostname, domain)) continue;
+      // Browsers reject __Host- cookies that try to escape host-only, root-path
+      // scoping. Keeping that behavior makes the origin-isolation tests meaningful.
+      if (name.startsWith("__Host-") && (domainAttr != null || path !== "/")) continue;
       const maxAgeAttr = attributes.map((a) => a.trim()).find((a) => a.toLowerCase().startsWith("max-age="));
-      if (maxAgeAttr != null && Number(maxAgeAttr.slice(8)) <= 0) {
+      const expiresAttr = attributes.map((a) => a.trim()).find((a) => a.toLowerCase().startsWith("expires="));
+      const maxAge = maxAgeAttr == null ? undefined : Number(maxAgeAttr.slice(8));
+      const expiresAt = maxAge == null || !Number.isFinite(maxAge)
+        ? (expiresAttr == null ? undefined : Date.parse(expiresAttr.slice(8)))
+        : Date.now() + maxAge * 1000;
+      const cookies = this.jar.get(domain) ?? new Map<string, StoredCookie>();
+      if ((maxAge != null && maxAge <= 0) || (expiresAt != null && expiresAt <= Date.now())) {
         cookies.delete(name);
       } else {
-        cookies.set(name, { value, path });
+        cookies.set(name, { value, path, domain, hostOnly: domainAttr == null, expiresAt });
       }
+      this.jar.set(domain, cookies);
     }
-    this.jar.set(target.hostname, cookies);
   }
+}
+
+/** RFC-style suffix match used for Domain cookies (after leading-dot removal). */
+function domainMatches(hostname: string, domain: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === domain || host.endsWith(`.${domain}`);
 }
 
 /** Maps unresolvable loopback hostnames (*.localhost) to 127.0.0.1. */
@@ -303,13 +332,18 @@ export async function startBackend(lane: BackendLane, env: BackendEnv): Promise<
     stdout: "pipe",
     stderr: "pipe",
   });
+  // Drain stderr immediately: waiting only on stdout can deadlock once the child
+  // fills the OS pipe buffer before printing its ready banner.
+  const stderr = new Response(proc.stderr).text();
 
   try {
     await readOutputUntil(proc, `app      ${appUrl}`, 90_000);
   } catch (error) {
-    const stderr = await new Response(proc.stderr).text().catch(() => "");
+    if (proc.exitCode == null) proc.kill();
+    await proc.exited;
+    const errorOutput = await stderr.catch(() => "");
     storage.remove();
-    throw new Error(`${lane} backend failed to start: ${(error as Error).message}\nstderr:\n${stderr}`);
+    throw new Error(`${lane} backend failed to start: ${(error as Error).message}\nstderr:\n${errorOutput}`);
   }
 
   return {
@@ -319,6 +353,7 @@ export async function startBackend(lane: BackendLane, env: BackendEnv): Promise<
     stop: async () => {
       proc.kill();
       await proc.exited;
+      await stderr;
       storage.remove();
     },
   };

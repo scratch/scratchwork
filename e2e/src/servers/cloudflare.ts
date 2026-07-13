@@ -8,6 +8,7 @@
  * prints the shared `app      <url>` ready banner.
  */
 import { Miniflare } from "miniflare";
+import { DEFAULT_CLOUDFLARE_COMPATIBILITY_DATE } from "@scratchwork/server-deploy-cloudflare";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -48,7 +49,7 @@ for (const [key, value] of Object.entries(process.env)) {
 const mf = new Miniflare({
   modules: true,
   scriptPath: join(outdir, "worker.js"),
-  compatibilityDate: "2025-01-01",
+  compatibilityDate: DEFAULT_CLOUDFLARE_COMPATIBILITY_DATE,
   host: "127.0.0.1",
   port,
   r2Buckets: ["SCRATCHWORK_R2"],

@@ -182,22 +182,34 @@ async function ensureBucket(aws: Aws, bucket: string, bucketRegion: string): Pro
 /** Creates the DynamoDB primitive DB table when it does not already exist. */
 async function ensureDynamoDbTable(aws: Aws, table: string): Promise<void> {
   const exists = await aws(["dynamodb", "describe-table", "--table-name", table], { allowFailure: true });
-  if (exists.ok) return;
-  await aws([
-    "dynamodb",
-    "create-table",
-    "--table-name",
-    table,
-    "--attribute-definitions",
-    "AttributeName=namespace,AttributeType=S",
-    "AttributeName=key,AttributeType=S",
-    "--key-schema",
-    "AttributeName=namespace,KeyType=HASH",
-    "AttributeName=key,KeyType=RANGE",
-    "--billing-mode",
-    "PAY_PER_REQUEST",
-  ]);
-  await aws(["dynamodb", "wait", "table-exists", "--table-name", table]);
+  if (!exists.ok) {
+    await aws([
+      "dynamodb",
+      "create-table",
+      "--table-name",
+      table,
+      "--attribute-definitions",
+      "AttributeName=namespace,AttributeType=S",
+      "AttributeName=key,AttributeType=S",
+      "--key-schema",
+      "AttributeName=namespace,KeyType=HASH",
+      "AttributeName=key,KeyType=RANGE",
+      "--billing-mode",
+      "PAY_PER_REQUEST",
+    ]);
+    await aws(["dynamodb", "wait", "table-exists", "--table-name", table]);
+  }
+
+  const ttl = await aws([
+    "dynamodb", "describe-time-to-live", "--table-name", table,
+    "--query", "TimeToLiveDescription.TimeToLiveStatus", "--output", "text",
+  ], { allowFailure: true, capture: true });
+  if (!ttl.ok || !["ENABLED", "ENABLING"].includes(ttl.stdout.trim())) {
+    await aws([
+      "dynamodb", "update-time-to-live", "--table-name", table,
+      "--time-to-live-specification", "Enabled=true,AttributeName=expiresAt",
+    ]);
+  }
 }
 
 /** Creates or updates the Lambda execution role and its S3 + DynamoDB access policy. */

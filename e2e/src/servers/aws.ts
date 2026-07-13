@@ -9,7 +9,7 @@
  * same shapes deploy.ts provisions), then serves on PORT and prints the shared
  * `app      <url>` ready banner.
  */
-import { CreateTableCommand, DynamoDBClient, waitUntilTableExists } from "@aws-sdk/client-dynamodb";
+import { CreateTableCommand, DynamoDBClient, UpdateTimeToLiveCommand, waitUntilTableExists } from "@aws-sdk/client-dynamodb";
 import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 
@@ -53,6 +53,10 @@ await dynamo.send(new CreateTableCommand({
   BillingMode: "PAY_PER_REQUEST",
 }));
 await waitUntilTableExists({ client: dynamo, maxWaitTime: 60 }, { TableName: table });
+await dynamo.send(new UpdateTimeToLiveCommand({
+  TableName: table,
+  TimeToLiveSpecification: { AttributeName: "expiresAt", Enabled: true },
+}));
 
 const { handler } = await import("@scratchwork/server-deploy-aws/handler");
 

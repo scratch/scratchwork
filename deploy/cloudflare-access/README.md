@@ -17,12 +17,18 @@ In the Cloudflare Zero Trust dashboard, create a self-hosted Access
 application that covers **both** hostnames, `access.sndbx.sh` and
 `access-pages.sndbx.sh`, with a policy allowing the intended users. Then:
 
+- Create a second, more-specific self-hosted application for
+  `access.sndbx.sh/auth/cli/token` and give it a **Bypass / Everyone** policy.
+  Only this one-time code + PKCE exchange is public at the edge; the Worker
+  still rejects invalid, expired, mismatched, or replayed codes. This bypass is
+  required for first-time and post-expiry CLI login.
 - Copy the application's Audience (AUD) tag from its overview page into
   `SCRATCHWORK_CF_ACCESS_AUD`.
 - Copy the team domain into `SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN`.
 - Set a long session duration on the application: `scratchwork login` relays
-  the browser's Access JWT to the CLI, and CLI commands start failing with a
-  re-login prompt when it expires.
+  the browser's Access JWT through an encrypted authorization code and the
+  bypassed exchange endpoint; CLI commands start failing with a re-login prompt
+  when that JWT expires.
 
 `SCRATCHWORK_ALLOWED_USERS` still applies on top of the Access policy; this
 config leaves it at `public`, so the Access policy alone decides who gets in.

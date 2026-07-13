@@ -257,7 +257,7 @@ function readLocalOAuthEndpoints(
   ] as const;
   const values = names.map((name) => nonEmpty(env[name]));
   if (values.every((value) => value == null)) return Effect.succeed({});
-  if (appUrl == null || !isLoopbackHost(new URL(appUrl).hostname)) {
+  if (appUrl == null || !isLiteralLoopbackHost(new URL(appUrl).hostname)) {
     return Effect.fail(
       new ServerConfigError({
         message: "SCRATCHWORK_LOCAL_OAUTH_* endpoints are accepted only when SCRATCHWORK_APP_URL uses a loopback host",
@@ -282,10 +282,18 @@ function readLocalOAuthEndpoints(
 function isLoopbackUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return (url.protocol === "http:" || url.protocol === "https:") && isLoopbackHost(url.hostname);
+    return (url.protocol === "http:" || url.protocol === "https:") && isLiteralLoopbackHost(url.hostname);
   } catch {
     return false;
   }
+}
+
+/** Narrow host gate for credential-bearing local OAuth endpoints. Unlike the
+ * general local-development helper, this excludes 0.0.0.0 and *.localhost so a
+ * client secret is sent only to an explicit loopback listener. */
+function isLiteralLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 }
 
 /** Parses required Cloudflare Access settings from environment variables. */

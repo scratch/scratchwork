@@ -1,18 +1,19 @@
 /*
- * Starts (or reuses) the LocalStack container backing the AWS lane. The lane is
+ * Starts an isolated LocalStack container backing the AWS lane. The lane is
  * a required part of `bun run ci`; when Docker is unavailable locally the error
  * says so explicitly, and SCRATCHWORK_E2E_SKIP_AWS=1 is the deliberate, loud
  * opt-out for machines that cannot run it — never silent, and never in CI.
  */
 
-const CONTAINER = "scratchwork-e2e-localstack";
+/** Per-run naming prevents concurrent worktrees/test invocations from deleting or
+ * attaching to one another's LocalStack container. */
+const CONTAINER = `scratchwork-e2e-localstack-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
 // The community image line: as of 2026 the "stable"/"latest" tags point at the
 // licensed distribution and exit without a LOCALSTACK_AUTH_TOKEN; the 4.x
 // community line runs S3 + DynamoDB unlicensed, which is all this lane needs.
 const IMAGE = "localstack/localstack:4";
 
-/** A reachable LocalStack: its edge endpoint and a stop that only removes the
- * container when this run started it. */
+/** A reachable LocalStack edge endpoint owned by this run. */
 export interface LocalStack {
   readonly endpoint: string;
   readonly stop: () => Promise<void>;
@@ -37,21 +38,14 @@ export async function ensureLocalStack(): Promise<LocalStack> {
     );
   }
 
-  const running = await docker(["inspect", "-f", "{{.State.Running}}", CONTAINER]);
-  let startedHere = false;
-  if (running.trim() !== "true") {
-    // A stopped leftover container blocks the name; clear it before starting.
-    await docker(["rm", "-f", CONTAINER]).catch(() => "");
-    await docker([
-      "run", "-d",
-      "--name", CONTAINER,
-      "-e", "SERVICES=s3,dynamodb",
-      "-e", "EAGER_SERVICE_LOADING=1",
-      "-p", "127.0.0.1::4566",
-      IMAGE,
-    ], { rejectOnFailure: true });
-    startedHere = true;
-  }
+  await docker([
+    "run", "-d",
+    "--name", CONTAINER,
+    "-e", "SERVICES=s3,dynamodb",
+    "-e", "EAGER_SERVICE_LOADING=1",
+    "-p", "127.0.0.1::4566",
+    IMAGE,
+  ], { rejectOnFailure: true });
 
   const portLine = await docker(["port", CONTAINER, "4566/tcp"], { rejectOnFailure: true });
   const hostPort = portLine.trim().split("\n")[0]?.split(":").pop();
@@ -62,7 +56,7 @@ export async function ensureLocalStack(): Promise<LocalStack> {
   return {
     endpoint,
     stop: async () => {
-      if (startedHere) await docker(["rm", "-f", CONTAINER]).catch(() => "");
+      await docker(["rm", "-f", CONTAINER]).catch(() => "");
     },
   };
 }

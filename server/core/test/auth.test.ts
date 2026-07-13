@@ -6,6 +6,7 @@ import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
 import {
   createSessionToken,
   decodeCliAuthorizationCode,
+  decryptCliCloudflareToken,
   makeAuth,
   verifyCliCodeExchange,
   type AuthUser,
@@ -55,6 +56,8 @@ function cookieValueFromSetCookie(setCookie: string): string {
 describe("Auth", () => {
   test("accepts a signed bearer session token", async () => {
     const token = await Effect.runPromise(createSessionToken(user, googleConfig));
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(token.split(".")[0])));
+    expect(payload.kind).toBe("session");
     const auth = makeAuth(googleConfig);
 
     const currentUser = await Effect.runPromise(
@@ -98,6 +101,19 @@ describe("Auth", () => {
     expect((await Effect.runPromise(auth.verifyProjectAccessToken(token, "site", "cookie")))?.email).toBe(user.email);
     // A token for one project does not verify for another, nor across uses.
     expect(await Effect.runPromise(auth.verifyProjectAccessToken(token, "other", "cookie"))).toBeNull();
+    expect(await Effect.runPromise(auth.verifyProjectAccessToken(token, "site", "handoff"))).toBeNull();
+  });
+
+  test("rejects expired project-access handoff tokens", async () => {
+    const auth = makeAuth(googleConfig);
+    const realNow = Date.now;
+    let token: string;
+    try {
+      Date.now = () => realNow() - 120_000;
+      token = await Effect.runPromise(auth.issueProjectAccessToken("site", user, "handoff"));
+    } finally {
+      Date.now = realNow;
+    }
     expect(await Effect.runPromise(auth.verifyProjectAccessToken(token, "site", "handoff"))).toBeNull();
   });
 
@@ -359,8 +375,8 @@ describe("Auth (cloudflare-access)", () => {
     const location = new URL(HttpServerResponse.toWeb(response).headers.get("location") ?? "https://invalid");
     expect(location.origin).toBe("http://127.0.0.1:5555");
     expect(location.searchParams.get("state")).toBe("cli-state-1");
-    // The loopback query carries only the one-time code: the bearer token and the
-    // relayed Access JWT ride the signed code payload to the back-channel exchange.
+    // The loopback query carries only the one-time code: neither bearer credential
+    // is readable from its signed payload.
     expect(location.searchParams.get("token")).toBeNull();
     expect(location.searchParams.get("cf_token")).toBeNull();
 
@@ -368,9 +384,10 @@ describe("Auth (cloudflare-access)", () => {
       decodeCliAuthorizationCode(location.searchParams.get("code") ?? "", cloudflareConfig),
     );
     expect(payload.provider).toBe("cloudflare-access");
-    // The verified Access JWT is relayed inside the signed payload so the CLI can
-    // pass the edge on API requests after the exchange.
-    expect(payload.cfToken).toBe(token);
+    const encodedPayload = new TextDecoder().decode(base64UrlDecode((location.searchParams.get("code") ?? "").split(".")[0]));
+    expect(encodedPayload).not.toContain(token);
+    expect(payload.encryptedCfToken).toBeDefined();
+    expect(await Effect.runPromise(decryptCliCloudflareToken(payload, cloudflareConfig))).toBe(token);
     const redeemed = await Effect.runPromise(
       verifyCliCodeExchange(payload, CLI_VERIFIER, "http://127.0.0.1:5555/callback", cloudflareConfig),
     );
@@ -571,6 +588,15 @@ describe("readServerConfig", () => {
       SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL: "https://accounts.example.com/token",
       SCRATCHWORK_LOCAL_OAUTH_JWKS_URL: "http://127.0.0.1:4300/jwks",
     }))).rejects.toThrow("a loopback URL");
+
+    for (const unsafeHost of ["0.0.0.0", "provider.localhost"]) {
+      await expect(Effect.runPromise(readServerConfig({
+        ...base,
+        SCRATCHWORK_LOCAL_OAUTH_AUTHORIZE_URL: `http://${unsafeHost}:4300/authorize`,
+        SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL: "http://127.0.0.1:4300/token",
+        SCRATCHWORK_LOCAL_OAUTH_JWKS_URL: "http://127.0.0.1:4300/jwks",
+      }))).rejects.toThrow("a loopback URL");
+    }
 
     const config = await Effect.runPromise(readServerConfig({
       ...base,

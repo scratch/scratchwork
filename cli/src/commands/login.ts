@@ -51,11 +51,11 @@ export function runLogin(
     // The exchange's server field is server-controlled input; a malformed URL
     // must fail as a CliError, not crash the fiber.
     const authenticatedServer = yield* Effect.try({
-      try: () => normalizeServerUrl(result.server ?? server),
+      try: () => normalizeServerUrl(result.server),
       catch: () => new CliError({ code: 1, message: `scratchwork login: server returned an invalid server URL: ${result.server}` }),
     });
     yield* writeAuthToken(authenticatedServer, result.token, result.email, result.cfToken);
-    yield* Console.log(`Authenticated ${result.email ?? "user"} for ${authenticatedServer}`);
+    yield* Console.log(`Authenticated ${result.email} for ${authenticatedServer}`);
   });
 }
 
@@ -85,7 +85,11 @@ function awaitBrowserLogin(
           try: () => serveLoginCallback(done, proof.state, exchangeSettled),
           catch: (cause) => new CliError({ code: 1, message: `scratchwork login: ${errorMessage(cause)}` }),
         }),
-        (bunServer) => Effect.sync(() => bunServer.stop(false)),
+        (bunServer) => Effect.sync(() => {
+          // Interruption/timeout must release the browser's pending callback too.
+          settleExchange(false);
+          bunServer.stop(false);
+        }),
       );
       const redirectUri = `http://127.0.0.1:${callback.port}/callback`;
       const url = loginUrl(server, redirectUri, proof);
@@ -109,6 +113,11 @@ function awaitBrowserLogin(
       // scope closes and stops the server.
       yield* Effect.sleep("250 millis");
       return result;
+    }),
+  ).pipe(
+    Effect.timeoutFail({
+      duration: "2 minutes",
+      onTimeout: () => new CliError({ code: 1, message: "scratchwork login: timed out waiting for browser authentication" }),
     }),
   );
 }

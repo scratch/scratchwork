@@ -72,6 +72,7 @@ const AuthUserSchema = Schema.Struct({
 /** Payload of a session token (browser cookie or CLI bearer). */
 const SessionPayloadSchema = Schema.Struct({
   version: Schema.Literal(SESSION_VERSION),
+  kind: Schema.Literal("session"),
   provider: Schema.Literal("google", "cloudflare-access"),
   user: AuthUserSchema,
   issuedAt: Schema.Number,
@@ -112,7 +113,10 @@ const CliCodePayloadSchema = Schema.Struct({
   provider: Schema.Literal("google", "cloudflare-access"),
   codeChallenge: Schema.String,
   redirectUri: Schema.String,
-  cfToken: Schema.optional(Schema.String),
+  /** AES-GCM ciphertext of the relayed Cloudflare Access JWT. Authorization codes
+   * ride a loopback query string, so bearer credentials must never appear in their
+   * signed-but-readable payload. */
+  encryptedCfToken: Schema.optional(Schema.String),
   expiresAt: Schema.Number,
 });
 
@@ -284,7 +288,7 @@ function makeGoogleAuth(config: OAuthAuthConfig): AuthShape {
           return yield* Effect.fail(new AuthError({ status: 400, message: "Missing OAuth callback parameters" }));
         }
         const state = yield* verifySignedValue(stateCookie, config.sessionSecret, OAuthStateSchema);
-        if (state.expiresAt < epochSeconds() || !timingSafeEqual(stateParam, state.state)) {
+        if (state.expiresAt <= epochSeconds() || !timingSafeEqual(stateParam, state.state)) {
           return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid or expired OAuth state" }));
         }
 
@@ -445,10 +449,9 @@ function makeCloudflareAccessAuth(config: CloudflareAccessAuthConfig): AuthShape
 
         const cli = yield* readCliLoginRequest(url);
         if (cli != null) {
-          // The loopback receives only a short-lived one-time code, never the bearer
-          // token. The verified Access JWT rides inside the signed code payload and is
-          // relayed to the CLI by the back-channel exchange, so it too stays out of
-          // the query string.
+          // The loopback receives only a short-lived one-time code. The verified
+          // Access JWT is encrypted before it enters the otherwise-readable signed
+          // payload, then decrypted only by the back-channel exchange.
           const code = yield* issueCliAuthorizationCode(user, {
             provider: "cloudflare-access",
             codeChallenge: cli.cliCodeChallenge,
@@ -503,7 +506,7 @@ function projectAccessTokenMethods(
         const payload = yield* verifySignedValue(token, config.sessionSecret, ProjectAccessPayloadSchema);
         if (
           payload.use !== use ||
-          payload.expiresAt < epochSeconds() ||
+          payload.expiresAt <= epochSeconds() ||
           payload.project !== project ||
           payload.scope !== `/${project}`
         ) {
@@ -524,6 +527,7 @@ export function createSessionToken(
   return signValue(
     {
       version: SESSION_VERSION,
+      kind: "session",
       provider: config.mode === "cloudflare-access" ? "cloudflare-access" : "google",
       user,
       issuedAt,
@@ -596,20 +600,25 @@ export function issueCliAuthorizationCode(
   },
   config: AuthConfig,
 ): Effect.Effect<string, AuthError> {
-  return signValue(
-    {
-      version: SESSION_VERSION,
-      kind: "cli-code",
-      id: randomNonce(),
-      user,
-      provider: binding.provider,
-      codeChallenge: binding.codeChallenge,
-      redirectUri: binding.redirectUri,
-      cfToken: binding.cfToken,
-      expiresAt: epochSeconds() + CLI_CODE_TTL_SECONDS,
-    } satisfies CliCodePayload,
-    config.sessionSecret,
-  );
+  return Effect.gen(function* () {
+    const encryptedCfToken = binding.cfToken == null
+      ? undefined
+      : yield* encryptCredential(binding.cfToken, config.sessionSecret);
+    return yield* signValue(
+      {
+        version: SESSION_VERSION,
+        kind: "cli-code",
+        id: randomNonce(),
+        user,
+        provider: binding.provider,
+        codeChallenge: binding.codeChallenge,
+        redirectUri: binding.redirectUri,
+        encryptedCfToken,
+        expiresAt: epochSeconds() + CLI_CODE_TTL_SECONDS,
+      } satisfies CliCodePayload,
+      config.sessionSecret,
+    );
+  });
 }
 
 /** Verifies a CLI authorization code's signature, shape, and expiry. The one-time
@@ -621,12 +630,25 @@ export function decodeCliAuthorizationCode(
   config: AuthConfig,
 ): Effect.Effect<CliCodePayload, AuthError> {
   return Effect.gen(function* () {
-    const payload = yield* verifySignedValue(code, config.sessionSecret, CliCodePayloadSchema);
-    if (payload.expiresAt < epochSeconds()) {
+    const payload = yield* verifySignedValue(code, config.sessionSecret, CliCodePayloadSchema).pipe(
+      Effect.mapError((cause) => new AuthError({ status: 400, message: "Invalid authorization code", cause })),
+    );
+    if (payload.expiresAt <= epochSeconds()) {
       return yield* Effect.fail(new AuthError({ status: 400, message: "Authorization code expired" }));
     }
     return payload;
   });
+}
+
+/** Returns the Access JWT protected inside a Cloudflare CLI code. The signed code
+ * payload is visible to browser history and local request logs, so this decrypts an
+ * authenticated ciphertext rather than reading a bearer credential in plaintext. */
+export function decryptCliCloudflareToken(
+  payload: CliCodePayload,
+  config: AuthConfig,
+): Effect.Effect<string | undefined, AuthError> {
+  if (payload.encryptedCfToken == null) return Effect.succeed(undefined);
+  return decryptCredential(payload.encryptedCfToken, config.sessionSecret);
 }
 
 /** Proves the exchange request comes from the CLI instance the code was issued to:
@@ -661,10 +683,57 @@ function verifySessionToken(
 ): Effect.Effect<AuthUser | null, AuthError> {
   return Effect.gen(function* () {
     const payload = yield* verifySignedValue(token, config.sessionSecret, SessionPayloadSchema);
-    if (payload.expiresAt < epochSeconds()) return null;
+    if (payload.expiresAt <= epochSeconds()) return null;
     if (!allowedUser(payload.user, config)) return null;
     return payload.user;
   });
+}
+
+/** Encrypts one credential with a key derived from the session secret. The random
+ * 96-bit IV is prefixed to the AES-GCM ciphertext and encoded as base64url. */
+function encryptCredential(value: string, secret: string): Effect.Effect<string, AuthError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const iv = new Uint8Array(12);
+      crypto.getRandomValues(iv);
+      const key = await credentialEncryptionKey(secret, ["encrypt"]);
+      const encrypted = new Uint8Array(await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        key,
+        new TextEncoder().encode(value),
+      ));
+      const encoded = new Uint8Array(iv.length + encrypted.length);
+      encoded.set(iv);
+      encoded.set(encrypted, iv.length);
+      return bytesToBase64Url(encoded);
+    },
+    catch: (cause) => new AuthError({ status: 500, message: "Could not protect Cloudflare Access credential", cause }),
+  });
+}
+
+/** Decrypts a credential produced by encryptCredential. */
+function decryptCredential(value: string, secret: string): Effect.Effect<string, AuthError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const encoded = base64UrlToBytes(value);
+      if (encoded == null || encoded.length <= 12) throw new Error("invalid encrypted credential");
+      const iv = encoded.slice(0, 12);
+      const ciphertext = encoded.slice(12);
+      const key = await credentialEncryptionKey(secret, ["decrypt"]);
+      const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+      return new TextDecoder().decode(decrypted);
+    },
+    catch: (cause) => new AuthError({ status: 400, message: "Invalid authorization code", cause }),
+  });
+}
+
+/** Derives the fixed-width AES key without using the session secret as raw AES input. */
+async function credentialEncryptionKey(
+  secret: string,
+  usages: ReadonlyArray<"encrypt" | "decrypt">,
+): Promise<CryptoKey> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [...usages]);
 }
 
 /** Exchanges a Google OAuth code (with the transaction's PKCE verifier) and verifies

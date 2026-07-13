@@ -37,7 +37,13 @@ export interface AuthorizeRequest {
 interface IssuedCode {
   readonly nonce: string;
   readonly codeChallenge: string;
+  readonly scopes: ReadonlySet<string>;
   used: boolean;
+}
+
+/** One recorded token-endpoint request, for exchange-order assertions. */
+export interface TokenRequest {
+  readonly params: Readonly<Record<string, string>>;
 }
 
 interface ProviderKey {
@@ -63,6 +69,7 @@ export interface OauthProvider {
   /** When set, the token endpoint returns this instead of a valid response. */
   tokenResponseOverride: (() => Response) | null;
   readonly authorizeRequests: AuthorizeRequest[];
+  readonly tokenRequests: TokenRequest[];
   /** Adds a new signing key. With retireOld, previous keys leave the JWKS so
    * tokens signed by them stop verifying. */
   rotateKeys(retireOld?: boolean): Promise<void>;
@@ -76,6 +83,7 @@ export async function startOauthProvider(options: OauthProviderOptions): Promise
   const keys: ProviderKey[] = [await makeProviderKey("kid-1")];
   const codes = new Map<string, IssuedCode>();
   const authorizeRequests: AuthorizeRequest[] = [];
+  const tokenRequests: TokenRequest[] = [];
   let kidCounter = 1;
 
   const provider: Omit<OauthProvider, "url" | "authorizeUrl" | "tokenUrl" | "jwksUrl" | "env" | "stop"> = {
@@ -84,6 +92,7 @@ export async function startOauthProvider(options: OauthProviderOptions): Promise
     idTokenClaims: {},
     tokenResponseOverride: null,
     authorizeRequests,
+    tokenRequests,
     async rotateKeys(retireOld = false) {
       kidCounter += 1;
       const next = await makeProviderKey(`kid-${kidCounter}`);
@@ -111,15 +120,21 @@ export async function startOauthProvider(options: OauthProviderOptions): Promise
           redirect.searchParams.set("error", "access_denied");
         } else {
           const code = crypto.randomUUID();
-          codes.set(code, { nonce: params.nonce, codeChallenge: params.code_challenge, used: false });
+          codes.set(code, {
+            nonce: params.nonce,
+            codeChallenge: params.code_challenge,
+            scopes: new Set((params.scope ?? "").split(/\s+/).filter(Boolean)),
+            used: false,
+          });
           redirect.searchParams.set("code", code);
         }
         return Response.redirect(redirect.toString(), 302);
       }
 
       if (url.pathname === "/token" && request.method === "POST") {
-        if (provider.tokenResponseOverride != null) return provider.tokenResponseOverride();
         const body = new URLSearchParams(await request.text());
+        tokenRequests.push({ params: Object.fromEntries(body.entries()) });
+        if (provider.tokenResponseOverride != null) return provider.tokenResponseOverride();
         const failure = await validateTokenRequest(body, codes, options);
         if (failure != null) {
           return Response.json({ error: "invalid_grant", error_description: failure }, { status: 400 });
@@ -132,10 +147,11 @@ export async function startOauthProvider(options: OauthProviderOptions): Promise
           aud: options.clientId,
           azp: options.clientId,
           sub: provider.user.sub,
-          email: provider.user.email,
-          email_verified: provider.user.emailVerified ?? true,
-          ...(provider.user.name == null ? {} : { name: provider.user.name }),
-          ...(provider.user.picture == null ? {} : { picture: provider.user.picture }),
+          ...(issued?.scopes.has("email") === true
+            ? { email: provider.user.email, email_verified: provider.user.emailVerified ?? true }
+            : {}),
+          ...(issued?.scopes.has("profile") !== true || provider.user.name == null ? {} : { name: provider.user.name }),
+          ...(issued?.scopes.has("profile") !== true || provider.user.picture == null ? {} : { picture: provider.user.picture }),
           iat: now,
           exp: now + 600,
           nonce: issued?.nonce,

@@ -34,6 +34,7 @@ import {
   AuthError,
   createSessionToken,
   decodeCliAuthorizationCode,
+  decryptCliCloudflareToken,
   verifyCliCodeExchange,
   type AuthShape,
   type AuthUser,
@@ -210,7 +211,12 @@ function exchangeCliToken(request: HttpServerRequest.HttpServerRequest): AppEffe
     // Burn the code before checking possession: the first redemption attempt
     // consumes it, so an intercepted code that is replayed — or raced with a wrong
     // verifier — fails closed instead of staying redeemable within its lifetime.
-    yield* db.put(CLI_CODE_NAMESPACE, payload.id, { expiresAt: payload.expiresAt }, { ifNoneMatch: "*" }).pipe(
+    yield* db.put(
+      CLI_CODE_NAMESPACE,
+      payload.id,
+      { redeemedAt: Math.floor(Date.now() / 1000) },
+      { ifNoneMatch: "*", expiresAt: payload.expiresAt },
+    ).pipe(
       Effect.mapError((error) =>
         error._tag === "PrimitiveDbConflict"
           ? new AuthError({ status: 400, message: "Authorization code already redeemed" })
@@ -218,12 +224,13 @@ function exchangeCliToken(request: HttpServerRequest.HttpServerRequest): AppEffe
       ),
     );
     const user = yield* verifyCliCodeExchange(payload, body.codeVerifier, body.redirectUri, config.auth);
+    const cfToken = yield* decryptCliCloudflareToken(payload, config.auth);
     const token = yield* createSessionToken(user, config.auth);
     const response: CliTokenResponse = {
       token,
       server: appBaseUrl(request, config),
       email: user.email,
-      ...(payload.cfToken != null ? { cfToken: payload.cfToken } : {}),
+      ...(cfToken != null ? { cfToken } : {}),
     };
     return jsonResponse(response, 200);
   });
@@ -929,7 +936,11 @@ function canonicalAppRedirect(
   const requestBase = requestBaseUrl(request);
   if (requestBase == null || sameOrigin(requestBase, appBase)) return null;
   const target = new URL(`${url.pathname}${url.search}`, appBase);
-  return HttpServerResponse.redirect(target.toString(), { status: 302 });
+  // Preserve the method and body for the CLI's token-exchange POST. Browser auth
+  // routes remain ordinary GET redirects.
+  return HttpServerResponse.redirect(target.toString(), {
+    status: request.method === "GET" || request.method === "HEAD" ? 302 : 307,
+  });
 }
 
 /** Reconstructs the request origin from x-forwarded-host/-proto or the Host header;

@@ -775,6 +775,20 @@ describe("server app", () => {
     expect(location.origin).toBe("https://app.scratch.test");
     expect(location.pathname).toBe("/auth/login");
     expect(location.searchParams.get("cli_redirect")).toBe("http://127.0.0.1:7777/callback");
+
+    const exchange = await handler(new Request("http://scratchwork.local/auth/cli/token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host: "pages.scratch.test",
+        "x-forwarded-host": "pages.scratch.test",
+        "x-forwarded-proto": "https",
+      },
+      body: JSON.stringify({ code: "code", codeVerifier: "verifier", redirectUri: "http://127.0.0.1:7777/callback" }),
+      redirect: "manual",
+    }));
+    expect(exchange.status).toBe(307);
+    expect(exchange.headers.get("location")).toBe("https://app.scratch.test/auth/cli/token");
   });
 
   test("uses configured content origin in private asset auth redirects", async () => {
@@ -1262,8 +1276,8 @@ describe("server app", () => {
       // schema, not redeem.
       const session = await Effect.runPromise(createSessionToken(cliUser, authConfig));
       const response = await exchange(handler, { code: session, codeVerifier: verifier, redirectUri });
-      expect(response.status).toBe(401);
-      expect(await response.text()).toContain("Invalid auth token");
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("Invalid authorization code");
     });
 
     test("rejects cross-origin browser attempts", async () => {

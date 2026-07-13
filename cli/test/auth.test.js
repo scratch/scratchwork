@@ -39,6 +39,11 @@ describe("decodeLoginCallback", () => {
     expect(decodeLoginCallback(url, "other")).toBeNull();
   });
 
+  test("sanitizes hostile server errors before terminal display", () => {
+    const url = new URL("http://127.0.0.1:5555/callback?error=%1B%5B31mowned&state=state-1");
+    expect(decodeLoginCallback(url, "state-1")).toEqual({ error: "provider_error" });
+  });
+
   test("a legacy token-in-query callback no longer decodes", () => {
     const url = new URL("http://127.0.0.1:5555/callback?token=bearer-1&state=state-1");
     expect(decodeLoginCallback(url, "state-1")).toBeNull();

@@ -25,6 +25,9 @@ import {
   type ScratchworkServerConfig,
 } from "../../scripts/server-settings";
 
+/** Worker compatibility date shared by production deploys and conformance lanes. */
+export const DEFAULT_CLOUDFLARE_COMPATIBILITY_DATE = "2026-06-01";
+
 /** Deploy options and server settings, shared with the other deploy packages. */
 export type { DeployServerOptions as CloudflareDeployOptions, ScratchworkServerConfig };
 
@@ -333,7 +336,7 @@ function resolveDeployConfig(config: CloudflareDeployConfig, env: DeployEnv): Re
 
   return {
     workerName: optional(config.workerName) ?? optional(env.SCRATCHWORK_CLOUDFLARE_WORKER_NAME) ?? "scratchwork-server",
-    compatibilityDate: optional(config.compatibilityDate) ?? optional(env.SCRATCHWORK_CLOUDFLARE_COMPATIBILITY_DATE) ?? "2026-06-01",
+    compatibilityDate: optional(config.compatibilityDate) ?? optional(env.SCRATCHWORK_CLOUDFLARE_COMPATIBILITY_DATE) ?? DEFAULT_CLOUDFLARE_COMPATIBILITY_DATE,
     bucketName,
     bucketBinding,
     d1DatabaseName,

@@ -46,17 +46,22 @@ export async function loginCli(
   browser = new Browser(),
 ): Promise<void> {
   const proc = spawnCli(["login", context.appUrl], cwd, { SCRATCHWORK_HOME: home });
-  const output = await readOutputUntil(proc, "cli_redirect=");
-  const match = output.match(/https?:\/\/\S+\/auth\/login\?\S+/);
-  if (match == null) throw new Error(`no login URL in output:\n${output}`);
+  try {
+    const output = await readOutputUntil(proc, "cli_redirect=");
+    const match = output.match(/https?:\/\/\S+\/auth\/login\?\S+/);
+    if (match == null) throw new Error(`no login URL in output:\n${output}`);
 
-  const result = await browser.get(match[0]);
-  expect(await result.response.text()).toContain("login complete");
-  expect(result.status).toBe(200);
+    const result = await browser.get(match[0]);
+    expect(await result.response.text()).toContain("login complete");
+    expect(result.status).toBe(200);
 
-  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-  expect(stderr).toBe("");
-  expect(code).toBe(0);
+    const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    expect(stderr).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    if (proc.exitCode == null) proc.kill();
+    await proc.exited;
+  }
 }
 
 /** Logs a browser session in on the app host (no CLI involved). */
@@ -123,6 +128,7 @@ export function publishLoopSuite(
       const authorize = provider.authorizeRequests.at(-1);
       expect(authorize?.params.code_challenge_method).toBe("S256");
       expect(authorize?.params.nonce).toBeDefined();
+      expect(authorize?.params.scope?.split(/\s+/)).toEqual(expect.arrayContaining(["openid", "email", "profile"]));
 
       const auth = JSON.parse(readFileSync(join(ownerHome.path, "auth.json"), "utf8"));
       expect(auth.servers[context.appUrl].email).toBe(OWNER.email);
