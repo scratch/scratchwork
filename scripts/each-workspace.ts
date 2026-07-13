@@ -11,9 +11,9 @@
  * are reported at the end.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createPool, runPooled } from "./pool";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const script = process.argv[2];
@@ -64,47 +64,29 @@ for (const [dir, blockers] of Object.entries(runAfter)) {
   }
 }
 
-// A tiny semaphore; waiting on a blocker never holds a slot, so runAfter
-// ordering cannot deadlock the pool.
-let slots = Math.max(1, availableParallelism());
-const waiters: Array<() => void> = [];
-const acquire = () =>
-  slots > 0 ? (slots--, Promise.resolve()) : new Promise<void>((resolve) => waiters.push(resolve));
-const release = () => {
-  const next = waiters.shift();
-  if (next) next();
-  else slots++;
-};
+const pool = createPool();
 
+// `finished` is fully populated with deferred promises before any workspace
+// starts, so a runAfter blocker resolves correctly no matter where it appears
+// in the workspaces list. (runAfter must stay acyclic — a cycle would wait
+// forever.)
 const finished = new Map<string, Promise<boolean>>();
-
-async function run(dir: string): Promise<boolean> {
-  await Promise.all((runAfter[dir] ?? []).map((blocker) => finished.get(blocker)));
-  await acquire();
-  try {
-    const started = Date.now();
-    const proc = Bun.spawn(["bun", "run", script], {
-      cwd: join(root, dir),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, err, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    const verdict = code === 0 ? "ok" : "FAILED";
-    console.log(`\n=== ${dir}: bun run ${script} ${verdict} (${seconds}s) ===`);
-    if (out) process.stdout.write(out);
-    if (err) process.stderr.write(err);
-    return code === 0;
-  } finally {
-    release();
-  }
+const resolvers = new Map<string, (ok: boolean) => void>();
+for (const dir of dirs) {
+  finished.set(dir, new Promise<boolean>((resolve) => resolvers.set(dir, resolve)));
 }
 
-for (const dir of dirs) finished.set(dir, run(dir));
+async function run(dir: string): Promise<boolean> {
+  // Await blockers before runPooled takes a slot, so waiting cannot deadlock
+  // the pool (see createPool).
+  await Promise.all((runAfter[dir] ?? []).map((blocker) => finished.get(blocker)));
+  return runPooled(pool, ["bun", "run", script], {
+    cwd: join(root, dir),
+    title: `${dir}: bun run ${script}`,
+  });
+}
+
+for (const dir of dirs) run(dir).then((ok) => resolvers.get(dir)!(ok));
 const results = await Promise.all(dirs.map((dir) => finished.get(dir)!));
 const failed = dirs.filter((_, i) => !results[i]);
 if (failed.length > 0) {

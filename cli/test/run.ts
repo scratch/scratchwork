@@ -10,10 +10,10 @@
  * wires into `bun run test`.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { availableParallelism } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rendererSourceHash } from "../../renderer/build.js";
+import { createPool, runPooled } from "../../scripts/pool";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const cliDir = dirname(testDir);
@@ -66,47 +66,22 @@ if (!bundled.success) {
 // 3. One `bun test` process per file, CPU-bounded, each with a disjoint port
 //    range. Output is buffered per file so logs never interleave; every file
 //    runs even if another fails.
-const files = readdirSync(testDir).filter((f) => f.endsWith(".test.js")).sort();
+const files = readdirSync(testDir)
+  .filter((f) => f.endsWith(".test.js") || f.endsWith(".test.ts"))
+  .sort();
 
-let slots = Math.max(1, availableParallelism());
-const waiters: Array<() => void> = [];
-const acquire = () =>
-  slots > 0 ? (slots--, Promise.resolve()) : new Promise<void>((resolve) => waiters.push(resolve));
-const release = () => {
-  const next = waiters.shift();
-  if (next) next();
-  else slots++;
-};
+const pool = createPool();
 
-async function run(file: string, index: number): Promise<boolean> {
-  await acquire();
-  try {
-    const started = Date.now();
-    const proc = Bun.spawn(["bun", "test", join(testDir, file)], {
-      cwd: cliDir,
-      env: {
-        ...process.env,
-        SCRATCHWORK_E2E_CLI: bundle,
-        SCRATCHWORK_E2E_PORT_BASE: String(34100 + index * 300),
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, err, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    const verdict = code === 0 ? "ok" : "FAILED";
-    console.log(`\n--- ${file} ${verdict} (${seconds}s) ---`);
-    if (out) process.stdout.write(out);
-    if (err) process.stderr.write(err);
-    return code === 0;
-  } finally {
-    release();
-  }
-}
+const run = (file: string, index: number) =>
+  runPooled(pool, ["bun", "test", join(testDir, file)], {
+    cwd: cliDir,
+    env: {
+      ...process.env,
+      SCRATCHWORK_E2E_CLI: bundle,
+      SCRATCHWORK_E2E_PORT_BASE: String(34100 + index * 300),
+    },
+    title: file,
+  });
 
 const results = await Promise.all(files.map(run));
 const failed = files.filter((_, i) => !results[i]);

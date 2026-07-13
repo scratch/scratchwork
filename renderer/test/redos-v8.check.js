@@ -97,20 +97,28 @@ function buildCases() {
 if (isMainThread) {
   const worker = new Worker(new URL(import.meta.url));
   const results = [];
-  let current = null;
+  let current = "worker startup (module import)";
   let timer = null;
   let hung = false;
+
+  const arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      hung = true;
+      console.error(
+        `FAIL ${JSON.stringify(current)}: no result after ${HARD_MS} ms — catastrophic backtracking in V8; terminating worker`,
+      );
+      worker.terminate().then(() => process.exit(1));
+    }, HARD_MS);
+  };
+  // Armed from the start: a top-level regex in an imported module can hang
+  // before the first case ever posts "start".
+  arm();
 
   worker.on("message", (msg) => {
     if (msg.type === "start") {
       current = msg.name;
-      timer = setTimeout(() => {
-        hung = true;
-        console.error(
-          `FAIL ${JSON.stringify(current)}: no result after ${HARD_MS} ms — catastrophic backtracking in V8; terminating worker`,
-        );
-        worker.terminate().then(() => process.exit(1));
-      }, HARD_MS);
+      arm();
     } else if (msg.type === "done") {
       clearTimeout(timer);
       results.push(msg);
