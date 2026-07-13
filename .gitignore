@@ -17,3 +17,6 @@ dist/
 .scratchwork-local-data/
 .scratchwork-cloudflare-data/
 .wrangler/
+
+# CLI bundle built by cli/test/run.ts for fast e2e spawns.
+cli/test/.build/
