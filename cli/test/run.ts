@@ -9,18 +9,39 @@
  * and the default port range); this runner is just the fast path package.json
  * wires into `bun run test`.
  */
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rendererSourceHash } from "../../renderer/build.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const cliDir = dirname(testDir);
 const rendererDir = join(cliDir, "..", "renderer");
 
-// 1. The embedded-fallback tests read renderer/dist/index.html; build it here,
-//    once, so the parallel processes below never race to create it.
-if (!existsSync(join(rendererDir, "dist", "index.html"))) {
+// 1. The embedded-fallback tests read renderer/dist/index.html. Ensure both it
+//    and the generated module match the current sources before starting any
+//    parallel processes, so they never race to refresh stale artifacts.
+const rendererHtml = join(rendererDir, "dist", "index.html");
+const generatedRenderer = join(
+  cliDir,
+  "..",
+  "shared",
+  "src",
+  "site",
+  "default-renderer.generated.js",
+);
+let generatedSourceHash: string | null = null;
+try {
+  const match = readFileSync(generatedRenderer, "utf8").match(
+    /^export const defaultRendererSourceHash = "([a-f0-9]+)";/m,
+  );
+  generatedSourceHash = match?.[1] ?? null;
+} catch {
+  // A missing generated module is handled by the rebuild below.
+}
+
+if (!existsSync(rendererHtml) || generatedSourceHash !== rendererSourceHash()) {
   const built = Bun.spawnSync(["bun", "build.js"], { cwd: rendererDir, stdout: "pipe", stderr: "pipe" });
   if (!built.success) {
     console.error(`failed to build renderer shell:\n${built.stderr.toString()}`);

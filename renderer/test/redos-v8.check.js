@@ -137,23 +137,6 @@ if (isMainThread) {
     process.exit(slow.length > 0 ? 1 : 0);
   });
 } else {
-  // Bun and esbuild resolve the renderer's extensionless prismjs imports
-  // (e.g. "prismjs/components/prism-bash"); node's ESM resolver does not.
-  // Retry failed resolutions with ".js" so node can load the sources as-is.
-  const { registerHooks } = await import("node:module");
-  registerHooks({
-    resolve(specifier, context, nextResolve) {
-      try {
-        return nextResolve(specifier, context);
-      } catch (err) {
-        if (err?.code === "ERR_MODULE_NOT_FOUND" && specifier.includes("/") && !specifier.endsWith(".js")) {
-          return nextResolve(specifier + ".js", context);
-        }
-        throw err;
-      }
-    },
-  });
-
   const [{ parseBlocks, collectLinkDefs }, { renderBlocks }, React, { renderToStaticMarkup }] =
     await Promise.all([
       import(new URL("../src/parser.js", import.meta.url).href),
