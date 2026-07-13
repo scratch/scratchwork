@@ -2,7 +2,14 @@ import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { createSessionToken, makeAuth, type AuthUser } from "../src/auth";
+import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import {
+  createSessionToken,
+  decodeCliAuthorizationCode,
+  makeAuth,
+  verifyCliCodeExchange,
+  type AuthUser,
+} from "../src/auth";
 import { readServerConfig, type AuthConfig, type CloudflareAccessAuthConfig } from "../src/config";
 import { jwksFetch, makeKeyPair, nowSeconds, signJwt, type TestKeyPair } from "./jwt-helpers";
 
@@ -20,6 +27,30 @@ const googleConfig: AuthConfig = {
   allowedUsers: "public",
   sessionTtlSeconds: 60,
 };
+
+/** A fixed CLI PKCE verifier (43 base64url characters, the RFC 7636 minimum). */
+const CLI_VERIFIER = "test-code-verifier-test-code-verifier-test1";
+
+/** Computes the S256 challenge for a PKCE verifier. */
+async function s256(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return bytesToBase64Url(new Uint8Array(digest));
+}
+
+/** Builds the /auth/login URL a CLI sends: loopback redirect, state echo, and challenge. */
+async function cliLoginUrl(baseUrl: string, options: { readonly cliState?: string; readonly verifier?: string } = {}): Promise<URL> {
+  const url = new URL(`${baseUrl}/auth/login`);
+  url.searchParams.set("cli_redirect", "http://127.0.0.1:5555/callback");
+  url.searchParams.set("cli_state", options.cliState ?? "cli-state-1");
+  url.searchParams.set("cli_code_challenge", await s256(options.verifier ?? CLI_VERIFIER));
+  return url;
+}
+
+/** Extracts the decoded cookie value from a Set-Cookie header. */
+function cookieValueFromSetCookie(setCookie: string): string {
+  const pair = setCookie.split(";")[0] ?? "";
+  return decodeURIComponent(pair.slice(pair.indexOf("=") + 1));
+}
 
 describe("Auth", () => {
   test("accepts a signed bearer session token", async () => {
@@ -70,35 +101,56 @@ describe("Auth", () => {
     expect(await Effect.runPromise(auth.verifyProjectAccessToken(token, "site", "handoff"))).toBeNull();
   });
 
-  test("OAuth login redirects to Google and never relays a cf_token", async () => {
+  test("OAuth login redirects to Google with PKCE and an opaque state, and never relays a cf_token", async () => {
     const auth = makeAuth(googleConfig);
     const response = await Effect.runPromise(auth.login(
       request({}),
-      new URL("https://app.scratch.test/auth/login?cli_redirect=http%3A%2F%2F127.0.0.1%3A5555%2Fcallback"),
+      await cliLoginUrl("https://app.scratch.test"),
       "https://app.scratch.test",
     ));
 
-    const location = new URL(HttpServerResponse.toWeb(response).headers.get("location") ?? "https://invalid");
+    const web = HttpServerResponse.toWeb(response);
+    const location = new URL(web.headers.get("location") ?? "https://invalid");
     expect(location.origin).toBe("https://accounts.google.com");
     expect(location.searchParams.get("cf_token")).toBeNull();
+    // The provider leg carries PKCE; the state parameter is an opaque random value,
+    // not the signed state token — the token (holding the verifier) stays in the
+    // browser cookie and never transits the provider.
+    expect(location.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(location.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(location.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]+$/);
+    const stateCookie = web.headers.get("set-cookie") ?? "";
+    expect(stateCookie).toContain("__Host-scratchwork_oauth_state=");
+    expect(stateCookie).not.toContain(location.searchParams.get("state") ?? "unset");
   });
 
-  test("OAuth callback redirects the CLI loopback without a cf_token", async () => {
+  test("OAuth login with a CLI redirect requires the CLI state and PKCE challenge", async () => {
+    const auth = makeAuth(googleConfig);
+    const url = new URL("https://app.scratch.test/auth/login?cli_redirect=http%3A%2F%2F127.0.0.1%3A5555%2Fcallback");
+    await expect(
+      Effect.runPromise(auth.login(request({}), url, "https://app.scratch.test")),
+    ).rejects.toThrow("cli_code_challenge");
+  });
+
+  test("OAuth callback hands the CLI loopback a one-time code, never the bearer token", async () => {
     const originalFetch = globalThis.fetch;
     try {
       const auth = makeAuth(googleConfig);
       const baseUrl = "https://app.scratch.test";
       const loginResponse = HttpServerResponse.toWeb(await Effect.runPromise(auth.login(
         request({}),
-        new URL(`${baseUrl}/auth/login?cli_redirect=http%3A%2F%2F127.0.0.1%3A5555%2Fcallback`),
+        await cliLoginUrl(baseUrl),
         baseUrl,
       )));
       const authorizeUrl = new URL(loginResponse.headers.get("location") ?? "https://invalid");
       const state = authorizeUrl.searchParams.get("state") ?? "";
       const nonce = authorizeUrl.searchParams.get("nonce") ?? "";
+      const providerChallenge = authorizeUrl.searchParams.get("code_challenge") ?? "";
+      const stateCookie = cookieValueFromSetCookie(loginResponse.headers.get("set-cookie") ?? "");
 
       // Google's side of the exchange: the token endpoint returns an ID token signed by
-      // a test key served from Google's JWKS URL.
+      // a test key served from Google's JWKS URL, and must be sent the PKCE verifier
+      // whose S256 digest was in the authorization request.
       const keyPair = await makeKeyPair();
       const idToken = await signJwt(keyPair.privateKey, {
         iss: "https://accounts.google.com",
@@ -109,28 +161,76 @@ describe("Auth", () => {
         exp: nowSeconds() + 600,
         nonce,
       });
-      globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      let exchangedVerifier: string | null = null;
+      globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const url = String(input instanceof Request ? input.url : input);
         if (url.startsWith("https://oauth2.googleapis.com/token")) {
+          exchangedVerifier = new URLSearchParams(String(init?.body)).get("code_verifier");
           return Response.json({ id_token: idToken });
         }
         return jwksFetch(keyPair.publicJwk)(input);
       }) as typeof fetch;
 
       const response = await Effect.runPromise(auth.callback(
-        request({ cookie: `__Host-scratchwork_oauth_state=${encodeURIComponent(state)}` }),
+        request({ cookie: `__Host-scratchwork_oauth_state=${encodeURIComponent(stateCookie)}` }),
         new URL(`${baseUrl}/auth/callback/google?code=auth-code&state=${encodeURIComponent(state)}`),
         baseUrl,
       ));
 
+      expect(exchangedVerifier).not.toBeNull();
+      expect(await s256(exchangedVerifier ?? "")).toBe(providerChallenge);
+
       const location = new URL(HttpServerResponse.toWeb(response).headers.get("location") ?? "https://invalid");
       expect(location.origin).toBe("http://127.0.0.1:5555");
-      expect(location.searchParams.get("email")).toBe("founder@example.com");
-      expect(location.searchParams.get("token")).not.toBeNull();
+      expect(location.searchParams.get("state")).toBe("cli-state-1");
+      expect(location.searchParams.get("code")).not.toBeNull();
+      // The loopback query string carries only the code: no bearer token, no email,
+      // no relayed Access JWT.
+      expect(location.searchParams.get("token")).toBeNull();
+      expect(location.searchParams.get("email")).toBeNull();
       expect(location.searchParams.get("cf_token")).toBeNull();
+
+      // The code redeems only with the matching PKCE verifier and exact redirect URI.
+      const payload = await Effect.runPromise(decodeCliAuthorizationCode(location.searchParams.get("code") ?? "", googleConfig));
+      expect(payload.provider).toBe("google");
+      const redeemed = await Effect.runPromise(
+        verifyCliCodeExchange(payload, CLI_VERIFIER, "http://127.0.0.1:5555/callback", googleConfig),
+      );
+      expect(redeemed.email).toBe("founder@example.com");
+      await expect(
+        Effect.runPromise(verifyCliCodeExchange(payload, `${CLI_VERIFIER}-wrong`, "http://127.0.0.1:5555/callback", googleConfig)),
+      ).rejects.toThrow("does not match");
+      await expect(
+        Effect.runPromise(verifyCliCodeExchange(payload, CLI_VERIFIER, "http://127.0.0.1:6666/callback", googleConfig)),
+      ).rejects.toThrow("does not match");
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  test("OAuth callback relays a provider denial to the CLI loopback", async () => {
+    const auth = makeAuth(googleConfig);
+    const baseUrl = "https://app.scratch.test";
+    const loginResponse = HttpServerResponse.toWeb(await Effect.runPromise(auth.login(
+      request({}),
+      await cliLoginUrl(baseUrl),
+      baseUrl,
+    )));
+    const authorizeUrl = new URL(loginResponse.headers.get("location") ?? "https://invalid");
+    const state = authorizeUrl.searchParams.get("state") ?? "";
+    const stateCookie = cookieValueFromSetCookie(loginResponse.headers.get("set-cookie") ?? "");
+
+    const response = await Effect.runPromise(auth.callback(
+      request({ cookie: `__Host-scratchwork_oauth_state=${encodeURIComponent(stateCookie)}` }),
+      new URL(`${baseUrl}/auth/callback/google?error=access_denied&state=${encodeURIComponent(state)}`),
+      baseUrl,
+    ));
+
+    const location = new URL(HttpServerResponse.toWeb(response).headers.get("location") ?? "https://invalid");
+    expect(location.origin).toBe("http://127.0.0.1:5555");
+    expect(location.searchParams.get("error")).toBe("access_denied");
+    expect(location.searchParams.get("state")).toBe("cli-state-1");
+    expect(location.searchParams.get("code")).toBeNull();
   });
 
   test("rejects old-format project-access tokens as invalid, not as a crash", async () => {
@@ -246,24 +346,35 @@ describe("Auth (cloudflare-access)", () => {
     expect(apiUser.email).toBe("founder@example.com");
   });
 
-  test("login redirects the CLI loopback with a working bearer token", async () => {
+  test("login hands the CLI loopback a one-time code that redeems to a working bearer token", async () => {
     const { token } = await accessAssertion();
     const auth = makeAuth(cloudflareConfig);
 
     const response = await Effect.runPromise(auth.login(
       request({ "cf-access-jwt-assertion": token }),
-      new URL("https://app.scratch.test/auth/login?cli_redirect=http%3A%2F%2F127.0.0.1%3A5555%2Fcallback"),
+      await cliLoginUrl("https://app.scratch.test"),
       "https://app.scratch.test",
     ));
 
     const location = new URL(HttpServerResponse.toWeb(response).headers.get("location") ?? "https://invalid");
     expect(location.origin).toBe("http://127.0.0.1:5555");
-    expect(location.searchParams.get("email")).toBe("founder@example.com");
-    expect(location.searchParams.get("server")).toBe("https://app.scratch.test");
-    // The verified Access JWT is relayed so the CLI can pass the edge on API requests.
-    expect(location.searchParams.get("cf_token")).toBe(token);
+    expect(location.searchParams.get("state")).toBe("cli-state-1");
+    // The loopback query carries only the one-time code: the bearer token and the
+    // relayed Access JWT ride the signed code payload to the back-channel exchange.
+    expect(location.searchParams.get("token")).toBeNull();
+    expect(location.searchParams.get("cf_token")).toBeNull();
 
-    const bearer = location.searchParams.get("token") ?? "";
+    const payload = await Effect.runPromise(
+      decodeCliAuthorizationCode(location.searchParams.get("code") ?? "", cloudflareConfig),
+    );
+    expect(payload.provider).toBe("cloudflare-access");
+    // The verified Access JWT is relayed inside the signed payload so the CLI can
+    // pass the edge on API requests after the exchange.
+    expect(payload.cfToken).toBe(token);
+    const redeemed = await Effect.runPromise(
+      verifyCliCodeExchange(payload, CLI_VERIFIER, "http://127.0.0.1:5555/callback", cloudflareConfig),
+    );
+    const bearer = await Effect.runPromise(createSessionToken(redeemed, cloudflareConfig));
     const apiUser = await Effect.runPromise(auth.requireApiUser(request({ authorization: `Bearer ${bearer}` })));
     expect(apiUser.email).toBe("founder@example.com");
   });
@@ -425,6 +536,54 @@ describe("readServerConfig", () => {
       SCRATCHWORK_APP_URL: "https://app.example.com",
       SCRATCHWORK_LOCAL_CF_ACCESS_JWKS: JSON.stringify({ keys: [{ kty: "RSA", kid: "local" }] }),
     }))).rejects.toThrow("only when SCRATCHWORK_APP_URL uses a loopback host");
+  });
+
+  test("never accepts local OAuth provider endpoints on a non-loopback app URL", async () => {
+    await expect(Effect.runPromise(readServerConfig({
+      SCRATCHWORK_AUTH: "oauth",
+      SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+      SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+      SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+      SCRATCHWORK_APP_URL: "https://app.example.com",
+      SCRATCHWORK_LOCAL_OAUTH_AUTHORIZE_URL: "http://127.0.0.1:4300/authorize",
+      SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL: "http://127.0.0.1:4300/token",
+      SCRATCHWORK_LOCAL_OAUTH_JWKS_URL: "http://127.0.0.1:4300/jwks",
+    }))).rejects.toThrow("only when SCRATCHWORK_APP_URL uses a loopback host");
+  });
+
+  test("local OAuth provider endpoints require all three and loopback URLs", async () => {
+    const base = {
+      SCRATCHWORK_AUTH: "oauth",
+      SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+      SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+      SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+      SCRATCHWORK_APP_URL: "http://localhost:3001",
+    };
+
+    await expect(Effect.runPromise(readServerConfig({
+      ...base,
+      SCRATCHWORK_LOCAL_OAUTH_AUTHORIZE_URL: "http://127.0.0.1:4300/authorize",
+    }))).rejects.toThrow("Set all of");
+
+    await expect(Effect.runPromise(readServerConfig({
+      ...base,
+      SCRATCHWORK_LOCAL_OAUTH_AUTHORIZE_URL: "http://127.0.0.1:4300/authorize",
+      SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL: "https://accounts.example.com/token",
+      SCRATCHWORK_LOCAL_OAUTH_JWKS_URL: "http://127.0.0.1:4300/jwks",
+    }))).rejects.toThrow("a loopback URL");
+
+    const config = await Effect.runPromise(readServerConfig({
+      ...base,
+      SCRATCHWORK_LOCAL_OAUTH_AUTHORIZE_URL: "http://127.0.0.1:4300/authorize",
+      SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL: "http://127.0.0.1:4300/token",
+      SCRATCHWORK_LOCAL_OAUTH_JWKS_URL: "http://127.0.0.1:4300/jwks",
+    }));
+    if (config.auth.mode !== "oauth") throw new Error("unreachable");
+    expect(config.auth.localEndpoints).toEqual({
+      authorizeUrl: "http://127.0.0.1:4300/authorize",
+      tokenUrl: "http://127.0.0.1:4300/token",
+      jwksUrl: "http://127.0.0.1:4300/jwks",
+    });
   });
 
   test("fails without the Cloudflare Access settings, without demanding OAuth credentials", async () => {

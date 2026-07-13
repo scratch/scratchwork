@@ -56,6 +56,37 @@ export const PublishResponseSchema = Schema.Struct({
 /** The decoded publish response. */
 export type PublishResponse = typeof PublishResponseSchema.Type;
 
+/** Path of the CLI login-code exchange endpoint. The browser leg of a CLI login
+ * delivers a short-lived one-time authorization code to the CLI's loopback
+ * callback; the CLI then POSTs it here (a back-channel request, no redirect)
+ * together with its PKCE verifier to receive the bearer token. */
+export const CLI_TOKEN_EXCHANGE_PATH = "/auth/cli/token";
+
+/** The JSON body of `POST /auth/cli/token`: the authorization code from the
+ * loopback callback, the PKCE S256 verifier whose challenge the code was bound
+ * to, and the exact loopback redirect URI the code was delivered to. */
+export const CliTokenRequestSchema = Schema.Struct({
+  code: Schema.String,
+  codeVerifier: Schema.String,
+  redirectUri: Schema.String,
+});
+
+/** The decoded CLI token-exchange request. */
+export type CliTokenRequest = typeof CliTokenRequestSchema.Type;
+
+/** The server's response to a successful CLI code exchange: the bearer token,
+ * the canonical server origin to store it under, and — on Cloudflare Access
+ * servers — the relayed Access JWT the CLI presents to pass the edge. */
+export const CliTokenResponseSchema = Schema.Struct({
+  token: Schema.String,
+  server: Schema.String,
+  email: Schema.String,
+  cfToken: Schema.optional(Schema.String),
+});
+
+/** The decoded CLI token-exchange response. */
+export type CliTokenResponse = typeof CliTokenResponseSchema.Type;
+
 /** A project's per-role grant lists (emails and @domain groups). */
 export const ProjectPermissionsSchema = Schema.Struct({
   read: Schema.Array(Schema.String),

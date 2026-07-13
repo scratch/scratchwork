@@ -10,6 +10,7 @@ import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import { homedir } from "node:os";
+import { bytesToBase64Url } from "../../shared/src/encoding/base64";
 import { nonEmpty } from "../../shared/src/util/strings";
 import { isLoopbackHost } from "../../shared/src/util/url";
 import { isRecord, parseJson } from "../../shared/src/util/json";
@@ -34,13 +35,19 @@ interface AuthFile {
   readonly servers: Record<string, AuthRecord>;
 }
 
-/** Query parameters delivered to the local login callback by the server. */
-export interface LoginCallback {
-  readonly token: string;
-  readonly email?: string;
-  readonly server?: string;
-  readonly cfToken?: string;
+/** The transaction material a login generates before opening the browser: the
+ * PKCE verifier (kept local), its S256 challenge (sent to the server), and the
+ * state value the loopback callback must echo. The loopback receives only a
+ * short-lived one-time code bound to the challenge; the bearer token arrives
+ * over the back-channel exchange, never in the callback query string. */
+export interface LoginProof {
+  readonly state: string;
+  readonly codeVerifier: string;
+  readonly codeChallenge: string;
 }
+
+/** One valid loopback callback: the authorization code, or the server-relayed denial. */
+export type LoginCallback = { readonly code: string } | { readonly error: string };
 
 /**
  * Looks up the stored bearer token for a server.
@@ -134,23 +141,44 @@ export function serverApiUrl(server: string, path: string): URL {
   return url;
 }
 
-/** Builds the browser URL that starts a login and redirects back to the local callback. */
-export function loginUrl(server: string, callbackUrl: string): string {
+/** Builds the browser URL that starts a login and redirects back to the local
+ * callback, binding the transaction to this CLI instance's state and PKCE challenge. */
+export function loginUrl(server: string, callbackUrl: string, proof: LoginProof): string {
   const url = serverApiUrl(server, "/auth/login");
   url.searchParams.set("cli_redirect", callbackUrl);
+  url.searchParams.set("cli_state", proof.state);
+  url.searchParams.set("cli_code_challenge", proof.codeChallenge);
   return url.toString();
 }
 
-/** Decodes the login callback query parameters, or returns null when no token is present. */
-export function decodeLoginCallback(url: URL): LoginCallback | null {
-  const token = url.searchParams.get("token");
-  if (!token) return null;
-  return {
-    token,
-    email: nonEmpty(url.searchParams.get("email") ?? undefined),
-    server: nonEmpty(url.searchParams.get("server") ?? undefined),
-    cfToken: nonEmpty(url.searchParams.get("cf_token") ?? undefined),
-  };
+/** Generates the per-login PKCE verifier/challenge pair and callback state. */
+export function generateLoginProof(): Effect.Effect<LoginProof, CliError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const state = randomUrlSafe(16);
+      const codeVerifier = randomUrlSafe(32);
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
+      return { state, codeVerifier, codeChallenge: bytesToBase64Url(new Uint8Array(digest)) };
+    },
+    catch: (cause) => new CliError({ code: 1, message: `scratchwork login: ${errorMessage(cause)}` }),
+  });
+}
+
+/** Decodes a loopback callback request. Anything without this login's exact state —
+ * a competing local process, a stray request, a mismatched transaction — is null. */
+export function decodeLoginCallback(url: URL, expectedState: string): LoginCallback | null {
+  if (url.searchParams.get("state") !== expectedState) return null;
+  const error = nonEmpty(url.searchParams.get("error") ?? undefined);
+  if (error != null) return { error };
+  const code = nonEmpty(url.searchParams.get("code") ?? undefined);
+  return code == null ? null : { code };
+}
+
+/** Generates base64url-encoded Web Crypto randomness. */
+function randomUrlSafe(bytes: number): string {
+  const buffer = new Uint8Array(bytes);
+  crypto.getRandomValues(buffer);
+  return bytesToBase64Url(buffer);
 }
 
 /**

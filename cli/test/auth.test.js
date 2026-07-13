@@ -26,21 +26,22 @@ describe("normalizeServerUrl", () => {
 });
 
 describe("decodeLoginCallback", () => {
-  test("reads the relayed cf_token when the server sends one", () => {
-    const url = new URL("http://127.0.0.1:5555/callback?token=bearer-1&email=a%40b.co&server=https%3A%2F%2Fapp.b.co&cf_token=cf-jwt-1");
-    expect(decodeLoginCallback(url)).toEqual({
-      token: "bearer-1",
-      email: "a@b.co",
-      server: "https://app.b.co",
-      cfToken: "cf-jwt-1",
-    });
+  test("accepts a code only with this login's exact state", () => {
+    const url = new URL("http://127.0.0.1:5555/callback?code=code-1&state=state-1");
+    expect(decodeLoginCallback(url, "state-1")).toEqual({ code: "code-1" });
+    expect(decodeLoginCallback(url, "state-2")).toBeNull();
+    expect(decodeLoginCallback(new URL("http://127.0.0.1:5555/callback?code=code-1"), "state-1")).toBeNull();
   });
 
-  test("leaves cfToken unset when the server does not relay one", () => {
-    const url = new URL("http://127.0.0.1:5555/callback?token=bearer-1");
-    const decoded = decodeLoginCallback(url);
-    expect(decoded?.token).toBe("bearer-1");
-    expect(decoded?.cfToken).toBeUndefined();
+  test("reads a server-relayed denial bound to the same state", () => {
+    const url = new URL("http://127.0.0.1:5555/callback?error=access_denied&state=state-1");
+    expect(decodeLoginCallback(url, "state-1")).toEqual({ error: "access_denied" });
+    expect(decodeLoginCallback(url, "other")).toBeNull();
+  });
+
+  test("a legacy token-in-query callback no longer decodes", () => {
+    const url = new URL("http://127.0.0.1:5555/callback?token=bearer-1&state=state-1");
+    expect(decodeLoginCallback(url, "state-1")).toBeNull();
   });
 });
 

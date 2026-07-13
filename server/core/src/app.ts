@@ -9,21 +9,37 @@ import type * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
-import type {
-  ProjectInfo,
-  ProjectResponse,
-  ProjectsListResponse,
-  PublishResponse,
-  ShareResponse,
+import * as Option from "effect/Option";
+import * as ParseResult from "effect/ParseResult";
+import * as Schema from "effect/Schema";
+import {
+  CliTokenRequestSchema,
+  type CliTokenRequest,
+  type CliTokenResponse,
+  type ProjectInfo,
+  type ProjectResponse,
+  type ProjectsListResponse,
+  type PublishResponse,
+  type ShareResponse,
 } from "../../../shared/src/publish/api";
 import { SiteFiles } from "../../../shared/src/site/files";
+import { parseJson } from "../../../shared/src/util/json";
 import { servePath } from "../../../shared/src/site/serve";
 import { isLoopbackHost } from "../../../shared/src/util/url";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
 import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
 import { accessGroupTerms, isSafeProjectIdentifier } from "./access";
-import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth";
+import {
+  Auth,
+  AuthError,
+  createSessionToken,
+  decodeCliAuthorizationCode,
+  verifyCliCodeExchange,
+  type AuthShape,
+  type AuthUser,
+} from "./auth";
 import { ServerConfig, type ServerConfigShape } from "./config";
+import { PrimitiveDb } from "./db";
 import { projectAccessCookie, projectAccessCookieValues } from "./cookies";
 import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages";
 import { HttpError, jsonResponse, securityHeaders } from "./http";
@@ -47,11 +63,11 @@ const HANDOFF_PARAM = "_scratchwork_handoff";
 type AppEffect = Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   HttpError | AuthError | SiteStoreError | StorageError,
-  ServerConfig | SiteStore | Auth
+  ServerConfig | SiteStore | Auth | PrimitiveDb
 >;
 
-/** The whole server as one platform-neutral HttpApp; adapters provide the three services. */
-export const app: HttpApp.Default<never, ServerConfig | SiteStore | Auth> =
+/** The whole server as one platform-neutral HttpApp; adapters provide the four services. */
+export const app: HttpApp.Default<never, ServerConfig | SiteStore | Auth | PrimitiveDb> =
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     return yield* handleRequest(request).pipe(
@@ -88,6 +104,13 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
     if (url.pathname === "/auth/logout") {
       const auth = yield* Auth;
       return auth.logout(appBaseUrl(request, config));
+    }
+
+    if (url.pathname === "/auth/cli/token") {
+      if (request.method !== "POST") {
+        return yield* Effect.fail(new HttpError({ status: 405, message: "Method not allowed" }));
+      }
+      return yield* exchangeCliToken(request);
     }
 
     if (url.pathname === "/auth/project") {
@@ -165,6 +188,70 @@ function projectApiPath(pathname: string): { readonly project: string; readonly 
 // ---------------------------------------------------------------------------
 // API handlers
 // ---------------------------------------------------------------------------
+
+/** Namespace of the one-time CLI code redemption records. Records are tiny (one per
+ * CLI login) and expire with their 60-second codes; they are never read back except
+ * by the conditional create that detects a replay. */
+const CLI_CODE_NAMESPACE = "cli-code-redemptions";
+/** Generous ceiling for the exchange body: three short strings. */
+const MAX_CLI_TOKEN_BODY_BYTES = 64 * 1024;
+
+/** Handles `POST /auth/cli/token`: the back-channel exchange of a one-time CLI
+ * authorization code plus PKCE verifier for a bearer token. The code — not a
+ * cookie — is the credential, so the route requires no session; the cross-origin
+ * rejection still applies so a browser page cannot drive it. */
+function exchangeCliToken(request: HttpServerRequest.HttpServerRequest): AppEffect {
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    yield* rejectCrossOriginApiRequest(request, appBaseUrl(request, config));
+    const db = yield* PrimitiveDb;
+    const body = yield* readCliTokenRequest(request);
+    const payload = yield* decodeCliAuthorizationCode(body.code, config.auth);
+    // Burn the code before checking possession: the first redemption attempt
+    // consumes it, so an intercepted code that is replayed — or raced with a wrong
+    // verifier — fails closed instead of staying redeemable within its lifetime.
+    yield* db.put(CLI_CODE_NAMESPACE, payload.id, { expiresAt: payload.expiresAt }, { ifNoneMatch: "*" }).pipe(
+      Effect.mapError((error) =>
+        error._tag === "PrimitiveDbConflict"
+          ? new AuthError({ status: 400, message: "Authorization code already redeemed" })
+          : new HttpError({ status: 500, message: "Could not record the code redemption" }),
+      ),
+    );
+    const user = yield* verifyCliCodeExchange(payload, body.codeVerifier, body.redirectUri, config.auth);
+    const token = yield* createSessionToken(user, config.auth);
+    const response: CliTokenResponse = {
+      token,
+      server: appBaseUrl(request, config),
+      email: user.email,
+      ...(payload.cfToken != null ? { cfToken: payload.cfToken } : {}),
+    };
+    return jsonResponse(response, 200);
+  });
+}
+
+/** Reads, size-limits, and strictly decodes the CLI token-exchange body. */
+function readCliTokenRequest(
+  request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<CliTokenRequest, HttpError> {
+  return Effect.gen(function* () {
+    const text = yield* request.text.pipe(
+      HttpServerRequest.withMaxBodySize(Option.some(MAX_CLI_TOKEN_BODY_BYTES)),
+      Effect.mapError((cause) => new HttpError({ status: 413, message: "Request body is too large", cause })),
+    );
+    const parsed = parseJson(text);
+    if (parsed == null) {
+      return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid JSON body" }));
+    }
+    return yield* Schema.decodeUnknown(CliTokenRequestSchema)(parsed, {
+      errors: "all",
+      onExcessProperty: "error",
+    }).pipe(
+      Effect.mapError((error) =>
+        new HttpError({ status: 400, message: ParseResult.TreeFormatter.formatErrorSync(error) }),
+      ),
+    );
+  });
+}
 
 /** Handles `POST /api/publish` through bearer auth and SiteStore. */
 function publish(request: HttpServerRequest.HttpServerRequest): AppEffect {

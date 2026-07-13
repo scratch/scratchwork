@@ -1,11 +1,14 @@
 /**
  * The auth service — one implementation per auth mode (built-in Google OAuth, or
  * Cloudflare Access asserting identity via the Cf-Access-Jwt-Assertion header) — and
- * the three signed HMAC token kinds it mints: session tokens (browser cookie or CLI
- * bearer, session TTL), OAuth state tokens (10-minute, browser-bound), and
- * project-access tokens ("handoff": ~60s, query-string form; "cookie": session-length
- * redeemed form).
+ * the four signed HMAC token kinds it mints: session tokens (browser cookie or CLI
+ * bearer, session TTL), OAuth state tokens (10-minute, browser-bound, cookie-only —
+ * they carry the PKCE verifier, which must never transit the provider), CLI
+ * authorization codes (~60s one-time codes delivered to the CLI's loopback callback
+ * and exchanged for a session token at /auth/cli/token), and project-access tokens
+ * ("handoff": ~60s, query-string form; "cookie": session-length redeemed form).
  */
+import * as Cookies from "@effect/platform/Cookies";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Context from "effect/Context";
@@ -20,6 +23,7 @@ import { accessGroupMatches } from "./access";
 import { verifyCloudflareAccessToken } from "./cloudflare-jwt";
 import { ServerConfig, type AuthConfig, type CloudflareAccessAuthConfig, type OAuthAuthConfig } from "./config";
 import {
+  clearOauthStateCookie,
   clearSessionCookie,
   cookieToken,
   oauthStateCookie,
@@ -40,6 +44,13 @@ const SESSION_VERSION = 1;
 const PROJECT_ACCESS_VERSION = 1;
 /** Handoff tokens ride redirect query strings (which land in proxy logs), so they live seconds. */
 const HANDOFF_TTL_SECONDS = 60;
+/** CLI authorization codes ride the loopback redirect query string, so they live seconds
+ * and are additionally one-time: redemption is recorded in PrimitiveDb by the exchange
+ * route, so a replayed code fails even inside this window. */
+const CLI_CODE_TTL_SECONDS = 60;
+/** PKCE S256 challenges and verifiers are 43-128 base64url characters (RFC 7636 §4). */
+const PKCE_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
+const CLI_STATE_MAX_LENGTH = 256;
 const REDIRECT_MAX_LENGTH = 2048;
 
 /** The authenticated identity attached to sessions and API requests. */
@@ -68,15 +79,52 @@ const SessionPayloadSchema = Schema.Struct({
 });
 type SessionPayload = typeof SessionPayloadSchema.Type;
 
-/** Payload of the OAuth state token that rides the login redirect round-trip. */
+/** Payload of the OAuth state token. It lives only in the browser-bound state cookie —
+ * never in the redirect's `state` parameter, which carries just the opaque random
+ * `state` value echoed by the provider — because the payload holds the PKCE
+ * `codeVerifier`, which the provider must never see. `cliState` and
+ * `cliCodeChallenge` are present exactly when `cliRedirect` is: they bind the CLI
+ * leg of the flow to the CLI instance that started it. */
 const OAuthStateSchema = Schema.Struct({
   version: Schema.Literal(SESSION_VERSION),
+  kind: Schema.Literal("oauth-state"),
+  state: Schema.String,
+  nonce: Schema.String,
+  codeVerifier: Schema.String,
   returnTo: Schema.String,
   cliRedirect: Schema.optional(Schema.String),
-  nonce: Schema.String,
+  cliState: Schema.optional(Schema.String),
+  cliCodeChallenge: Schema.optional(Schema.String),
   expiresAt: Schema.Number,
 });
 type OAuthState = typeof OAuthStateSchema.Type;
+
+/** Payload of a CLI authorization code: the short-lived one-time token the browser
+ * leg delivers to the CLI's loopback callback. It never grants access by itself —
+ * the CLI exchanges it at /auth/cli/token by proving possession of the PKCE
+ * verifier (`codeChallenge` is its S256 digest) from the exact `redirectUri` the
+ * code was delivered to. `id` keys the one-time redemption record. */
+const CliCodePayloadSchema = Schema.Struct({
+  version: Schema.Literal(SESSION_VERSION),
+  kind: Schema.Literal("cli-code"),
+  id: Schema.String,
+  user: AuthUserSchema,
+  provider: Schema.Literal("google", "cloudflare-access"),
+  codeChallenge: Schema.String,
+  redirectUri: Schema.String,
+  cfToken: Schema.optional(Schema.String),
+  expiresAt: Schema.Number,
+});
+
+/** The decoded CLI authorization-code payload. */
+export type CliCodePayload = typeof CliCodePayloadSchema.Type;
+
+/** The CLI login parameters accepted by /auth/login: all three present or none. */
+interface CliLoginRequest {
+  readonly cliRedirect: string;
+  readonly cliState: string;
+  readonly cliCodeChallenge: string;
+}
 
 /**
  * `handoff` tokens ride the redirect from the app host to the content host and live for
@@ -188,74 +236,96 @@ function makeGoogleAuth(config: OAuthAuthConfig): AuthShape {
     login: (_request, url, baseUrl) =>
       Effect.gen(function* () {
         const returnTo = safeReturnTo(url.searchParams.get("returnTo")) ?? "/";
-        const cliRedirect = safeCliRedirect(url.searchParams.get("cli_redirect"));
+        const cli = yield* readCliLoginRequest(url);
+        const state = randomNonce();
         const nonce = randomNonce();
-        const state = yield* signValue(
+        const codeVerifier = randomVerifier();
+        const codeChallenge = yield* sha256Base64Url(codeVerifier);
+        const stateToken = yield* signValue(
           {
             version: SESSION_VERSION,
-            returnTo,
-            cliRedirect,
+            kind: "oauth-state",
+            state,
             nonce,
+            codeVerifier,
+            returnTo,
+            ...(cli ?? {}),
             expiresAt: epochSeconds() + STATE_TTL_SECONDS,
           } satisfies OAuthState,
           config.sessionSecret,
         );
 
-        const authUrl = new URL(GOOGLE_AUTHORIZE_URL);
+        const authUrl = new URL(providerEndpoints(config).authorizeUrl);
         authUrl.searchParams.set("client_id", config.clientId);
         authUrl.searchParams.set("redirect_uri", callbackUrl(baseUrl));
         authUrl.searchParams.set("response_type", "code");
         authUrl.searchParams.set("scope", "openid email profile");
         authUrl.searchParams.set("state", state);
         authUrl.searchParams.set("nonce", nonce);
+        authUrl.searchParams.set("code_challenge", codeChallenge);
+        authUrl.searchParams.set("code_challenge_method", "S256");
         authUrl.searchParams.set("prompt", "select_account");
         return HttpServerResponse.redirect(authUrl, {
           status: 302,
           headers: {
-            "set-cookie": oauthStateCookie(state, baseUrl),
+            "set-cookie": oauthStateCookie(stateToken, baseUrl),
           },
         });
       }),
 
     callback: (request, url, baseUrl) =>
       Effect.gen(function* () {
+        // The state transaction binds every branch, including provider denial: the
+        // cookie must verify and the provider-echoed state parameter must match it
+        // before anything — even an error — is acted on.
+        const stateParam = url.searchParams.get("state");
+        const stateCookie = oauthStateToken(request, baseUrl);
+        if (!stateParam || stateCookie == null) {
+          return yield* Effect.fail(new AuthError({ status: 400, message: "Missing OAuth callback parameters" }));
+        }
+        const state = yield* verifySignedValue(stateCookie, config.sessionSecret, OAuthStateSchema);
+        if (state.expiresAt < epochSeconds() || !timingSafeEqual(stateParam, state.state)) {
+          return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid or expired OAuth state" }));
+        }
+
         const error = url.searchParams.get("error");
         if (error != null) {
+          // A CLI-initiated flow learns of the denial through its loopback callback,
+          // per RFC 8252; a browser flow gets the error page.
+          if (state.cliRedirect != null && state.cliState != null) {
+            return cliCallbackRedirect(state.cliRedirect, state.cliState, { error }, baseUrl);
+          }
           return yield* Effect.fail(
-            new AuthError({ status: 400, message: `Google OAuth failed: ${error}` }),
+            new AuthError({ status: 400, message: `Google OAuth failed: ${sanitizeProviderError(error)}` }),
           );
         }
 
         const code = url.searchParams.get("code");
-        const stateToken = url.searchParams.get("state");
-        if (!code || !stateToken) {
+        if (!code) {
           return yield* Effect.fail(new AuthError({ status: 400, message: "Missing OAuth callback parameters" }));
         }
-        if (oauthStateToken(request, baseUrl) !== stateToken) {
-          return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid OAuth state cookie" }));
+
+        const user = yield* exchangeGoogleCode(code, callbackUrl(baseUrl), state.nonce, state.codeVerifier, config);
+
+        if (state.cliRedirect != null && state.cliState != null && state.cliCodeChallenge != null) {
+          const cliCode = yield* issueCliAuthorizationCode(user, {
+            provider: "google",
+            codeChallenge: state.cliCodeChallenge,
+            redirectUri: state.cliRedirect,
+          }, config);
+          return cliCallbackRedirect(state.cliRedirect, state.cliState, { code: cliCode }, baseUrl);
         }
 
-        const state = yield* verifySignedValue(stateToken, config.sessionSecret, OAuthStateSchema);
-        if (state.expiresAt < epochSeconds()) {
-          return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid or expired OAuth state" }));
-        }
-
-        const user = yield* exchangeGoogleCode(code, callbackUrl(baseUrl), state.nonce, config);
         const token = yield* createSessionToken(user, config);
-
-        if (state.cliRedirect != null) {
-          const redirectUrl = new URL(state.cliRedirect);
-          redirectUrl.searchParams.set("token", token);
-          redirectUrl.searchParams.set("server", baseUrl);
-          redirectUrl.searchParams.set("email", user.email);
-          return HttpServerResponse.redirect(redirectUrl, { status: 302 });
-        }
-
+        // Two Set-Cookie headers (the session, and the now-spent state cookie's
+        // clearing) must stay separate headers; the cookies option does that where
+        // a headers record would comma-join them.
         return HttpServerResponse.redirect(state.returnTo, {
           status: 302,
-          headers: {
-            "set-cookie": sessionCookie(token, baseUrl, config.sessionTtlSeconds),
-          },
+          cookies: Cookies.fromSetCookie([
+            sessionCookie(token, baseUrl, config.sessionTtlSeconds),
+            clearOauthStateCookie(baseUrl),
+          ]),
         });
       }),
 
@@ -373,18 +443,19 @@ function makeCloudflareAccessAuth(config: CloudflareAccessAuthConfig): AuthShape
           return yield* Effect.fail(new AuthError({ status: 403, message: "Account is not allowed on this server" }));
         }
 
-        const cliRedirect = safeCliRedirect(url.searchParams.get("cli_redirect"));
-        if (cliRedirect != null) {
-          const token = yield* createSessionToken(user, config);
-          const redirectUrl = new URL(cliRedirect);
-          redirectUrl.searchParams.set("token", token);
-          redirectUrl.searchParams.set("server", baseUrl);
-          redirectUrl.searchParams.set("email", user.email);
-          // Relay the verified Access JWT so the CLI can present it back (as
-          // cf-access-token) and pass Cloudflare's edge on API requests. It rides the
-          // loopback query string exactly like the bearer token above — same exposure.
-          redirectUrl.searchParams.set("cf_token", accessToken);
-          return HttpServerResponse.redirect(redirectUrl, { status: 302 });
+        const cli = yield* readCliLoginRequest(url);
+        if (cli != null) {
+          // The loopback receives only a short-lived one-time code, never the bearer
+          // token. The verified Access JWT rides inside the signed code payload and is
+          // relayed to the CLI by the back-channel exchange, so it too stays out of
+          // the query string.
+          const code = yield* issueCliAuthorizationCode(user, {
+            provider: "cloudflare-access",
+            codeChallenge: cli.cliCodeChallenge,
+            redirectUri: cli.cliRedirect,
+            cfToken: accessToken,
+          }, config);
+          return cliCallbackRedirect(cli.cliRedirect, cli.cliState, { code }, baseUrl);
         }
         return HttpServerResponse.redirect(safeReturnTo(url.searchParams.get("returnTo")) ?? "/", { status: 302 });
       }),
@@ -462,6 +533,127 @@ export function createSessionToken(
   );
 }
 
+/** Reads and validates the CLI login parameters from /auth/login. A CLI-initiated
+ * login must bind its whole transaction up front: the loopback redirect, the CLI's
+ * own state echo, and the PKCE S256 challenge its code will be locked to. An
+ * invalid loopback redirect is treated as absent (a plain browser login); a valid
+ * one missing its companions is rejected so a downlevel CLI cannot silently start
+ * an unbound flow. */
+function readCliLoginRequest(url: URL): Effect.Effect<CliLoginRequest | undefined, AuthError> {
+  const cliRedirect = safeCliRedirect(url.searchParams.get("cli_redirect"));
+  if (cliRedirect == null) return Effect.succeed(undefined);
+  const cliState = url.searchParams.get("cli_state");
+  const cliCodeChallenge = url.searchParams.get("cli_code_challenge");
+  if (
+    cliState == null || cliState === "" || cliState.length > CLI_STATE_MAX_LENGTH ||
+    cliCodeChallenge == null || !PKCE_PATTERN.test(cliCodeChallenge)
+  ) {
+    return Effect.fail(
+      new AuthError({
+        status: 400,
+        message: "CLI login requires cli_state and a cli_code_challenge (PKCE S256). Update the scratchwork CLI.",
+      }),
+    );
+  }
+  return Effect.succeed({ cliRedirect, cliState, cliCodeChallenge });
+}
+
+/** Builds the redirect that completes (or denies) a CLI login at its loopback
+ * callback, echoing the CLI's state and clearing the spent browser state cookie. */
+function cliCallbackRedirect(
+  cliRedirect: string,
+  cliState: string,
+  result: { readonly code: string } | { readonly error: string },
+  baseUrl: string,
+): HttpServerResponse.HttpServerResponse {
+  const redirectUrl = new URL(cliRedirect);
+  if ("code" in result) {
+    redirectUrl.searchParams.set("code", result.code);
+  } else {
+    redirectUrl.searchParams.set("error", sanitizeProviderError(result.error));
+  }
+  redirectUrl.searchParams.set("state", cliState);
+  return HttpServerResponse.redirect(redirectUrl, {
+    status: 302,
+    headers: { "set-cookie": clearOauthStateCookie(baseUrl) },
+  });
+}
+
+/** Reduces a provider-supplied error code to a safe token before echoing it. */
+function sanitizeProviderError(error: string): string {
+  return /^[a-z0-9_]{1,64}$/i.test(error) ? error : "provider_error";
+}
+
+/** Signs a short-lived one-time CLI authorization code bound to a PKCE challenge
+ * and the exact loopback redirect it is about to be delivered to. */
+export function issueCliAuthorizationCode(
+  user: AuthUser,
+  binding: {
+    readonly provider: "google" | "cloudflare-access";
+    readonly codeChallenge: string;
+    readonly redirectUri: string;
+    readonly cfToken?: string;
+  },
+  config: AuthConfig,
+): Effect.Effect<string, AuthError> {
+  return signValue(
+    {
+      version: SESSION_VERSION,
+      kind: "cli-code",
+      id: randomNonce(),
+      user,
+      provider: binding.provider,
+      codeChallenge: binding.codeChallenge,
+      redirectUri: binding.redirectUri,
+      cfToken: binding.cfToken,
+      expiresAt: epochSeconds() + CLI_CODE_TTL_SECONDS,
+    } satisfies CliCodePayload,
+    config.sessionSecret,
+  );
+}
+
+/** Verifies a CLI authorization code's signature, shape, and expiry. The one-time
+ * redemption record and the PKCE/redirect binding checks are separate steps: the
+ * exchange route burns the code id between the two, so a code is consumed by its
+ * first redemption attempt whether or not that attempt proves possession. */
+export function decodeCliAuthorizationCode(
+  code: string,
+  config: AuthConfig,
+): Effect.Effect<CliCodePayload, AuthError> {
+  return Effect.gen(function* () {
+    const payload = yield* verifySignedValue(code, config.sessionSecret, CliCodePayloadSchema);
+    if (payload.expiresAt < epochSeconds()) {
+      return yield* Effect.fail(new AuthError({ status: 400, message: "Authorization code expired" }));
+    }
+    return payload;
+  });
+}
+
+/** Proves the exchange request comes from the CLI instance the code was issued to:
+ * the presented verifier's S256 digest must equal the bound challenge and the
+ * presented redirect URI must be the exact one the code was delivered to. The
+ * allow-list is re-applied so removal revokes a code issued moments earlier. */
+export function verifyCliCodeExchange(
+  payload: CliCodePayload,
+  codeVerifier: string,
+  redirectUri: string,
+  config: AuthConfig,
+): Effect.Effect<AuthUser, AuthError> {
+  return Effect.gen(function* () {
+    if (!PKCE_PATTERN.test(codeVerifier)) {
+      return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid code verifier" }));
+    }
+    const challenge = yield* sha256Base64Url(codeVerifier);
+    if (!timingSafeEqual(challenge, payload.codeChallenge) || redirectUri !== payload.redirectUri) {
+      return yield* Effect.fail(new AuthError({ status: 400, message: "Authorization code does not match this login" }));
+    }
+    if (!allowedUser(payload.user, config)) {
+      return yield* Effect.fail(new AuthError({ status: 403, message: "Account is not allowed on this server" }));
+    }
+    return payload.user;
+  });
+}
+
 /** Verifies one signed session token and applies current allow-list rules. */
 function verifySessionToken(
   token: string,
@@ -475,24 +667,28 @@ function verifySessionToken(
   });
 }
 
-/** Exchanges a Google OAuth code and verifies the returned ID token. */
+/** Exchanges a Google OAuth code (with the transaction's PKCE verifier) and verifies
+ * the returned ID token. */
 function exchangeGoogleCode(
   code: string,
   redirectUri: string,
   nonce: string,
+  codeVerifier: string,
   config: OAuthAuthConfig,
 ): Effect.Effect<AuthUser, AuthError> {
   return Effect.gen(function* () {
+    const endpoints = providerEndpoints(config);
     const { ok, json } = yield* Effect.tryPromise({
       try: async () => {
         const body = new URLSearchParams({
           client_id: config.clientId,
           client_secret: config.clientSecret,
           code,
+          code_verifier: codeVerifier,
           grant_type: "authorization_code",
           redirect_uri: redirectUri,
         });
-        const response = await fetch(GOOGLE_TOKEN_URL, {
+        const response = await fetch(endpoints.tokenUrl, {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
           body,
@@ -514,6 +710,7 @@ function exchangeGoogleCode(
     const claims = yield* verifyGoogleIdToken(json.id_token, {
       clientId: config.clientId,
       expectedNonce: nonce,
+      jwksUrl: config.localEndpoints?.jwksUrl,
     }).pipe(
       Effect.mapError((cause) => new AuthError({ status: 401, message: cause.message, cause })),
     );
@@ -523,6 +720,12 @@ function exchangeGoogleCode(
     }
     return user;
   });
+}
+
+/** The authorization-server endpoints for this configuration: the loopback-gated
+ * local test provider when configured, otherwise Google. */
+function providerEndpoints(config: OAuthAuthConfig): { readonly authorizeUrl: string; readonly tokenUrl: string } {
+  return config.localEndpoints ?? { authorizeUrl: GOOGLE_AUTHORIZE_URL, tokenUrl: GOOGLE_TOKEN_URL };
 }
 
 /** Converts verified Google claims into the auth user shape. */
@@ -649,4 +852,22 @@ function randomNonce(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return bytesToBase64Url(bytes);
+}
+
+/** Generates a PKCE code verifier: 32 random bytes as 43 base64url characters. */
+function randomVerifier(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+/** Computes the base64url SHA-256 digest used for PKCE S256 challenges. */
+function sha256Base64Url(value: string): Effect.Effect<string, AuthError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+      return bytesToBase64Url(new Uint8Array(digest));
+    },
+    catch: (cause) => new AuthError({ status: 500, message: `Could not compute code challenge: ${errorMessage(cause)}` }),
+  });
 }

@@ -26,7 +26,8 @@ if (!script || !runnable.includes(script)) {
 // Both the renderer and cli builds write shared/src/site/default-renderer.generated.js
 // and renderer/dist (cli/build.js calls the renderer's buildDist), so they must
 // never run concurrently. Each listed workspace starts only after its blockers finish.
-const runAfter: Record<string, string[]> = { cli: ["renderer"] };
+// e2e bundles the CLI (which embeds renderer artifacts), so it starts after cli.
+const runAfter: Record<string, string[]> = { cli: ["renderer"], e2e: ["cli"] };
 
 /** Expands the root workspaces globs (literal dirs and trailing "/*") into workspace dirs. */
 function workspaceDirs(): string[] {

@@ -73,6 +73,23 @@
         "typescript": "^6.0.3",
       },
     },
+    "e2e": {
+      "name": "@scratchwork/e2e",
+      "version": "0.1.0",
+      "dependencies": {
+        "@aws-sdk/client-dynamodb": "3.1075.0",
+        "@aws-sdk/client-s3": "3.1075.0",
+        "@scratchwork/server-deploy-aws": "workspace:*",
+        "@scratchwork/server-deploy-cloudflare": "workspace:*",
+        "@scratchwork/server-deploy-local": "workspace:*",
+        "miniflare": "4.20260701.0",
+      },
+      "devDependencies": {
+        "@types/aws-lambda": "^8.10.152",
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "renderer": {
       "name": "scratchwork-renderer",
       "version": "0.1.0",
@@ -430,6 +447,8 @@
     "@scratchwork/deploy-generic-aws": ["@scratchwork/deploy-generic-aws@workspace:deploy/generic-aws"],
 
     "@scratchwork/deploy-local-dev": ["@scratchwork/deploy-local-dev@workspace:deploy/local-dev"],
+
+    "@scratchwork/e2e": ["@scratchwork/e2e@workspace:e2e"],
 
     "@scratchwork/server-core": ["@scratchwork/server-core@workspace:server/core"],
 

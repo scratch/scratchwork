@@ -20,3 +20,4 @@ dist/
 
 # CLI bundle built by cli/test/run.ts for fast e2e spawns.
 cli/test/.build/
+e2e/test/.build/
