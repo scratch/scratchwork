@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { createSessionToken } from "../src/auth";
+import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import { createSessionToken, issueCliAuthorizationCode, type AuthUser } from "../src/auth";
+import type { AuthConfig } from "../src/config";
 import { MemoryPrimitiveDbLive } from "../src/db";
 import { appHandler, bundle, json, testAuth, type MemoryStoredObject } from "./helpers";
 import { jwksFetch, makeKeyPair, nowSeconds, signJwt } from "./jwt-helpers";
@@ -773,6 +775,20 @@ describe("server app", () => {
     expect(location.origin).toBe("https://app.scratch.test");
     expect(location.pathname).toBe("/auth/login");
     expect(location.searchParams.get("cli_redirect")).toBe("http://127.0.0.1:7777/callback");
+
+    const exchange = await handler(new Request("http://scratchwork.local/auth/cli/token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host: "pages.scratch.test",
+        "x-forwarded-host": "pages.scratch.test",
+        "x-forwarded-proto": "https",
+      },
+      body: JSON.stringify({ code: "code", codeVerifier: "verifier", redirectUri: "http://127.0.0.1:7777/callback" }),
+      redirect: "manual",
+    }));
+    expect(exchange.status).toBe(307);
+    expect(exchange.headers.get("location")).toBe("https://app.scratch.test/auth/cli/token");
   });
 
   test("uses configured content origin in private asset auth redirects", async () => {
@@ -1131,14 +1147,145 @@ describe("server app", () => {
     });
     const login = await handler(new Request("https://scratch.test/auth/login?returnTo=/docs"));
     const location = login.headers.get("location");
-    const setCookie = login.headers.get("set-cookie");
+    const setCookie = login.headers.get("set-cookie") ?? "";
     expect(location).toContain("https://accounts.google.com");
     expect(setCookie).toContain("__Host-scratchwork_oauth_state=");
 
-    const state = new URL(location ?? "https://invalid").searchParams.get("state");
-    const callback = await handler(new Request(`https://scratch.test/auth/callback/google?code=code&state=${encodeURIComponent(state ?? "")}`));
-    expect(callback.status).toBe(400);
-    expect(await callback.text()).toContain("Invalid OAuth state cookie");
+    const state = new URL(location ?? "https://invalid").searchParams.get("state") ?? "";
+    // The signed state token lives only in the cookie; the redirect's state
+    // parameter is an opaque value bound inside it.
+    expect(state).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(setCookie).not.toContain(state);
+
+    // Without the browser cookie the callback cannot complete, even with the
+    // provider-echoed state parameter.
+    const noCookie = await handler(new Request(`https://scratch.test/auth/callback/google?code=code&state=${encodeURIComponent(state)}`));
+    expect(noCookie.status).toBe(400);
+    expect(await noCookie.text()).toContain("Missing OAuth callback parameters");
+
+    // With the cookie but a state parameter from a different transaction, the
+    // callback is rejected before any code exchange.
+    const cookiePair = setCookie.split(";")[0] ?? "";
+    const mismatched = await handler(new Request("https://scratch.test/auth/callback/google?code=code&state=other-state", {
+      headers: { cookie: cookiePair },
+    }));
+    expect(mismatched.status).toBe(400);
+    expect(await mismatched.text()).toContain("Invalid or expired OAuth state");
+  });
+
+  describe("CLI code exchange", () => {
+    // Matches the appHandler default auth config, so codes issued here verify there.
+    const authConfig: AuthConfig = {
+      mode: "oauth",
+      clientId: "test-client-id",
+      clientSecret: "test-client-secret",
+      sessionSecret: "test-session-secret-test-session-secret",
+      allowedUsers: "public",
+      sessionTtlSeconds: 60,
+    };
+    const cliUser: AuthUser = { id: "google-user-1", email: "founder@example.com" };
+    const verifier = "test-code-verifier-test-code-verifier-test1";
+    const redirectUri = "http://127.0.0.1:5555/callback";
+
+    async function s256(value: string): Promise<string> {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+      return bytesToBase64Url(new Uint8Array(digest));
+    }
+
+    async function issueCode(): Promise<string> {
+      return Effect.runPromise(issueCliAuthorizationCode(cliUser, {
+        provider: "google",
+        codeChallenge: await s256(verifier),
+        redirectUri,
+      }, authConfig));
+    }
+
+    function exchange(
+      handler: (request: Request) => Promise<Response>,
+      body: unknown,
+      headers: Record<string, string> = {},
+    ): Promise<Response> {
+      return handler(new Request("https://scratch.test/auth/cli/token", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      }));
+    }
+
+    test("redeems a code once for a working bearer token and rejects the replay", async () => {
+      const handler = await appHandler();
+      const code = await issueCode();
+
+      const redeemed = await exchange(handler, { code, codeVerifier: verifier, redirectUri });
+      expect(redeemed.status).toBe(200);
+      const body = await json(redeemed) as { token: string; server: string; email: string; cfToken?: string };
+      expect(body.email).toBe("founder@example.com");
+      expect(body.server).toBe("https://scratch.test");
+      expect(body.cfToken).toBeUndefined();
+
+      const me = await handler(new Request("https://scratch.test/api/me", {
+        headers: { authorization: `Bearer ${body.token}` },
+      }));
+      expect(await json(me)).toMatchObject({ authenticated: true });
+
+      const replay = await exchange(handler, { code, codeVerifier: verifier, redirectUri });
+      expect(replay.status).toBe(400);
+      expect(await replay.text()).toContain("already redeemed");
+    });
+
+    test("a wrong verifier consumes the code instead of leaving it redeemable", async () => {
+      const handler = await appHandler();
+      const code = await issueCode();
+
+      const wrong = await exchange(handler, { code, codeVerifier: `${verifier}xx`, redirectUri });
+      expect(wrong.status).toBe(400);
+      expect(await wrong.text()).toContain("does not match");
+
+      const retry = await exchange(handler, { code, codeVerifier: verifier, redirectUri });
+      expect(retry.status).toBe(400);
+      expect(await retry.text()).toContain("already redeemed");
+    });
+
+    test("rejects a mismatched redirect URI", async () => {
+      const handler = await appHandler();
+      const code = await issueCode();
+      const response = await exchange(handler, { code, codeVerifier: verifier, redirectUri: "http://127.0.0.1:6666/callback" });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("does not match");
+    });
+
+    test("rejects expired codes", async () => {
+      const realNow = Date.now;
+      let code: string;
+      try {
+        // Issue the code two minutes in the past; its 60-second lifetime is over.
+        Date.now = () => realNow() - 120_000;
+        code = await issueCode();
+      } finally {
+        Date.now = realNow;
+      }
+      const handler = await appHandler();
+      const response = await exchange(handler, { code, codeVerifier: verifier, redirectUri });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("expired");
+    });
+
+    test("rejects other token kinds presented as codes", async () => {
+      const handler = await appHandler();
+      // A real session token signed with the same secret must fail the code
+      // schema, not redeem.
+      const session = await Effect.runPromise(createSessionToken(cliUser, authConfig));
+      const response = await exchange(handler, { code: session, codeVerifier: verifier, redirectUri });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("Invalid authorization code");
+    });
+
+    test("rejects cross-origin browser attempts", async () => {
+      const handler = await appHandler();
+      const code = await issueCode();
+      const response = await exchange(handler, { code, codeVerifier: verifier, redirectUri }, { origin: "https://evil.example" });
+      expect(response.status).toBe(403);
+    });
   });
 });
 

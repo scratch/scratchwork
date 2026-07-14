@@ -94,6 +94,16 @@ describe("apiRequest Cloudflare Access headers", () => {
 });
 
 describe("apiRequest Cloudflare edge-block detection", () => {
+  test("a blocked CLI exchange explains the required narrow Access bypass", async () => {
+    await withServer(
+      () => new Response("Forbidden", { status: 403, headers: { "cf-mitigated": "challenge" } }),
+      async (origin) => {
+        await expect(run(apiRequest("scratchwork login", `${origin}/auth/cli/token`, { method: "POST" })))
+          .rejects.toThrow("configure a Bypass / Everyone policy limited to `/auth/cli/token`");
+      },
+    );
+  });
+
   test("a 403 tagged cf-mitigated fails with the re-auth hint", async () => {
     await withServer(
       () => new Response("Forbidden", { status: 403, headers: { "cf-mitigated": "challenge" } }),

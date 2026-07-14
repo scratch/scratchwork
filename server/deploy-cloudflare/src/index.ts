@@ -1,4 +1,5 @@
 export {
+  DEFAULT_CLOUDFLARE_COMPATIBILITY_DATE,
   deployServer,
   runLocalCloudflareServer,
   type CloudflareDeployConfig,

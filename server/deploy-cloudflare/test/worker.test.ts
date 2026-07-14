@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { makeKeyPair } from "../../core/test/jwt-helpers";
-import localWorker from "../src/local-worker";
+import localWorker, { shouldInjectAccessAssertion } from "../src/local-worker";
 import worker, { envVarsFromCloudflare } from "../src/worker";
 
 /** Minimal R2/D1 binding stubs; requests that die in config never reach them. */
@@ -73,6 +73,12 @@ describe("worker fetch", () => {
 });
 
 describe("local Cloudflare Access worker", () => {
+  test("models the narrow first-login bypass for only the CLI exchange", () => {
+    expect(shouldInjectAccessAssertion("/auth/cli/token")).toBe(false);
+    expect(shouldInjectAccessAssertion("/auth/login")).toBe(true);
+    expect(shouldInjectAccessAssertion("/api/publish")).toBe(true);
+  });
+
   test("injects a signed Access assertion that the production auth path verifies", async () => {
     const keyPair = await makeKeyPair();
     const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);

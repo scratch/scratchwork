@@ -14,7 +14,7 @@ import type * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { ProjectResponseSchema } from "../../shared/src/publish/api";
+import { CLI_TOKEN_EXCHANGE_PATH, ProjectResponseSchema } from "../../shared/src/publish/api";
 import { isRecord, parseJson } from "../../shared/src/util/json";
 import { readAuthToken, readCfToken, serverApiUrl } from "./auth";
 import { CliError, errorMessage } from "./errors";
@@ -62,10 +62,7 @@ export function apiRequest(
     const response = yield* client.execute(request);
     const text = yield* response.text;
     if (edgeBlocked(response.status, response.headers, text)) {
-      return yield* apiFail(
-        context,
-        "Cloudflare Access blocked this request. Run `scratchwork login` again (your Access session may have expired), or set SCRATCHWORK_CF_ACCESS_CLIENT_ID and SCRATCHWORK_CF_ACCESS_CLIENT_SECRET for automation.",
-      );
+      return yield* apiFail(context, cloudflareAccessBlockedMessage(url));
     }
     return {
       status: response.status,
@@ -79,6 +76,17 @@ export function apiRequest(
       ResponseError: (error) => apiFail(context, errorMessage(error.cause ?? error)),
     }),
   );
+}
+
+/** Explains the circular first-login failure separately from an expired Access
+ * session on an ordinary API request. The exchange cannot use a stored Access
+ * JWT because successfully calling it is how the CLI obtains that JWT. */
+function cloudflareAccessBlockedMessage(url: URL | string): string {
+  const pathname = new URL(url).pathname;
+  if (pathname.endsWith(CLI_TOKEN_EXCHANGE_PATH)) {
+    return "Cloudflare Access blocked the CLI token exchange. The server administrator must configure a Bypass / Everyone policy limited to `/auth/cli/token`, then run `scratchwork login` again. The Worker still validates the signed one-time code and PKCE verifier.";
+  }
+  return "Cloudflare Access blocked this request. Run `scratchwork login` again (your Access session may have expired), or set SCRATCHWORK_CF_ACCESS_CLIENT_ID and SCRATCHWORK_CF_ACCESS_CLIENT_SECRET for automation.";
 }
 
 /** Executes an API request and fails with the server-reported error on non-2xx statuses. */

@@ -48,6 +48,19 @@ export function oauthStateCookie(state: string, baseUrl: string): string {
   ].filter(Boolean).join("; ");
 }
 
+/** Builds the Set-Cookie header that clears the OAuth state cookie once its
+ * transaction completes, so the state token is single-use on the browser side. */
+export function clearOauthStateCookie(baseUrl: string): string {
+  return [
+    `${oauthStateCookieName(baseUrl)}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+    secureCookie(baseUrl),
+  ].filter(Boolean).join("; ");
+}
+
 /** Builds the Set-Cookie header that clears the session token. */
 export function clearSessionCookie(baseUrl: string): string {
   return [

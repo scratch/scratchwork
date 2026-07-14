@@ -89,4 +89,22 @@ describe("PrimitiveDb", () => {
 
     await expect(Effect.runPromise(db.put("projects", "alice/docs", { value: Number.NaN }))).rejects.toThrow("Database value must be JSON-serializable");
   });
+
+  test("expires records and lets conditional creates reuse elapsed keys", async () => {
+    const db = makeMemoryPrimitiveDb();
+    const realNow = Date.now;
+    try {
+      Date.now = () => 10_000;
+      await Effect.runPromise(db.put("codes", "one", { redeemed: true }, { ifNoneMatch: "*", expiresAt: 11 }));
+      await expect(Effect.runPromise(db.put("codes", "one", { redeemed: true }, { ifNoneMatch: "*", expiresAt: 11 }))).rejects.toThrow("already exists");
+      Date.now = () => 12_000;
+      expect(await Effect.runPromise(db.get("codes", "one"))).toBeNull();
+      await Effect.runPromise(db.put("codes", "one", { redeemed: true }, { ifNoneMatch: "*", expiresAt: 13 }));
+      expect((await Effect.runPromise(db.list("codes"))).records).toHaveLength(1);
+      Date.now = () => 14_000;
+      expect((await Effect.runPromise(db.list("codes"))).records).toHaveLength(0);
+    } finally {
+      Date.now = realNow;
+    }
+  });
 });

@@ -39,11 +39,21 @@ export interface AuthConfigCommon {
   readonly sessionTtlSeconds: number;
 }
 
+/** Authorization-server endpoints used by the OAuth login flow. Overridable only
+ * by the loopback-gated local test configuration; production always uses Google's. */
+export interface OAuthProviderEndpoints {
+  readonly authorizeUrl: string;
+  readonly tokenUrl: string;
+  readonly jwksUrl: string;
+}
+
 /** Built-in Google OAuth: the server runs the login flow itself. */
 export interface OAuthAuthConfig extends AuthConfigCommon {
   readonly mode: "oauth";
   readonly clientId: string;
   readonly clientSecret: string;
+  /** Provider endpoints supplied only by the hermetic local test provider. */
+  readonly localEndpoints?: OAuthProviderEndpoints;
 }
 
 /** Cloudflare Access: the server sits behind an Access application that authenticates
@@ -198,12 +208,12 @@ function readAuthConfig(env: EnvVars, appUrl: string | undefined): Effect.Effect
       return yield* Effect.fail(invalidValue("SCRATCHWORK_AUTH", authMode, '"oauth" or "cloudflare-access"'));
     }
     if (authMode === "cloudflare-access") return yield* readCloudflareAccessConfig(env, appUrl);
-    return yield* readOAuthConfig(env);
+    return yield* readOAuthConfig(env, appUrl);
   });
 }
 
 /** Parses required Google OAuth settings from environment variables. */
-function readOAuthConfig(env: EnvVars): Effect.Effect<OAuthAuthConfig, ServerConfigError> {
+function readOAuthConfig(env: EnvVars, appUrl: string | undefined): Effect.Effect<OAuthAuthConfig, ServerConfigError> {
   return Effect.gen(function* () {
     const clientId = env.SCRATCHWORK_GOOGLE_CLIENT_ID ?? env.GOOGLE_CLIENT_ID;
     const clientSecret = env.SCRATCHWORK_GOOGLE_CLIENT_SECRET ?? env.GOOGLE_CLIENT_SECRET;
@@ -226,9 +236,64 @@ function readOAuthConfig(env: EnvVars): Effect.Effect<OAuthAuthConfig, ServerCon
       mode: "oauth",
       clientId,
       clientSecret,
+      ...(yield* readLocalOAuthEndpoints(env, appUrl)),
       ...(yield* readCommonAuthConfig(env, sessionSecret)),
     } as const;
   });
+}
+
+/** Parses the hermetic test provider's endpoints. Like the local Cloudflare JWKS
+ * override, the LOCAL prefix and the loopback gates keep this out of production
+ * configuration: the variables are accepted only when the app origin is loopback,
+ * and every endpoint must itself be a loopback URL. Set all three or none. */
+function readLocalOAuthEndpoints(
+  env: EnvVars,
+  appUrl: string | undefined,
+): Effect.Effect<Pick<OAuthAuthConfig, "localEndpoints">, ServerConfigError> {
+  const names = [
+    "SCRATCHWORK_LOCAL_OAUTH_AUTHORIZE_URL",
+    "SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL",
+    "SCRATCHWORK_LOCAL_OAUTH_JWKS_URL",
+  ] as const;
+  const values = names.map((name) => nonEmpty(env[name]));
+  if (values.every((value) => value == null)) return Effect.succeed({});
+  if (appUrl == null || !isLiteralLoopbackHost(new URL(appUrl).hostname)) {
+    return Effect.fail(
+      new ServerConfigError({
+        message: "SCRATCHWORK_LOCAL_OAUTH_* endpoints are accepted only when SCRATCHWORK_APP_URL uses a loopback host",
+      }),
+    );
+  }
+  if (values.some((value) => value == null)) {
+    return Effect.fail(
+      new ServerConfigError({ message: `Set all of ${names.join(", ")} or none of them` }),
+    );
+  }
+  for (const [index, value] of values.entries()) {
+    if (!isLoopbackUrl(value as string)) {
+      return Effect.fail(invalidValue(names[index], value as string, 'a loopback URL, like "http://127.0.0.1:4300/authorize"'));
+    }
+  }
+  const [authorizeUrl, tokenUrl, jwksUrl] = values as [string, string, string];
+  return Effect.succeed({ localEndpoints: { authorizeUrl, tokenUrl, jwksUrl } });
+}
+
+/** Returns true for an http(s) URL whose host is loopback. */
+function isLoopbackUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && isLiteralLoopbackHost(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Narrow host gate for credential-bearing local OAuth endpoints. Unlike the
+ * general local-development helper, this excludes 0.0.0.0 and *.localhost so a
+ * client secret is sent only to an explicit loopback listener. */
+function isLiteralLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 }
 
 /** Parses required Cloudflare Access settings from environment variables. */

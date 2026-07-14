@@ -44,6 +44,8 @@ const KEY = "key";
 const VALUE = "value";
 const VERSION = "version";
 const UPDATED_AT = "updatedAt";
+/** DynamoDB TTL attribute; deploy.ts enables native expiry for this field. */
+const EXPIRES_AT = "expiresAt";
 
 /** Reads DynamoDB table and client settings from deployment environment values. */
 export function readDynamoDbPrimitiveDbConfig(
@@ -91,7 +93,7 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
         try: () => client.send(new GetItemCommand({ TableName: tableName, Key: keyAttributes(namespace, key) })),
         catch: (cause) => new PrimitiveDbError({ message: `Could not read DynamoDB record: ${namespace}/${key}`, cause }),
       });
-      return response.Item == null ? null : yield* itemToRecord<A>(response.Item);
+      return response.Item == null || itemExpired(response.Item) ? null : yield* itemToRecord<A>(response.Item);
     });
 
   const put: PrimitiveDbShape["put"] = <A extends JsonValue = JsonValue>(namespace: string, key: string, value: A, options?: PutPrimitiveDbRecordOptions) =>
@@ -106,19 +108,21 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
         yield* Effect.tryPromise({
           try: () => client.send(new PutItemCommand({
             TableName: tableName,
-            Item: itemAttributes(namespace, key, encoded, 1, updatedAt),
-            ConditionExpression: "attribute_not_exists(#namespace)",
-            ExpressionAttributeNames: { "#namespace": NAMESPACE },
+            Item: itemAttributes(namespace, key, encoded, 1, updatedAt, options.expiresAt),
+            ConditionExpression: "attribute_not_exists(#namespace) OR #expiresAt <= :now",
+            ExpressionAttributeNames: { "#namespace": NAMESPACE, "#expiresAt": EXPIRES_AT },
+            ExpressionAttributeValues: { ":now": { N: String(epochSeconds()) } },
           })),
           catch: (cause) => toDynamoDbWriteError(cause, namespace, key),
         });
-        return yield* itemToRecord<A>(itemAttributes(namespace, key, encoded, 1, updatedAt));
+        return yield* itemToRecord<A>(itemAttributes(namespace, key, encoded, 1, updatedAt, options.expiresAt));
       }
 
       const expressionAttributeNames = {
         "#value": VALUE,
         "#version": VERSION,
         "#updatedAt": UPDATED_AT,
+        "#expiresAt": EXPIRES_AT,
       };
       const expressionAttributeValues: Record<string, AttributeValue> = {
         ":value": { S: encoded },
@@ -128,12 +132,15 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
       };
       const conditionExpression = options?.ifMatch == null ? undefined : "#version = :expected";
       if (options?.ifMatch != null) expressionAttributeValues[":expected"] = { N: String(options.ifMatch) };
+      if (options?.expiresAt != null) expressionAttributeValues[":expiresAt"] = { N: String(options.expiresAt) };
 
       const response = yield* Effect.tryPromise({
         try: () => client.send(new UpdateItemCommand({
           TableName: tableName,
           Key: keyAttributes(namespace, key),
-          UpdateExpression: "SET #value = :value, #updatedAt = :updatedAt, #version = if_not_exists(#version, :zero) + :one",
+          UpdateExpression: options?.expiresAt == null
+            ? "SET #value = :value, #updatedAt = :updatedAt, #version = if_not_exists(#version, :zero) + :one REMOVE #expiresAt"
+            : "SET #value = :value, #updatedAt = :updatedAt, #version = if_not_exists(#version, :zero) + :one, #expiresAt = :expiresAt",
           ConditionExpression: conditionExpression,
           ExpressionAttributeNames: expressionAttributeNames,
           ExpressionAttributeValues: expressionAttributeValues,
@@ -185,7 +192,7 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
       });
       const lastEvaluatedKey = response.LastEvaluatedKey?.[KEY]?.S;
       return {
-        records: yield* Effect.all((response.Items ?? []).map((item) => itemToRecord<A>(item))),
+        records: yield* Effect.all((response.Items ?? []).filter((item) => !itemExpired(item)).map((item) => itemToRecord<A>(item))),
         ...(lastEvaluatedKey == null ? {} : { cursor: lastEvaluatedKey }),
       };
     });
@@ -199,8 +206,32 @@ function keyAttributes(namespace: string, key: string): Record<string, Attribute
 }
 
 /** Builds the full DynamoDB item for one record. */
-function itemAttributes(namespace: string, key: string, value: string, version: number, updatedAt: string): Record<string, AttributeValue> {
-  return { ...keyAttributes(namespace, key), [VALUE]: { S: value }, [VERSION]: { N: String(version) }, [UPDATED_AT]: { S: updatedAt } };
+function itemAttributes(
+  namespace: string,
+  key: string,
+  value: string,
+  version: number,
+  updatedAt: string,
+  expiresAt?: number,
+): Record<string, AttributeValue> {
+  return {
+    ...keyAttributes(namespace, key),
+    [VALUE]: { S: value },
+    [VERSION]: { N: String(version) },
+    [UPDATED_AT]: { S: updatedAt },
+    ...(expiresAt == null ? {} : { [EXPIRES_AT]: { N: String(expiresAt) } }),
+  };
+}
+
+/** Treats elapsed TTL records as absent even before DynamoDB's asynchronous sweeper
+ * physically removes them. */
+function itemExpired(item: Record<string, AttributeValue>): boolean {
+  const expiresAt = Number(item[EXPIRES_AT]?.N);
+  return Number.isFinite(expiresAt) && expiresAt <= epochSeconds();
+}
+
+function epochSeconds(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
 /** Converts a DynamoDB item back into the public record shape. */

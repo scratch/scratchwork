@@ -2,13 +2,19 @@
 
 ## Status
 
-**Implemented (2026-07-06), including the plan below.** Login relays the verified Access
-JWT to the CLI as `cf_token`; the CLI stores it in auth.json and sends it back as
-`cf-access-token` on API requests (which both Cloudflare's edge and the server accept);
+**Implemented (revised 2026-07-12).** Login encrypts the verified Access JWT inside a
+short-lived code and returns it only from the PKCE back-channel exchange; the CLI stores
+it in auth.json and sends it back as `cf-access-token` on API requests;
 `SCRATCHWORK_CF_ACCESS_CLIENT_ID`/`SECRET` attach service-token headers for CI; edge
-blocks fail with a re-auth prompt. The `/api/*` bypass policy is now optional, documented
-as a fallback for older CLIs. Remaining manual step: verify against a real
-Access-protected deploy.
+blocks fail with a re-auth prompt. The Access application must narrowly bypass
+`/auth/cli/token` so first-time and post-expiry logins can exchange without already
+owning an Access JWT. The `/api/*` bypass remains optional for older CLIs. Remaining
+manual step: verify against a real Access-protected deploy.
+
+The original implementation plan below is retained as history. Its direct
+`cf_token` loopback relay and zero-configuration claim were superseded by the
+encrypted-code + narrowly bypassed exchange described above; they are not the
+current protocol.
 
 The server-side `cloudflare-access` auth mode is implemented (see `server/README.md`
 "Cloudflare Access"): `SCRATCHWORK_AUTH=cloudflare-access` makes the server verify the

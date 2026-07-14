@@ -277,27 +277,69 @@ describe("scratchwork login", () => {
     }
   });
 
-  test("accepts the local callback and stores the returned token", async () => {
+  /** Computes the S256 challenge the server would derive from a PKCE verifier. */
+  async function s256(verifier) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    return Buffer.from(digest).toString("base64url");
+  }
+
+  /** Starts a login: a mock exchange endpoint (the only server route this flow
+   * needs), the CLI subprocess, and the parsed login URL it printed. */
+  async function startLogin({ exchange } = {}) {
+    const port = nextPort();
+    const serverUrl = `http://localhost:${port}`;
+    const requests = [];
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname === "/auth/cli/token" && request.method === "POST") {
+          requests.push(await request.json());
+          if (exchange === "fail") {
+            return Response.json({ error: "Authorization code already redeemed" }, { status: 400 });
+          }
+          if (exchange === "cloudflare-block") {
+            return new Response("Forbidden", { status: 403, headers: { "cf-mitigated": "challenge" } });
+          }
+          return Response.json({ token: "login-token", server: serverUrl, email: "founder@example.com" });
+        }
+        return new Response("Not found", { status: 404 });
+      },
+    });
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-login-"));
     const configDir = mkdtempSync(join(tmpdir(), "scratchwork-login-config-"));
-    const serverUrl = "http://localhost:3999";
     const proc = Bun.spawn([...CLI, "login", serverUrl], {
       cwd: dir,
       env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", SCRATCHWORK_HOME: configDir },
       stdout: "pipe",
       stderr: "pipe",
     });
+    const output = await readOutputUntil(proc, "cli_redirect=");
+    const loginMatch = output.match(/https?:\/\/\S+\/auth\/login\?\S+/);
+    expect(loginMatch).not.toBeNull();
+    const login = new URL(loginMatch[0]);
+    const cleanup = async () => {
+      proc.kill();
+      await proc.exited;
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    };
+    return { serverUrl, requests, proc, login, configDir, cleanup };
+  }
 
+  test("exchanges the loopback code for a token over the back channel and stores it", async () => {
+    const { serverUrl, requests, proc, login, configDir, cleanup } = await startLogin();
     try {
-      const output = await readOutputUntil(proc, "cli_redirect=");
-      const loginMatch = output.match(/https?:\/\/\S+\/auth\/login\?\S+/);
-      expect(loginMatch).not.toBeNull();
-      const login = new URL(loginMatch[0]);
+      // The login URL binds the transaction: loopback redirect, state, and challenge.
       const callback = new URL(login.searchParams.get("cli_redirect"));
-      callback.searchParams.set("token", "login-token");
-      callback.searchParams.set("server", serverUrl);
-      callback.searchParams.set("email", "founder@example.com");
+      const cliState = login.searchParams.get("cli_state");
+      const challenge = login.searchParams.get("cli_code_challenge");
+      expect(cliState).toMatch(/^[A-Za-z0-9_-]+$/);
+      expect(challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
+      callback.searchParams.set("code", "one-time-code");
+      callback.searchParams.set("state", cliState);
       const response = await fetch(callback);
       expect(response.status).toBe(200);
       expect(await response.text()).toContain("login complete");
@@ -309,13 +351,175 @@ describe("scratchwork login", () => {
       expect(code).toBe(0);
       expect(stderr).toBe("");
 
+      // The exchange proved possession: the code, a verifier matching the
+      // challenge from the login URL, and the exact redirect URI.
+      expect(requests).toHaveLength(1);
+      expect(requests[0].code).toBe("one-time-code");
+      expect(requests[0].redirectUri).toBe(`${callback.origin}${callback.pathname}`);
+      expect(await s256(requests[0].codeVerifier)).toBe(challenge);
+
       const auth = JSON.parse(readFileSync(join(configDir, "auth.json"), "utf8"));
       expect(auth.servers[serverUrl].token).toBe("login-token");
     } finally {
-      proc.kill();
+      await cleanup();
+    }
+  });
+
+  test("preserves the exchange POST while a content origin canonicalizes to the app origin", async () => {
+    const appPort = nextPort();
+    const contentPort = nextPort();
+    const appUrl = `http://localhost:${appPort}`;
+    const contentUrl = `http://localhost:${contentPort}`;
+    const appRequests = [];
+    const appServer = Bun.serve({
+      port: appPort,
+      async fetch(request) {
+        if (new URL(request.url).pathname === "/auth/cli/token" && request.method === "POST") {
+          appRequests.push(await request.json());
+          return Response.json({ token: "canonical-token", server: appUrl, email: "founder@example.com" });
+        }
+        return new Response("Not found", { status: 404 });
+      },
+    });
+    const contentServer = Bun.serve({
+      port: contentPort,
+      fetch(request) {
+        if (new URL(request.url).pathname === "/auth/cli/token") {
+          return Response.redirect(`${appUrl}/auth/cli/token`, 307);
+        }
+        return new Response("Not found", { status: 404 });
+      },
+    });
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-login-content-origin-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-login-content-config-"));
+    const proc = Bun.spawn([...CLI, "login", contentUrl], {
+      cwd: dir,
+      env: { ...process.env, SCRATCHWORK_NO_OPEN: "1", SCRATCHWORK_HOME: configDir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    try {
+      const output = await readOutputUntil(proc, "cli_redirect=");
+      const login = new URL(output.match(/https?:\/\/\S+\/auth\/login\?\S+/)[0]);
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      callback.searchParams.set("code", "one-time-code");
+      callback.searchParams.set("state", login.searchParams.get("cli_state"));
+      expect((await fetch(callback)).status).toBe(200);
+      expect(await proc.exited).toBe(0);
+      expect(appRequests).toHaveLength(1);
+      expect(appRequests[0].code).toBe("one-time-code");
+      const auth = JSON.parse(readFileSync(join(configDir, "auth.json"), "utf8"));
+      expect(auth.servers[appUrl].token).toBe("canonical-token");
+      expect(auth.servers[contentUrl]).toBeUndefined();
+    } finally {
+      if (proc.exitCode == null) proc.kill();
       await proc.exited;
+      appServer.stop(true);
+      contentServer.stop(true);
       rmSync(dir, { recursive: true, force: true });
       rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a competing callback with the wrong state and keeps waiting", async () => {
+    const { requests, proc, login, cleanup } = await startLogin();
+    try {
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      const cliState = login.searchParams.get("cli_state");
+
+      // A competing local process cannot complete or poison the login: wrong
+      // state, wrong path, and a legacy token-in-query callback all bounce.
+      const wrongState = new URL(callback);
+      wrongState.searchParams.set("code", "attacker-code");
+      wrongState.searchParams.set("state", "attacker-state");
+      expect((await fetch(wrongState)).status).toBe(400);
+
+      const wrongPath = new URL(callback);
+      wrongPath.pathname = "/other";
+      expect((await fetch(wrongPath)).status).toBe(404);
+
+      const legacy = new URL(callback);
+      legacy.searchParams.set("token", "stolen-token");
+      legacy.searchParams.set("state", cliState);
+      expect((await fetch(legacy)).status).toBe(400);
+      expect(requests).toHaveLength(0);
+
+      // The real callback still completes afterward.
+      callback.searchParams.set("code", "one-time-code");
+      callback.searchParams.set("state", cliState);
+      expect((await fetch(callback)).status).toBe(200);
+      expect(await proc.exited).toBe(0);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].code).toBe("one-time-code");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("a failed exchange fails the login and tells the browser", async () => {
+    const { proc, login, configDir, cleanup } = await startLogin({ exchange: "fail" });
+    try {
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      callback.searchParams.set("code", "spent-code");
+      callback.searchParams.set("state", login.searchParams.get("cli_state"));
+
+      const response = await fetch(callback);
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("login failed");
+
+      const [stderr, code] = await Promise.all([
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(code).not.toBe(0);
+      expect(stderr).toContain("already redeemed");
+      expect(existsSync(join(configDir, "auth.json"))).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("a Cloudflare-blocked exchange tells the administrator how to enable first login", async () => {
+    const { proc, login, cleanup } = await startLogin({ exchange: "cloudflare-block" });
+    try {
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      callback.searchParams.set("code", "one-time-code");
+      callback.searchParams.set("state", login.searchParams.get("cli_state"));
+
+      const response = await fetch(callback);
+      expect(response.status).toBe(400);
+      const [stderr, code] = await Promise.all([
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(code).not.toBe(0);
+      expect(stderr).toContain("Bypass / Everyone");
+      expect(stderr).toContain("/auth/cli/token");
+      expect(stderr).not.toContain("Access session may have expired");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("a server-relayed denial fails the login without an exchange", async () => {
+    const { requests, proc, login, cleanup } = await startLogin();
+    try {
+      const callback = new URL(login.searchParams.get("cli_redirect"));
+      callback.searchParams.set("error", "access_denied");
+      callback.searchParams.set("state", login.searchParams.get("cli_state"));
+
+      const response = await fetch(callback);
+      expect(response.status).toBe(400);
+
+      const [stderr, code] = await Promise.all([
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(code).not.toBe(0);
+      expect(stderr).toContain("access_denied");
+      expect(requests).toHaveLength(0);
+    } finally {
+      await cleanup();
     }
   });
 });

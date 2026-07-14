@@ -13,7 +13,8 @@
     "server/deploy-aws",
     "server/deploy-cloudflare",
     "server/deploy-local",
-    "deploy/*"
+    "deploy/*",
+    "e2e"
   ],
   "scripts": {
     "build": "cd cli && bun run build",
