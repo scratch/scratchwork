@@ -9,9 +9,11 @@
  * process-global: JWKS refreshes are idempotent, so concurrent cold-start misses at
  * worst duplicate one fetch.
  */
-import { base64UrlToBytes } from "../../../shared/src/encoding/base64";
+import * as Either from "effect/Either";
+import * as Encoding from "effect/Encoding";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
-import { isRecord, parseJson } from "../../../shared/src/util/json";
 
 /** Tolerated clock difference for exp/nbf/iat claim checks. */
 export const CLOCK_SKEW_SECONDS = 300;
@@ -92,7 +94,7 @@ function decodeRs256Jwt(token: string): DecodedRs256Jwt {
   if (header.crit != null) throw new Error("Token uses unsupported critical headers");
 
   const payload = decodeJwtJson<Record<string, unknown>>(encodedPayload);
-  const signature = base64UrlToBytes(encodedSignature);
+  const signature = Either.getOrNull(Encoding.decodeBase64Url(encodedSignature));
   if (signature == null) throw new Error("Invalid token signature encoding");
   return {
     header,
@@ -113,12 +115,15 @@ async function verifySignature(decoded: DecodedRs256Jwt, key: CryptoKey): Promis
   if (!ok) throw new Error("Invalid token signature");
 }
 
+/** Decodes a JSON string (or fails) without running an Effect. */
+const parseJsonEither = Schema.decodeUnknownEither(Schema.parseJson());
+
 /** Decodes one base64url JWT part as JSON. */
 function decodeJwtJson<A>(value: string): A {
-  const bytes = base64UrlToBytes(value);
+  const bytes = Either.getOrNull(Encoding.decodeBase64Url(value));
   if (bytes == null) throw new Error("Invalid JWT base64url");
-  const parsed = parseJson(new TextDecoder().decode(bytes));
-  if (!isRecord(parsed)) throw new Error("Invalid JWT JSON");
+  const parsed = Either.getOrNull(parseJsonEither(new TextDecoder().decode(bytes)));
+  if (!Predicate.isRecord(parsed)) throw new Error("Invalid JWT JSON");
   return parsed as A;
 }
 

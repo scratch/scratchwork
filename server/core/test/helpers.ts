@@ -2,8 +2,7 @@ import * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { bytesToBase64 } from "../../../shared/src/encoding/base64";
-import { bytesToHex } from "../../../shared/src/encoding/hex";
+import * as Encoding from "effect/Encoding";
 import { app } from "../src/app";
 import { Auth, AuthError, AuthLive, type AuthShape, type AuthUser } from "../src/auth";
 import { ServerConfig, type ServerConfigShape } from "../src/config";
@@ -24,7 +23,7 @@ export function bundle(files: Record<string, string | Uint8Array>) {
     version: 1,
     files: Object.entries(files).map(([path, value]) => ({
       path,
-      contentBase64: bytesToBase64(typeof value === "string" ? new TextEncoder().encode(value) : value),
+      contentBase64: Encoding.encodeBase64(typeof value === "string" ? new TextEncoder().encode(value) : value),
     })),
   };
 }
@@ -123,7 +122,7 @@ function memoryStorage(map: Map<string, MemoryStoredObject>): ObjectStorageShape
           throw new StorageConflict({ key, message: `Object ETag mismatch: ${key}` });
         }
         const body = value.slice();
-        const etag = bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer)));
+        const etag = Encoding.encodeHex(new Uint8Array(await crypto.subtle.digest("SHA-256", body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer)));
         map.set(key, { body, contentType: options?.contentType, etag });
         return { etag };
       },

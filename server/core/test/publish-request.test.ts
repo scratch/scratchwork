@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { bytesToBase64 } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import { decodePublishRequest, MAX_PUBLISH_FILE_BYTES, MAX_PUBLISH_FILES, MAX_PUBLISH_TOTAL_BYTES } from "../src/publish-request";
 import { bundle } from "./helpers";
 
@@ -24,8 +24,8 @@ describe("decodePublishRequest", () => {
       bundle: {
         version: 1,
         files: [
-          { path: "index.html", contentBase64: bytesToBase64(new TextEncoder().encode("a")) },
-          { path: "index.html", contentBase64: bytesToBase64(new TextEncoder().encode("b")) },
+          { path: "index.html", contentBase64: Encoding.encodeBase64(new TextEncoder().encode("a")) },
+          { path: "index.html", contentBase64: Encoding.encodeBase64(new TextEncoder().encode("b")) },
         ],
       },
     }))).rejects.toThrow("Duplicate file path");
@@ -33,7 +33,7 @@ describe("decodePublishRequest", () => {
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: {
         version: 1,
-        files: [{ path: "../secret", contentBase64: bytesToBase64(new TextEncoder().encode("x")) }],
+        files: [{ path: "../secret", contentBase64: Encoding.encodeBase64(new TextEncoder().encode("x")) }],
       },
     }))).rejects.toThrow("Invalid site path");
   });
@@ -88,7 +88,7 @@ describe("decodePublishRequest", () => {
         version: 1,
         files: Array.from({ length: MAX_PUBLISH_FILES + 1 }, (_, index) => ({
           path: `file-${index}.txt`,
-          contentBase64: bytesToBase64(new Uint8Array([index % 255])),
+          contentBase64: Encoding.encodeBase64(new Uint8Array([index % 255])),
         })),
       },
     }))).rejects.toThrow("too many files");
@@ -96,7 +96,7 @@ describe("decodePublishRequest", () => {
     await expect(Effect.runPromise(decodePublishRequest({
       bundle: {
         version: 1,
-        files: [{ path: "big.bin", contentBase64: bytesToBase64(new Uint8Array(MAX_PUBLISH_FILE_BYTES + 1)) }],
+        files: [{ path: "big.bin", contentBase64: Encoding.encodeBase64(new Uint8Array(MAX_PUBLISH_FILE_BYTES + 1)) }],
       },
     }))).rejects.toThrow("too large");
 
@@ -105,10 +105,10 @@ describe("decodePublishRequest", () => {
       bundle: {
         version: 1,
         files: [
-          { path: "a.bin", contentBase64: bytesToBase64(third) },
-          { path: "b.bin", contentBase64: bytesToBase64(third) },
-          { path: "c.bin", contentBase64: bytesToBase64(third) },
-          { path: "d.bin", contentBase64: bytesToBase64(third) },
+          { path: "a.bin", contentBase64: Encoding.encodeBase64(third) },
+          { path: "b.bin", contentBase64: Encoding.encodeBase64(third) },
+          { path: "c.bin", contentBase64: Encoding.encodeBase64(third) },
+          { path: "d.bin", contentBase64: Encoding.encodeBase64(third) },
         ],
       },
     }))).rejects.toThrow("Publish bundle is too large");

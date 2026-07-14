@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import { verifyGoogleIdToken } from "../src/google-jwt";
 import { jwksFetch, makeKeyPair, nowSeconds as now, signJwt } from "./jwt-helpers";
 
@@ -48,7 +48,7 @@ describe("verifyGoogleIdToken", () => {
     });
 
     const [header, payload, signature] = token.split(".");
-    const tamperedPayload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify({
+    const tamperedPayload = Encoding.encodeBase64Url(new TextEncoder().encode(JSON.stringify({
       iss: "https://accounts.google.com",
       aud: "client-id",
       sub: "google-user-1",

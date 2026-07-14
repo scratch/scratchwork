@@ -2,7 +2,7 @@ import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import {
   createSessionToken,
   decodeCliAuthorizationCode,
@@ -35,7 +35,7 @@ const CLI_VERIFIER = "test-code-verifier-test-code-verifier-test1";
 /** Computes the S256 challenge for a PKCE verifier. */
 async function s256(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-  return bytesToBase64Url(new Uint8Array(digest));
+  return Encoding.encodeBase64Url(new Uint8Array(digest));
 }
 
 /** Builds the /auth/login URL a CLI sends: loopback redirect, state echo, and challenge. */

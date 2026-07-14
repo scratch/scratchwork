@@ -5,7 +5,6 @@ import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
 import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
 import { PublishRequestBodySchema, type PublishRequestBody } from "../../../shared/src/publish/api";
-import { parseJson } from "../../../shared/src/util/json";
 import { HttpError } from "./http";
 
 /** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
@@ -40,10 +39,9 @@ export function readPublishRequest(
     if (new TextEncoder().encode(text).byteLength > MAX_PUBLISH_BODY_BYTES) {
       return yield* Effect.fail(new HttpError({ status: 413, message: "Publish body is too large" }));
     }
-    const parsed = parseJson(text);
-    if (parsed == null) {
-      return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid JSON body" }));
-    }
+    const parsed = yield* Schema.decodeUnknown(Schema.parseJson())(text).pipe(
+      Effect.mapError(() => new HttpError({ status: 400, message: "Invalid JSON body" })),
+    );
     return yield* decodePublishRequest(parsed);
   });
 }
@@ -75,13 +73,10 @@ function normalizePublishRequest(raw: PublishRequestBody): Effect.Effect<Publish
       return yield* Effect.fail(new HttpError({ status: 413, message: "Publish bundle has too many files" }));
     }
 
-    const seen = new Set<string>();
+    // Path uniqueness and base64 validity are already guaranteed by the shared
+    // bundle schema; the size math still needs each file's decoded byte length.
     let totalBytes = 0;
     for (const file of raw.bundle.files) {
-      if (seen.has(file.path)) {
-        return yield* Effect.fail(new HttpError({ status: 400, message: `Duplicate file path: ${file.path}` }));
-      }
-      seen.add(file.path);
       const bytes = decodedBase64ByteLength(file.contentBase64);
       if (bytes == null) {
         return yield* Effect.fail(new HttpError({ status: 400, message: `Invalid base64 content: ${file.path}` }));

@@ -12,12 +12,19 @@ import * as HttpClient from "@effect/platform/HttpClient";
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
 import type * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
+import * as Either from "effect/Either";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { CLI_TOKEN_EXCHANGE_PATH, ProjectResponseSchema } from "../../shared/src/publish/api";
-import { isRecord, parseJson } from "../../shared/src/util/json";
 import { readAuthToken, readCfToken, serverApiUrl } from "./auth";
 import { CliError, errorMessage } from "./errors";
+
+/** Decodes a response body as JSON, or null when it is not JSON. */
+const parseBodyJson = (text: string): unknown =>
+  Either.getOrNull(Schema.decodeUnknownEither(Schema.parseJson())(text));
+
+/** Matches an `{"error": "..."}` body, tolerating extra fields. */
+const decodeErrorBody = Schema.decodeUnknownOption(Schema.Struct({ error: Schema.String }));
 
 /** A completed API exchange: HTTP status plus the raw and JSON-decoded body. */
 export interface ApiResponse {
@@ -68,7 +75,7 @@ export function apiRequest(
       status: response.status,
       ok: response.status >= 200 && response.status < 300,
       text,
-      json: parseJson(text),
+      json: parseBodyJson(text),
     };
   }).pipe(
     Effect.catchTags({
@@ -153,8 +160,9 @@ function edgeBlocked(
  * proxy HTML error pages, stack dumps) are never echoed wholesale into the terminal —
  * an HTML page is reduced to its title and anything long is truncated. */
 export function apiErrorText(response: ApiResponse): string {
-  if (isRecord(response.json) && typeof response.json.error === "string" && response.json.error !== "") {
-    return response.json.error;
+  const errorBody = Option.getOrNull(decodeErrorBody(response.json));
+  if (errorBody != null && errorBody.error !== "") {
+    return errorBody.error;
   }
   const text = response.text.trim();
   if (text === "") return `server returned ${response.status}`;

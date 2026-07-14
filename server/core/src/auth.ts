@@ -14,12 +14,14 @@ import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Either from "effect/Either";
+import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { base64UrlToBytes, bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import { sha256Base64Url } from "../../../shared/src/crypto/digest";
 import { errorMessage } from "../../../shared/src/util/errors";
-import { parseJson } from "../../../shared/src/util/json";
 import { accessGroupMatches } from "./access";
+import * as AuthCrypto from "./auth-crypto";
 import { verifyCloudflareAccessToken } from "./cloudflare-jwt";
 import { ServerConfig, type AuthConfig, type CloudflareAccessAuthConfig, type OAuthAuthConfig } from "./config";
 import {
@@ -31,7 +33,11 @@ import {
   sessionCookie,
   STATE_TTL_SECONDS,
 } from "./cookies";
-import { verifyGoogleIdToken, type GoogleIdTokenClaims } from "./google-jwt";
+import {
+  postAuthorizationCodeGrant,
+  verifyGoogleIdToken,
+  type GoogleIdTokenClaims,
+} from "./google-jwt";
 import { timingSafeEqual } from "./tokens";
 
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -151,13 +157,6 @@ const ProjectAccessPayloadSchema = Schema.Struct({
 });
 type ProjectAccessPayload = typeof ProjectAccessPayloadSchema.Type;
 
-/** Google's token-endpoint response shape, as much of it as the exchange needs. */
-interface GoogleTokenResponse {
-  readonly id_token?: string;
-  readonly error?: string;
-  readonly error_description?: string;
-}
-
 /** Auth failure; `status` becomes the HTTP response status. */
 export class AuthError extends Data.TaggedError("AuthError")<{
   readonly status: number;
@@ -244,7 +243,7 @@ function makeGoogleAuth(config: OAuthAuthConfig): AuthShape {
         const state = randomNonce();
         const nonce = randomNonce();
         const codeVerifier = randomVerifier();
-        const codeChallenge = yield* sha256Base64Url(codeVerifier);
+        const codeChallenge = yield* sha256Challenge(codeVerifier);
         const stateToken = yield* signValue(
           {
             version: SESSION_VERSION,
@@ -665,7 +664,7 @@ export function verifyCliCodeExchange(
     if (!PKCE_PATTERN.test(codeVerifier)) {
       return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid code verifier" }));
     }
-    const challenge = yield* sha256Base64Url(codeVerifier);
+    const challenge = yield* sha256Challenge(codeVerifier);
     if (!timingSafeEqual(challenge, payload.codeChallenge) || redirectUri !== payload.redirectUri) {
       return yield* Effect.fail(new AuthError({ status: 400, message: "Authorization code does not match this login" }));
     }
@@ -689,24 +688,11 @@ function verifySessionToken(
   });
 }
 
-/** Encrypts one credential with a key derived from the session secret. The random
- * 96-bit IV is prefixed to the AES-GCM ciphertext and encoded as base64url. */
+/** Encrypts one credential with a key derived from the session secret (AES-GCM in
+ * the auth-crypto boundary module). */
 function encryptCredential(value: string, secret: string): Effect.Effect<string, AuthError> {
   return Effect.tryPromise({
-    try: async () => {
-      const iv = new Uint8Array(12);
-      crypto.getRandomValues(iv);
-      const key = await credentialEncryptionKey(secret, ["encrypt"]);
-      const encrypted = new Uint8Array(await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        key,
-        new TextEncoder().encode(value),
-      ));
-      const encoded = new Uint8Array(iv.length + encrypted.length);
-      encoded.set(iv);
-      encoded.set(encrypted, iv.length);
-      return bytesToBase64Url(encoded);
-    },
+    try: () => AuthCrypto.encryptCredential(value, secret),
     catch: (cause) => new AuthError({ status: 500, message: "Could not protect Cloudflare Access credential", cause }),
   });
 }
@@ -714,26 +700,9 @@ function encryptCredential(value: string, secret: string): Effect.Effect<string,
 /** Decrypts a credential produced by encryptCredential. */
 function decryptCredential(value: string, secret: string): Effect.Effect<string, AuthError> {
   return Effect.tryPromise({
-    try: async () => {
-      const encoded = base64UrlToBytes(value);
-      if (encoded == null || encoded.length <= 12) throw new Error("invalid encrypted credential");
-      const iv = encoded.slice(0, 12);
-      const ciphertext = encoded.slice(12);
-      const key = await credentialEncryptionKey(secret, ["decrypt"]);
-      const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
-      return new TextDecoder().decode(decrypted);
-    },
+    try: () => AuthCrypto.decryptCredential(value, secret),
     catch: (cause) => new AuthError({ status: 400, message: "Invalid authorization code", cause }),
   });
-}
-
-/** Derives the fixed-width AES key without using the session secret as raw AES input. */
-async function credentialEncryptionKey(
-  secret: string,
-  usages: ReadonlyArray<"encrypt" | "decrypt">,
-): Promise<CryptoKey> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [...usages]);
 }
 
 /** Exchanges a Google OAuth code (with the transaction's PKCE verifier) and verifies
@@ -748,23 +717,13 @@ function exchangeGoogleCode(
   return Effect.gen(function* () {
     const endpoints = providerEndpoints(config);
     const { ok, json } = yield* Effect.tryPromise({
-      try: async () => {
-        const body = new URLSearchParams({
-          client_id: config.clientId,
-          client_secret: config.clientSecret,
-          code,
-          code_verifier: codeVerifier,
-          grant_type: "authorization_code",
-          redirect_uri: redirectUri,
-        });
-        const response = await fetch(endpoints.tokenUrl, {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body,
-        });
-        const json = (await response.json().catch(() => null)) as GoogleTokenResponse | null;
-        return { ok: response.ok, json };
-      },
+      try: () => postAuthorizationCodeGrant(endpoints.tokenUrl, {
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        code,
+        codeVerifier,
+        redirectUri,
+      }),
       catch: (cause) => new AuthError({ status: 500, message: errorMessage(cause) }),
     });
     if (!ok || json?.id_token == null) {
@@ -818,13 +777,16 @@ function allowedUser(user: AuthUser, config: AuthConfig): boolean {
 
 /** Signs arbitrary JSON as a compact HMAC token. */
 function signValue(value: unknown, secret: string): Effect.Effect<string, AuthError> {
-  return Effect.tryPromise({
-    try: async () => {
-      const payload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(value)));
-      const signature = await hmac(payload, secret);
-      return `${payload}.${signature}`;
-    },
-    catch: (cause) => new AuthError({ status: 500, message: `Could not sign auth token: ${errorMessage(cause)}` }),
+  return Effect.gen(function* () {
+    const payload = yield* Effect.try({
+      try: () => Encoding.encodeBase64Url(new TextEncoder().encode(JSON.stringify(value))),
+      catch: (cause) => new AuthError({ status: 500, message: `Could not sign auth token: ${errorMessage(cause)}` }),
+    });
+    const signature = yield* Effect.tryPromise({
+      try: () => AuthCrypto.hmacSha256Base64Url(payload, secret),
+      catch: (cause) => new AuthError({ status: 500, message: `Could not sign auth token: ${errorMessage(cause)}` }),
+    });
+    return `${payload}.${signature}`;
   });
 }
 
@@ -834,37 +796,20 @@ function verifySignedValue<A, I>(
   secret: string,
   schema: Schema.Schema<A, I, never>,
 ): Effect.Effect<A, AuthError> {
-  return Effect.tryPromise({
-    try: async () => {
-      const [payload, signature] = token.split(".");
-      if (!payload || !signature) throw new Error("invalid token");
-      const expected = await hmac(payload, secret);
-      if (!timingSafeEqual(signature, expected)) throw new Error("invalid token signature");
-      const bytes = base64UrlToBytes(payload);
-      if (bytes == null) throw new Error("invalid token payload");
-      return parseJson(new TextDecoder().decode(bytes));
-    },
-    catch: () => new AuthError({ status: 401, message: "Invalid auth token" }),
-  }).pipe(
-    Effect.flatMap((value) =>
-      Schema.decodeUnknown(schema)(value).pipe(
-        Effect.mapError(() => new AuthError({ status: 401, message: "Invalid auth token" })),
-      ),
-    ),
-  );
-}
-
-/** Computes a base64url HMAC signature for signed auth values. */
-async function hmac(value: string, secret: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  return bytesToBase64Url(new Uint8Array(signature));
+  const invalid = () => new AuthError({ status: 401, message: "Invalid auth token" });
+  return Effect.gen(function* () {
+    const [payload, signature] = token.split(".");
+    if (!payload || !signature) return yield* Effect.fail(invalid());
+    const expected = yield* Effect.tryPromise({
+      try: () => AuthCrypto.hmacSha256Base64Url(payload, secret),
+      catch: invalid,
+    });
+    if (!timingSafeEqual(signature, expected)) return yield* Effect.fail(invalid());
+    const bytes = yield* Encoding.decodeBase64Url(payload).pipe(Either.mapLeft(invalid));
+    return yield* Schema.decodeUnknown(Schema.parseJson(schema))(new TextDecoder().decode(bytes)).pipe(
+      Effect.mapError(invalid),
+    );
+  });
 }
 
 /** Extracts a bearer token from the Authorization header. */
@@ -920,23 +865,20 @@ function epochSeconds(): number {
 function randomNonce(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
-  return bytesToBase64Url(bytes);
+  return Encoding.encodeBase64Url(bytes);
 }
 
 /** Generates a PKCE code verifier: 32 random bytes as 43 base64url characters. */
 function randomVerifier(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
-  return bytesToBase64Url(bytes);
+  return Encoding.encodeBase64Url(bytes);
 }
 
 /** Computes the base64url SHA-256 digest used for PKCE S256 challenges. */
-function sha256Base64Url(value: string): Effect.Effect<string, AuthError> {
+function sha256Challenge(value: string): Effect.Effect<string, AuthError> {
   return Effect.tryPromise({
-    try: async () => {
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-      return bytesToBase64Url(new Uint8Array(digest));
-    },
+    try: () => sha256Base64Url(value),
     catch: (cause) => new AuthError({ status: 500, message: `Could not compute code challenge: ${errorMessage(cause)}` }),
   });
 }

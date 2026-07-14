@@ -4,7 +4,7 @@
  * and auth tests. The production JWKS cache is keyed by URL, so tests that generate their
  * own key pair must also use a JWKS URL (or team domain) unique to that key pair.
  */
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
 
 /** A generated RSA signing key with its public JWKS entry. */
@@ -31,15 +31,15 @@ export async function makeKeyPair(): Promise<TestKeyPair> {
 
 /** Signs a test JWT with the generated RSA private key. */
 export async function signJwt(privateKey: CryptoKey, payload: Record<string, unknown>): Promise<string> {
-  const header = bytesToBase64Url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", kid: "kid-1", typ: "JWT" })));
-  const body = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
+  const header = Encoding.encodeBase64Url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", kid: "kid-1", typ: "JWT" })));
+  const body = Encoding.encodeBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
   const data = `${header}.${body}`;
   const signature = await crypto.subtle.sign(
     "RSASSA-PKCS1-v1_5",
     privateKey,
     toArrayBuffer(new TextEncoder().encode(data)),
   );
-  return `${data}.${bytesToBase64Url(new Uint8Array(signature))}`;
+  return `${data}.${Encoding.encodeBase64Url(new Uint8Array(signature))}`;
 }
 
 /** Returns a fetch mock that serves one JWKS document. */

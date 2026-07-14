@@ -7,27 +7,10 @@
  * so a newer server adding fields never breaks an older CLI.
  */
 import * as Schema from "effect/Schema";
-import { decodedBase64ByteLength } from "../encoding/base64";
 import { isSafeProjectIdentifier } from "../site/identifiers";
-import { isSafeSitePath } from "../site/paths";
-import { PUBLISH_BUNDLE_VERSION } from "./bundle";
+import { PublishBundleSchema } from "./bundle";
 
-/** One file in a publish bundle: a safe site-relative path plus base64 content. */
-const PublishBundleFileSchema = Schema.Struct({
-  path: Schema.String.pipe(
-    Schema.filter((path) => isSafeSitePath(path) || "Invalid site path"),
-  ),
-  contentBase64: Schema.String.pipe(
-    Schema.filter((content) => decodedBase64ByteLength(content) != null || "Invalid base64 content"),
-  ),
-});
-
-/** A complete publish upload: format version plus every file in the site.
- * The runtime shape matches PublishBundle in bundle.ts. */
-export const PublishBundleSchema = Schema.Struct({
-  version: Schema.Literal(PUBLISH_BUNDLE_VERSION),
-  files: Schema.Array(PublishBundleFileSchema),
-});
+export { PublishBundleSchema };
 
 /** The JSON body of `POST /api/publish`. `project` is optional at the protocol
  * level — a random-naming server mints a name when none is sent; `isPublic` is

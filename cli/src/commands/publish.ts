@@ -12,7 +12,8 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { bytesToBase64, decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
+import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
 import {
   PublishResponseSchema,
   type PublishRequestBody,
@@ -21,7 +22,6 @@ import {
 import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeProjectIdentifier, slugifyIdentifier } from "../../../shared/src/site/identifiers";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
-import { nonEmpty } from "../../../shared/src/util/strings";
 import { apiErrorText, apiRequest } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
 import { openBrowser } from "../browser";
@@ -115,7 +115,7 @@ function createBundle(
       fs.readFile(paths.join(root, ...sitePath.split("/"))).pipe(
         Effect.map((bytes) => ({
           path: sitePath,
-          contentBase64: bytesToBase64(bytes),
+          contentBase64: Encoding.encodeBase64(bytes),
         })),
       ),
     );
@@ -279,8 +279,8 @@ function resolveProjectName(
   target: { readonly root: string; readonly file?: string },
 ): Effect.Effect<string | undefined, CliError, Path.Path> {
   return Effect.gen(function* () {
-    const explicit = nonEmpty(config.project) ?? nonEmpty(projectConfig?.project);
-    if (explicit != null) {
+    const explicit = config.project || projectConfig?.project;
+    if (explicit) {
       if (!isSafeProjectIdentifier(explicit)) {
         return yield* Effect.fail(new CliError({
           code: 1,
@@ -291,7 +291,7 @@ function resolveProjectName(
     }
 
     const derived = target.file != null ? fileStem(target.file) : yield* basename(target.root);
-    return nonEmpty(slugifyIdentifier(derived, ""));
+    return slugifyIdentifier(derived, "") || undefined;
   });
 }
 

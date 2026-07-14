@@ -77,18 +77,18 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 The invariant starts out violated by existing code, not just guarding new code: much of `shared/src` is hand-rolled utility with a direct Effect stdlib equivalent. Pre-launch churn is accepted here: the goal is to delegate effects, errors, validation, encoding, resource lifetime, concurrency, and test services to Effect wherever it has a maintained equivalent, reducing repository-owned semantics and maximizing the guarantees available to callers.
 
-`[ ]` Migrate `shared/src` to Effect-native and update call sites in cli and server as each util is replaced:
+`[x]` Migrate `shared/src` to Effect-native and update call sites in cli and server as each util is replaced:
 
-- `util/json.ts` (`isRecord`, `parseJson`) → `Schema` decoding
-- `encoding/{base64,hex,bytes}.ts` → `effect/Encoding`
-- `util/strings.ts`, `util/errors.ts` → Effect stdlib / `Data.TaggedError` where they're error-shaped
-- `site/*` contract and serving helpers → Effect types at the exported surface
+- `util/json.ts` (`isRecord`, `parseJson`) → `Schema` decoding *(deleted; call sites use `Schema.parseJson(...)` decoding and `Predicate.isRecord`)*
+- `encoding/{base64,hex,bytes}.ts` → `effect/Encoding` *(hand-rolled codecs deleted; `base64.ts` retains only `decodedBase64ByteLength` — size-without-decode has no Effect equivalent — with a conformance test pinning agreement with `Encoding.decodeBase64`; `bytes.ts`'s `toArrayBuffer` retained with documented rationale, Encoding covers codecs not BufferSource conversion)*
+- `util/strings.ts`, `util/errors.ts` → Effect stdlib / `Data.TaggedError` where they're error-shaped *(`strings.ts` deleted — `nonEmpty` collapsed into plain `||` fallbacks; `errors.ts` retained with documented rationale: no Effect stdlib equivalent for unknown-thrown-value → message)*
+- `site/*` contract and serving helpers → Effect types at the exported surface *(routing/serve/html/renderer/files were already Effect; `publish/bundle.ts` is now the single Schema definition of the bundle wire format — `decodePublishBundle` deleted, path uniqueness enforced in the schema; remaining `site/*` helpers are pure total functions, which is the Effect-idiomatic shape for them)*
 
-`[ ]` Sweep cli and server for remaining hand-rolled equivalents once shared is clean. Before replacing a helper, preserve its intended behavior with characterization/adversarial tests; after migration, delete the old implementation rather than retaining parallel paths.
+`[x]` Sweep cli and server for remaining hand-rolled equivalents once shared is clean. Before replacing a helper, preserve its intended behavior with characterization/adversarial tests; after migration, delete the old implementation rather than retaining parallel paths. *(auth.json validation → Schema in `cli/src/auth.ts`; JWKS env parsing → Schema in `server/core/src/config.ts`; API error-body sniffing → Schema in `cli/src/api.ts`; `db.ts` JSON codecs already Effect-native with domain validation and stay.)*
 
-`[ ]` Extract the async Web Crypto helpers (`hmac` in `auth.ts`, and any similar inline `crypto.subtle` use) into a small dedicated boundary module so `auth.ts` itself stays subject to the Effect-boundary lint. The allowlist stays file-level; boundary files stay tiny.
+`[x]` Extract the async Web Crypto helpers (`hmac` in `auth.ts`, and any similar inline `crypto.subtle` use) into a small dedicated boundary module so `auth.ts` itself stays subject to the Effect-boundary lint. The allowlist stays file-level; boundary files stay tiny. *(Boundary set is now six small documented files: `server/core/src/auth-crypto.ts` (HMAC + AES-GCM), `shared/src/crypto/digest.ts` (SHA-256 for PKCE/content hashing, shared by cli and server), `cli/src/commands/login-callback-server.ts` (Bun.serve loopback), plus the pre-existing `jwt-rs256.ts`/`google-jwt.ts`/`cloudflare-jwt.ts` provider boundary — the Google token-endpoint POST moved from `auth.ts` into `google-jwt.ts`. `auth.ts` and `login.ts` contain no async/await/Promise.)*
 
-`[ ]` Bring existing signed payloads into invariant 3 compliance: add a discriminating `kind` to session and OAuth-state payloads, add the CLI authorization-code payload, version the format change deliberately, and verify every kind only through the shared signed-value codec.
+`[x]` Bring existing signed payloads into invariant 3 compliance: add a discriminating `kind` to session and OAuth-state payloads, add the CLI authorization-code payload, version the format change deliberately, and verify every kind only through the shared signed-value codec. *(Landed with Phase 3: all four payload schemas carry `version` + `kind` literals and every kind signs/verifies only through `signValue`/`verifySignedValue`; the exhaustive adversarial corpus remains Phase 5.)*
 
 - Exempt: `shared/src/site/default-renderer.generated.js` (build artifact written by `renderer/build.js`, not source).
 

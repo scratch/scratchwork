@@ -13,11 +13,11 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { base64ToBytes } from "../../../shared/src/encoding/base64";
+import * as Either from "effect/Either";
+import * as Encoding from "effect/Encoding";
 import { ProjectsListResponseSchema } from "../../../shared/src/publish/api";
-import { decodePublishBundle } from "../../../shared/src/publish/bundle";
+import { PublishBundleSchema } from "../../../shared/src/publish/bundle";
 import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
-import { isRecord } from "../../../shared/src/util/json";
 import { apiErrorText, apiJson, apiRequest, projectApiUrl } from "../api";
 import { readAuthToken, serverApiUrl } from "../auth";
 import { SKIPPED_DIRECTORIES } from "../dev/target";
@@ -173,8 +173,10 @@ export function runClone(
     }
     const token = yield* readAuthToken(ref.server);
     const body = yield* apiJson("scratchwork clone", projectApiUrl(ref, "/bundle"), { token });
-    const bundle = isRecord(body) ? decodePublishBundle(body.bundle) : null;
-    if (bundle == null) {
+    const envelope = Option.getOrNull(
+      Schema.decodeUnknownOption(Schema.Struct({ bundle: PublishBundleSchema }))(body),
+    );
+    if (envelope == null) {
       return yield* Effect.fail(new CliError({ code: 1, message: "scratchwork clone: invalid server response" }));
     }
 
@@ -182,11 +184,10 @@ export function runClone(
     const paths = yield* Path.Path;
     const destination = paths.resolve(process.cwd(), ref.project);
     yield* fs.makeDirectory(destination, { recursive: true });
-    for (const file of bundle.files) {
-      const bytes = base64ToBytes(file.contentBase64);
-      if (bytes == null) {
-        return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork clone: invalid file content ${file.path}` }));
-      }
+    for (const file of envelope.bundle.files) {
+      const bytes = yield* Encoding.decodeBase64(file.contentBase64).pipe(
+        Either.mapLeft(() => new CliError({ code: 1, message: `scratchwork clone: invalid file content ${file.path}` })),
+      );
       const outputPath = paths.join(destination, ...file.path.split("/"));
       yield* fs.makeDirectory(paths.dirname(outputPath), { recursive: true });
       yield* fs.writeFile(outputPath, bytes);

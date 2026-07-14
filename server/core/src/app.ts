@@ -23,7 +23,6 @@ import {
   type ShareResponse,
 } from "../../../shared/src/publish/api";
 import { SiteFiles } from "../../../shared/src/site/files";
-import { parseJson } from "../../../shared/src/util/json";
 import { servePath } from "../../../shared/src/site/serve";
 import { isLoopbackHost } from "../../../shared/src/util/url";
 import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
@@ -245,10 +244,9 @@ function readCliTokenRequest(
       HttpServerRequest.withMaxBodySize(Option.some(MAX_CLI_TOKEN_BODY_BYTES)),
       Effect.mapError((cause) => new HttpError({ status: 413, message: "Request body is too large", cause })),
     );
-    const parsed = parseJson(text);
-    if (parsed == null) {
-      return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid JSON body" }));
-    }
+    const parsed = yield* Schema.decodeUnknown(Schema.parseJson())(text).pipe(
+      Effect.mapError(() => new HttpError({ status: 400, message: "Invalid JSON body" })),
+    );
     return yield* Schema.decodeUnknown(CliTokenRequestSchema)(parsed, {
       errors: "all",
       onExcessProperty: "error",

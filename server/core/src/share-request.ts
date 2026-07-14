@@ -8,7 +8,6 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
-import { parseJson } from "../../../shared/src/util/json";
 import { HttpError } from "./http";
 import type { ShareChanges } from "./site-store";
 
@@ -36,10 +35,9 @@ export function readShareRequest(
       HttpServerRequest.withMaxBodySize(Option.some(MAX_SHARE_BODY_BYTES)),
       Effect.mapError((cause) => new HttpError({ status: 413, message: "Share body is too large", cause })),
     );
-    const parsed = parseJson(text);
-    if (parsed == null) {
-      return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid JSON body" }));
-    }
+    const parsed = yield* Schema.decodeUnknown(Schema.parseJson())(text).pipe(
+      Effect.mapError(() => new HttpError({ status: 400, message: "Invalid JSON body" })),
+    );
     const raw = yield* Schema.decodeUnknown(RawShareRequestSchema)(parsed, {
       errors: "all",
       onExcessProperty: "error",

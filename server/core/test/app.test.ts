@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import { createSessionToken, issueCliAuthorizationCode, type AuthUser } from "../src/auth";
 import type { AuthConfig } from "../src/config";
 import { MemoryPrimitiveDbLive } from "../src/db";
@@ -1189,7 +1189,7 @@ describe("server app", () => {
 
     async function s256(value: string): Promise<string> {
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-      return bytesToBase64Url(new Uint8Array(digest));
+      return Encoding.encodeBase64Url(new Uint8Array(digest));
     }
 
     async function issueCode(): Promise<string> {
