@@ -16,8 +16,9 @@ const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 /** Computes decoded standard-base64 byte length without allocating the bytes.
  * Returns null for input Encoding.decodeBase64 would reject. */
 export function decodedBase64ByteLength(value: string): number | null {
-  // Encoding.decodeBase64 strips CR/LF before validating; mirror that.
-  const stripped = value.replace(/[\r\n]/g, "");
+  // Encoding.decodeBase64 strips CR/LF before validating; mirror that, without
+  // copying multi-megabyte file contents in the common no-CR/LF case.
+  const stripped = /[\r\n]/.test(value) ? value.replace(/[\r\n]/g, "") : value;
   if (stripped.length % 4 !== 0 || !BASE64_PATTERN.test(stripped)) return null;
   const padding = stripped.endsWith("==") ? 2 : stripped.endsWith("=") ? 1 : 0;
   return (stripped.length / 4) * 3 - padding;

@@ -33,8 +33,8 @@ const AuthRecordSchema = Schema.Struct({
 export type AuthRecord = typeof AuthRecordSchema.Type;
 
 /** On-disk shape of auth.json: tokens keyed by normalized server origin. The file
- * is user-editable, so it is decoded tolerantly (unknown fields survive a rewrite
- * of the known ones only in spirit — writes serialize the decoded shape). */
+ * is user-editable, so unknown fields are tolerated on read — but the decode drops
+ * them, so the next write rewrites the file with only the fields declared here. */
 const AuthFileSchema = Schema.Struct({
   version: Schema.Literal(1),
   servers: Schema.Record({ key: Schema.String, value: AuthRecordSchema }),
@@ -164,12 +164,15 @@ export function loginUrl(server: string, callbackUrl: string, proof: LoginProof)
 
 /** Generates the per-login PKCE verifier/challenge pair and callback state. */
 export function generateLoginProof(): Effect.Effect<LoginProof, CliError> {
-  const state = randomUrlSafe(16);
-  const codeVerifier = randomUrlSafe(32);
-  return Effect.tryPromise({
-    try: () => sha256Base64Url(codeVerifier),
-    catch: (cause) => new CliError({ code: 1, message: `scratchwork login: ${errorMessage(cause)}` }),
-  }).pipe(Effect.map((codeChallenge) => ({ state, codeVerifier, codeChallenge })));
+  return Effect.gen(function* () {
+    const state = yield* Effect.sync(() => randomUrlSafe(16));
+    const codeVerifier = yield* Effect.sync(() => randomUrlSafe(32));
+    const codeChallenge = yield* Effect.tryPromise({
+      try: () => sha256Base64Url(codeVerifier),
+      catch: (cause) => new CliError({ code: 1, message: `scratchwork login: ${errorMessage(cause)}` }),
+    });
+    return { state, codeVerifier, codeChallenge };
+  });
 }
 
 /** Decodes a loopback callback request. Anything without this login's exact state —

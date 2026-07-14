@@ -17,7 +17,9 @@ export interface LoginCallbackServer {
   readonly port: number;
   /** Resolves the browser's held callback response with the exchange outcome. */
   readonly settleExchange: (ok: boolean) => void;
-  /** Stops the server without waiting for in-flight requests. */
+  /** Stops accepting new connections; in-flight requests (including the held
+   * callback response) are allowed to finish, so call settleExchange first to
+   * unblock them. */
   readonly stop: () => void;
 }
 

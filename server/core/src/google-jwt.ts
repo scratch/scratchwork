@@ -8,6 +8,8 @@
  */
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { errorMessage } from "../../../shared/src/util/errors";
 import { CLOCK_SKEW_SECONDS, verifyRs256Jwt } from "./jwt-rs256";
 
@@ -55,12 +57,17 @@ export function verifyGoogleIdToken(
   });
 }
 
-/** Google's token-endpoint response shape, as much of it as the exchange needs. */
-export interface GoogleTokenResponse {
-  readonly id_token?: string;
-  readonly error?: string;
-  readonly error_description?: string;
-}
+/** Google's token-endpoint response shape, as much of it as the exchange needs —
+ * decoded tolerantly, so extra fields are ignored and a malformed body is null. */
+const GoogleTokenResponseSchema = Schema.Struct({
+  id_token: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  error_description: Schema.optional(Schema.String),
+});
+
+export type GoogleTokenResponse = typeof GoogleTokenResponseSchema.Type;
+
+const decodeTokenResponse = Schema.decodeUnknownOption(GoogleTokenResponseSchema);
 
 /** POSTs an authorization-code grant (with its PKCE verifier) to the token endpoint —
  * Google's, or the loopback-gated local test provider's. Network and JSON failures
@@ -88,8 +95,8 @@ export async function postAuthorizationCodeGrant(
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
   });
-  const json = (await response.json().catch(() => null)) as GoogleTokenResponse | null;
-  return { ok: response.ok, json };
+  const responseBody: unknown = await response.json().catch(() => null);
+  return { ok: response.ok, json: Option.getOrNull(decodeTokenResponse(responseBody)) };
 }
 
 /** Validates issuer, audience, time, email, and nonce claims. */
