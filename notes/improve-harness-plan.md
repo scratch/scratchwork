@@ -96,7 +96,7 @@ The invariant starts out violated by existing code, not just guarding new code: 
 
 Six invariants (registry below). They live **directly in root `AGENTS.md`** — the one file Claude (via `CLAUDE.md` symlink), Codex, and OpenCode all read natively — rather than behind a pointer agents might skip. Once moved, AGENTS.md is the sole normative prose copy and this plan links to it rather than retaining a second editable copy; anything a script can check graduates into `bun run ci` (agents drift; CI doesn't).
 
-`[ ]` Root `AGENTS.md` (with `CLAUDE.md` symlinked to it): workspace map, `bun run ci`, the six invariants stated in full, and the standing rule "verify every diff against the invariants before committing."
+`[x]` Root `AGENTS.md` (with `CLAUDE.md` symlinked to it): workspace map, `bun run ci`, the six invariants stated in full, and the standing rule "verify every diff against the invariants before committing."
 
 `[ ]` Mechanize invariants 1 and 2's checkable cores in `bun run ci`: the Effect-boundary lint test (no async/await/Promise outside an exact, reviewed initial allowlist) and the import-boundary test (cli ⇄ server only via shared). The remaining invariants' checks are described below and in their registry entries.
 
@@ -123,64 +123,22 @@ Six invariants (registry below). They live **directly in root `AGENTS.md`** — 
 
 ### Phase 6 — Housekeeping
 
-`[ ]` Confirm `examples/` and `notes/` are exempt from the gate on purpose, and document the exemption in `AGENTS.md`.
+`[x]` Confirm `examples/` and `notes/` are exempt from the gate on purpose, and document the exemption in `AGENTS.md`.
 
 ## Invariants registry
 
-Six invariants, each enforced at three layers, strongest first: **structural** (the architecture makes violation impossible) → **mechanized** (a test in `bun run ci` fails) → **agent-pass** (judgment calls, per the standing rule in AGENTS.md).
+The six invariants now live in full in the root [`AGENTS.md`](../AGENTS.md) (with
+`CLAUDE.md` symlinked to it) — the sole normative copy. Each is enforced at up to three
+layers, strongest first: **structural** (the architecture makes violation impossible) →
+**mechanized** (a test in `bun run ci` fails) → **agent-pass** (judgment calls, per the
+standing rule in AGENTS.md). In brief:
 
-### 1. Effect-native everywhere
-
-All cli, server, and shared functionality is written against Effect: Effect types for errors and async, the Effect runtime, and the Effect standard library (Schema, platform, Encoding, stdlib data structures) instead of hand-rolled equivalents. The deliberate objective is maximal delegation: if Effect already owns a capability with equal or better semantics, use it rather than retaining a repository implementation. Pre-launch migration churn is accepted in exchange for fewer locally maintained semantics, stronger types at boundaries, service substitution in tests, controlled resource lifetime/concurrency, and a smaller custom surface after launch. Promise/async appears only at documented edges whose APIs inherently return Promises (Web Crypto/provider SDK/platform entrypoints); the initial allowlist names every such file and why it is a boundary.
-
-- Scope: `cli/src/**`, `server/**/src/**`, `shared/src/**`. (`renderer/` is the sole exception — deliberately plain browser JS.)
-- Mechanized: a ci test that fails on `async function` / `await` / `new Promise` / `.then(` in scope outside the exact reviewed allowlist of boundary files. New boundary = add its rationale to the allowlist in the same PR, which makes the exception reviewable; the baseline may shrink but not grow silently. The allowlist is file-level, so boundary files must stay tiny: extract async helpers into a dedicated module rather than allowlisting a large file (Phase 4 does this for `auth.ts`'s Web Crypto helpers).
-- Agent-pass: the parts a grep can't judge — Schema over hand-rolled validation, Effect stdlib over reimplemented utilities, services/layers over ambient dependencies, scoped resources over manual cleanup, error channels over thrown exceptions, and no parallel legacy implementation left behind after a migration.
-
-### 2. CLI↔server contracts live in `shared`
-
-Anything the CLI and server both use — types, schemas, helpers — is exposed from `shared/`, never duplicated. The CLI-consumed JSON API contract is defined once, as Effect Schemas in `shared/src/publish/api.ts` (already the case today; extend there, never inline). Auth callbacks, published-content routing, health checks, deployment hooks, and other server-only endpoints stay in server.
-
-- Structural (Phase 5 stretch): migrate the shared CLI API contract to `@effect/platform` `HttpApi`, so the server implements it and the CLI derives its client from the same object — duplication becomes impossible rather than forbidden.
-- Mechanized: boundary test in ci — `cli/**` never imports from `server/**` and vice versa; the only code importable by both is `shared/**`. Plus: every CLI-consumed JSON route's request/response schema is imported from shared, not defined locally. Maintain an explicit inventory of those routes so a newly added CLI call cannot escape the check.
-- Agent-pass: near-duplicate logic between cli and server that should be hoisted into shared (imports can't catch a reimplementation).
-- **Sanctioned exception:** `renderer/src/components.js` deliberately duplicates the component-scan logic in `shared/src/site/components.ts` — the renderer is plain browser JS and must not depend on shared, and the CLI dev diagnostics must predict what the renderer's loader will do. This is the *only* permitted duplication, and only because a ci conformance test (Phase 5) asserts the two implementations agree; don't "fix" it by hoisting, and don't cite it as precedent for new duplication.
-
-### 3. Auth goes through the chokepoints
-
-The auth code stays reviewable because its security-critical operations are singular. Every MAC/tag comparison goes through `timingSafeEqual` (`server/core/src/tokens.ts`); every HMAC token is minted by `signValue` and verified by `verifySignedValue` (`server/core/src/auth.ts`); every RS256 JWT is verified via `jwt-rs256.ts`. Every token payload, including session and OAuth state, carries a `version` and discriminating `kind` claim so cross-kind confusion fails Schema decoding. No new comparison, signing, verification, or credential-transport path is introduced outside the chokepoints.
-
-- Scope: `server/core/src/{auth,tokens,cookies,jwt-rs256,google-jwt,cloudflare-jwt,access}.ts`, `cli/src/{auth,api}.ts`, `cli/src/commands/login.ts`, and anything new that touches credentials.
-- Mechanized: the adversarial token corpus (Phase 5) and OAuth full-loop tests (Phase 3) — integrity, typed meaning, parser hardening, lifecycle, PKCE/callback binding, and secret-length checks.
-- Agent-pass: no `===` on cryptographic secrets/tags, no inline `crypto.subtle` signing/verifying outside the chokepoint modules, and every token kind gets `version` + `kind` claims and corpus coverage in the same PR.
-- **Accepted trade-off** (decided, don't "fix" without Pete): sessions are stateless HMAC — no single-token revocation (levers: allow-list removal, `SESSION_VERSION` bump). The old bearer-token-in-loopback-query flow is not accepted: replace it with the Phase 3 short-lived code + PKCE exchange before launch.
-
-### 4. API routes declare security policy and deny by default
-
-Every API route is registered once with its handler and explicit authentication mode, minimum project role, mutation/origin policy, and response-visibility policy. Dispatch and the authorization matrix derive from that production registry, so adding an unclassified route is impossible and the default for an unspecified credential/role combination is denial.
-
-- Scope: the server API router/registry, route handlers, and shared CLI API contract.
-- Structural: the router dispatches only registered route definitions; handlers receive the authenticated principal/authorized project capability produced by policy middleware rather than independently reconstructing it.
-- Mechanized: enumerate the registry and exercise credential kind × role × endpoint × public/private status; fail on missing policy metadata and deny every unspecified cell.
-- Agent-pass: sensitive response fields are gated by the declared visibility policy, and no handler bypasses the registry or performs a weaker inline substitute.
-
-### 5. Browser origins and credentials stay isolated
-
-The app, content, and homepage origins are separate security principals. HTTPS accepts only the intended secure-prefixed cookie names; cookies remain host/path scoped; published content cannot plant or override an app session; mutations reject untrusted origins; redirects remain on their intended origin/path; and production proxy/origin trust is explicit.
-
-- Scope: `server/core/src/{app,auth,cookies,http,config}.ts`, deployment proxy configuration, and published-content headers.
-- Structural: cookie readers require the resolved origin mode instead of accepting both secure and local names; production public origins/trusted proxies are explicit configuration.
-- Mechanized: the cross-host headless-browser security suite plus handler-level adversarial origin/redirect tests.
-- Agent-pass: any new cookie, redirect, forwarded header, CORS rule, or cross-origin flow receives an explicit threat-boundary review.
-
-### 6. Storage adapters have identical observable semantics
-
-Every `PrimitiveDb` and `ObjectStorage` implementation honors the same contract for conditional writes, versions/ETags, pagination, missing values, key validation, concurrency, binary data, and typed failures. A deploy target cannot weaken ownership or consistency guarantees through adapter drift.
-
-- Scope: in-memory/file implementations and D1/R2, DynamoDB/S3 deploy adapters.
-- Structural: all deploy implementations satisfy the same Effect service interfaces and use shared contract fixtures.
-- Mechanized: run the reusable adapter conformance suite unchanged against every implementation, using miniflare and LocalStack where required.
-- Agent-pass: provider-specific retries/eventual-consistency behavior is documented and mapped without changing the core contract.
+1. **Effect-native everywhere** — cli/server/shared code is written against Effect; async/Promise only in the reviewed boundary-file allowlist.
+2. **CLI↔server contracts live in `shared`** — never duplicated; the renderer component-scan is the one sanctioned, conformance-tested exception.
+3. **Auth goes through the chokepoints** — `timingSafeEqual`, `signValue`/`verifySignedValue`, `jwt-rs256.ts`; every payload carries `version` + `kind`.
+4. **API routes declare security policy and deny by default** — one registry with auth mode, role, origin, and visibility policy per route.
+5. **Browser origins and credentials stay isolated** — app/content/homepage are separate principals; cookies, redirects, and origin trust are explicit.
+6. **Storage adapters have identical observable semantics** — one conformance suite across in-memory/file, D1/R2, DynamoDB/S3.
 
 ## Non-goals (for this branch)
 
