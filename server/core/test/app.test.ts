@@ -376,11 +376,16 @@ describe("server app", () => {
       isPublic: true,
     }));
     expect(adminPublish.status).toBe(200);
-    const adminUnpublish = await adminHandler(post("/api/projects/site/unpublish", {}));
-    expect(adminUnpublish.status).toBe(200);
     const adminDelete = await adminHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
     expect(adminDelete.status).toBe(403);
     expect(await adminDelete.text()).toContain("owner");
+    const adminUnpublish = await adminHandler(post("/api/projects/site/unpublish", {}));
+    expect(adminUnpublish.status).toBe(200);
+    // Unpublishing cleared every grant, so the ex-admin is no longer a reader
+    // and the route policy masks the project's very existence.
+    const revokedDelete = await adminHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
+    expect(revokedDelete.status).toBe(403);
+    expect(await revokedDelete.text()).toContain("Project not found");
 
     const ownerDelete = await ownerHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
     expect(ownerDelete.status).toBe(200);
