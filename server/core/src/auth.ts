@@ -67,6 +67,10 @@ export interface AuthUser {
   readonly picture?: string;
 }
 
+/** Seconds-since-epoch claim. JSON can smuggle `1e999`, which parses to
+ * Infinity and would make a token eternal; finite() closes that. */
+const EpochSecondsSchema = Schema.Number.pipe(Schema.finite());
+
 /** The user object embedded in every session-token payload. */
 const AuthUserSchema = Schema.Struct({
   id: Schema.String,
@@ -81,8 +85,8 @@ const SessionPayloadSchema = Schema.Struct({
   kind: Schema.Literal("session"),
   provider: Schema.Literal("google", "cloudflare-access"),
   user: AuthUserSchema,
-  issuedAt: Schema.Number,
-  expiresAt: Schema.Number,
+  issuedAt: EpochSecondsSchema,
+  expiresAt: EpochSecondsSchema,
 });
 type SessionPayload = typeof SessionPayloadSchema.Type;
 
@@ -102,7 +106,7 @@ const OAuthStateSchema = Schema.Struct({
   cliRedirect: Schema.optional(Schema.String),
   cliState: Schema.optional(Schema.String),
   cliCodeChallenge: Schema.optional(Schema.String),
-  expiresAt: Schema.Number,
+  expiresAt: EpochSecondsSchema,
 });
 type OAuthState = typeof OAuthStateSchema.Type;
 
@@ -123,7 +127,7 @@ const CliCodePayloadSchema = Schema.Struct({
    * ride a loopback query string, so bearer credentials must never appear in their
    * signed-but-readable payload. */
   encryptedCfToken: Schema.optional(Schema.String),
-  expiresAt: Schema.Number,
+  expiresAt: EpochSecondsSchema,
 });
 
 /** The decoded CLI authorization-code payload. */
@@ -153,7 +157,7 @@ const ProjectAccessPayloadSchema = Schema.Struct({
   project: Schema.String,
   scope: Schema.String,
   email: Schema.String,
-  expiresAt: Schema.Number,
+  expiresAt: EpochSecondsSchema,
 });
 type ProjectAccessPayload = typeof ProjectAccessPayloadSchema.Type;
 
@@ -675,7 +679,12 @@ export function verifyCliCodeExchange(
   });
 }
 
-/** Verifies one signed session token and applies current allow-list rules. */
+/** Tolerated clock skew before a session token's issuedAt reads as forged. */
+const ISSUED_AT_SKEW_SECONDS = 60;
+
+/** Verifies one signed session token and applies current allow-list rules. A
+ * token issued in the future (beyond clock skew) can only be a signing bug or
+ * a crafted payload, so it is rejected rather than trusted until expiry. */
 function verifySessionToken(
   token: string,
   config: AuthConfig,
@@ -683,6 +692,7 @@ function verifySessionToken(
   return Effect.gen(function* () {
     const payload = yield* verifySignedValue(token, config.sessionSecret, SessionPayloadSchema);
     if (payload.expiresAt <= epochSeconds()) return null;
+    if (payload.issuedAt > epochSeconds() + ISSUED_AT_SKEW_SECONDS) return null;
     if (!allowedUser(payload.user, config)) return null;
     return payload.user;
   });
@@ -790,7 +800,16 @@ function signValue(value: unknown, secret: string): Effect.Effect<string, AuthEr
   });
 }
 
-/** Verifies a compact HMAC token and decodes its payload against the expected schema. */
+/** No minted token comes close to this; a bound keeps adversarial inputs from
+ * buying an HMAC over megabytes. The largest legitimate payload is a CLI code
+ * carrying an encrypted Cloudflare Access JWT (a few KB). */
+const MAX_TOKEN_LENGTH = 16384;
+
+/** Verifies a compact HMAC token and decodes its payload against the expected
+ * schema. The parse is deliberately unforgiving: exactly two non-empty
+ * segments, canonical base64url, and a strict decode that rejects excess
+ * properties — a token that isn't byte-for-byte what the server mints is
+ * invalid, never coerced. */
 function verifySignedValue<A, I>(
   token: string,
   secret: string,
@@ -798,7 +817,10 @@ function verifySignedValue<A, I>(
 ): Effect.Effect<A, AuthError> {
   const invalid = () => new AuthError({ status: 401, message: "Invalid auth token" });
   return Effect.gen(function* () {
-    const [payload, signature] = token.split(".");
+    if (token.length > MAX_TOKEN_LENGTH) return yield* Effect.fail(invalid());
+    const segments = token.split(".");
+    if (segments.length !== 2) return yield* Effect.fail(invalid());
+    const [payload, signature] = segments;
     if (!payload || !signature) return yield* Effect.fail(invalid());
     const expected = yield* Effect.tryPromise({
       try: () => AuthCrypto.hmacSha256Base64Url(payload, secret),
@@ -806,9 +828,12 @@ function verifySignedValue<A, I>(
     });
     if (!timingSafeEqual(signature, expected)) return yield* Effect.fail(invalid());
     const bytes = yield* Encoding.decodeBase64Url(payload).pipe(Either.mapLeft(invalid));
-    return yield* Schema.decodeUnknown(Schema.parseJson(schema))(new TextDecoder().decode(bytes)).pipe(
-      Effect.mapError(invalid),
-    );
+    // Canonicality: exactly one token string may exist per payload, however
+    // tolerant the base64url decoder is of padding or alternate alphabets.
+    if (Encoding.encodeBase64Url(bytes) !== payload) return yield* Effect.fail(invalid());
+    return yield* Schema.decodeUnknown(Schema.parseJson(schema), { onExcessProperty: "error" })(
+      new TextDecoder().decode(bytes),
+    ).pipe(Effect.mapError(invalid));
   });
 }
 

@@ -102,14 +102,14 @@ Six invariants (registry below). They live **directly in root `AGENTS.md`** — 
 
 `[x]` Component-scan conformance test in `bun run ci`: import both `collectComponentNames` implementations (`renderer/src/components.js` and `shared/src/site/components.ts`), run them over a shared table of adversarial markdown samples (nested backtick runs, tags in comments, fences), assert identical output. Guards the one sanctioned duplication (see invariant 2). *(Landed as `shared/test/component-scan-conformance.test.ts`: a 23-sample adversarial table plus an every-prefix stress sweep.)*
 
-`[ ]` Adversarial token corpus test in `bun run ci`, split by property:
+`[x]` Adversarial token corpus test in `bun run ci`, split by property *(landed as `server/core/test/token-corpus.test.ts` — all four kinds through their production verification paths; hardened `verifySignedValue` along the way: exact two-segment parse, canonical-base64url re-encode check, strict excess-property decode, finite timestamps, future-issuance rejection, 16KB length cap)*:
 
 - Integrity: for each token kind (session, OAuth state, CLI authorization code, project-access handoff/cookie), a valid token rejects every single-byte bit-flip of encoded payload and signature.
 - Typed meaning: correctly sign malformed payloads and reject missing/extra/wrong-type fields, wrong `kind`/`version`/provider/use/project/scope/audience/nonce, extreme and boundary timestamps, future issuance, and every cross-kind pairing.
 - Parser hardening: reject truncation, empty/extra/swapped segments, duplicate delimiters, prefix/suffix garbage, non-canonical base64url, and oversized inputs.
 - Lifecycle: reject expiry and disallowed replay; explicitly document which short-lived stateless tokens remain replayable within their lifetime.
 
-`[ ]` Session-secret length floor: retain the existing config failure below 32 bytes and add the missing regression test in `bun run ci` (length is checkable; entropy is not).
+`[x]` Session-secret length floor: retain the existing config failure below 32 bytes and add the missing regression test in `bun run ci` (length is checkable; entropy is not). *(In `server/core/test/auth.test.ts`: 31/32-byte boundary, multibyte bytes-not-chars, both auth modes.)*
 
 `[ ]` Server-owned route-policy registry: define API routes once in production code (prefer `server/core/src/api-routes.ts`, or the server implementation layer when `HttpApi` lands), with handler, method/path, authentication mode, minimum project role, mutation/origin policy, and response-visibility policy attached to each entry. The router dispatches from this registry; the test matrix is generated from the same definitions rather than maintained as a second list. CI fails if an API route has no policy and exercises credential kind × role × endpoint × public/private status, denying every unspecified combination.
 
