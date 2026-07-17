@@ -71,6 +71,11 @@ export function LocalObjectStorageLive(
       const fs = yield* FileSystem.FileSystem;
       const paths = yield* Path.Path;
       const root = paths.resolve(process.cwd(), directory);
+      // Conditional writes read the current object before deciding; without
+      // mutual exclusion two concurrent ifNoneMatch creates both pass the
+      // check and both win. One lock keeps the read-check-write atomic —
+      // the local target is a single low-throughput process.
+      const writeLock = yield* Effect.makeSemaphore(1);
 
       /** Resolves one object key to an absolute path under the storage root. */
       const resolveKey = (key: string): Effect.Effect<string, StorageError> =>
@@ -124,7 +129,7 @@ export function LocalObjectStorageLive(
       const putObject: ObjectStorageShape["putObject"] = (key, value, options) =>
         resolveKey(key).pipe(
           Effect.flatMap((path) =>
-            Effect.gen(function* () {
+            writeLock.withPermits(1)(Effect.gen(function* () {
               const existing = yield* readExisting(path);
               if (options?.ifNoneMatch === "*" && existing != null) {
                 return yield* Effect.fail(
@@ -148,7 +153,7 @@ export function LocalObjectStorageLive(
               yield* fs.makeDirectory(paths.dirname(path), { recursive: true });
               yield* fs.writeFile(path, value);
               return { etag: yield* sha256Hex(value) };
-            }).pipe(
+            })).pipe(
               Effect.catchTags({
                 SystemError: (error) =>
                   Effect.fail(new StorageError({ message: `Could not write object: ${key}`, cause: error })),

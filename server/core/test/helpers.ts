@@ -96,24 +96,33 @@ export async function json(response: Response): Promise<unknown> {
 }
 
 /** Implements ObjectStorage against a mutable test map. */
-function memoryStorage(map: Map<string, MemoryStoredObject>): ObjectStorageShape {
+export function memoryStorage(map: Map<string, MemoryStoredObject>): ObjectStorageShape {
   const getObject: ObjectStorageShape["getObject"] = (key) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
+      if (!safeObjectKey(key)) {
+        return Effect.fail(new StorageError({ message: `Invalid object key: ${key}` }));
+      }
       const object = map.get(key);
-      return object == null
-        ? null
-        : {
-            key,
-            body: object.body.slice(),
-            contentType: object.contentType,
-            etag: object.etag,
-          } satisfies StoredObject;
+      return Effect.succeed(
+        object == null
+          ? null
+          : {
+              key,
+              body: object.body.slice(),
+              contentType: object.contentType,
+              etag: object.etag,
+            } satisfies StoredObject,
+      );
     });
 
   const putObject: ObjectStorageShape["putObject"] = (key, value, options) =>
     Effect.tryPromise({
       try: async () => {
         if (!safeObjectKey(key)) throw new StorageError({ message: `Invalid object key: ${key}` });
+        const body = value.slice();
+        // Hash before the precondition check: an await between check and set
+        // would let concurrent conditional writes all pass the check.
+        const etag = Encoding.encodeHex(new Uint8Array(await crypto.subtle.digest("SHA-256", body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer)));
         const existing = map.get(key);
         if (options?.ifNoneMatch === "*" && existing != null) {
           throw new StorageConflict({ key, message: `Object already exists: ${key}` });
@@ -121,8 +130,6 @@ function memoryStorage(map: Map<string, MemoryStoredObject>): ObjectStorageShape
         if (options?.ifMatch != null && existing?.etag !== options.ifMatch) {
           throw new StorageConflict({ key, message: `Object ETag mismatch: ${key}` });
         }
-        const body = value.slice();
-        const etag = Encoding.encodeHex(new Uint8Array(await crypto.subtle.digest("SHA-256", body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer)));
         map.set(key, { body, contentType: options?.contentType, etag });
         return { etag };
       },

@@ -182,7 +182,9 @@ export function makeDynamoDbPrimitiveDb(client: DynamoDBClient, tableName: strin
         try: () => client.send(new QueryCommand({
           TableName: tableName,
           KeyConditionExpression: prefix === "" ? "#namespace = :namespace" : "#namespace = :namespace AND begins_with(#key, :prefix)",
-          ExpressionAttributeNames: { "#namespace": NAMESPACE, "#key": KEY },
+          // DynamoDB rejects attribute names that no expression uses, so #key
+          // may appear only when the prefix condition does.
+          ExpressionAttributeNames: prefix === "" ? { "#namespace": NAMESPACE } : { "#namespace": NAMESPACE, "#key": KEY },
           ExpressionAttributeValues: prefix === "" ? { ":namespace": { S: namespace } } : { ":namespace": { S: namespace }, ":prefix": { S: prefix } },
           Limit: limit,
           ScanIndexForward: true,
