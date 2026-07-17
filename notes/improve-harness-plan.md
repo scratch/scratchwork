@@ -100,7 +100,7 @@ Six invariants (registry below). They live **directly in root `AGENTS.md`** — 
 
 `[x]` Mechanize invariants 1 and 2's checkable cores in `bun run ci`: the Effect-boundary lint test (no async/await/Promise outside an exact, reviewed initial allowlist) and the import-boundary test (cli ⇄ server only via shared). *(Landed as `scripts/check-boundaries.ts`, first step of the root ci gate: Effect-boundary lint with a 14-file rationale-carrying allowlist, import-boundary check including shared/renderer layering, and the explicit CLI route inventory checked against shared schema exports; the `{error}` envelope moved into `shared/src/publish/api.ts` as `ApiErrorBodySchema`.)*
 
-`[ ]` Component-scan conformance test in `bun run ci`: import both `collectComponentNames` implementations (`renderer/src/components.js` and `shared/src/site/components.ts`), run them over a shared table of adversarial markdown samples (nested backtick runs, tags in comments, fences), assert identical output. Guards the one sanctioned duplication (see invariant 2).
+`[x]` Component-scan conformance test in `bun run ci`: import both `collectComponentNames` implementations (`renderer/src/components.js` and `shared/src/site/components.ts`), run them over a shared table of adversarial markdown samples (nested backtick runs, tags in comments, fences), assert identical output. Guards the one sanctioned duplication (see invariant 2). *(Landed as `shared/test/component-scan-conformance.test.ts`: a 23-sample adversarial table plus an every-prefix stress sweep.)*
 
 `[ ]` Adversarial token corpus test in `bun run ci`, split by property:
 
