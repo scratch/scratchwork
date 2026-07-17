@@ -15,7 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Either from "effect/Either";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { CLI_TOKEN_EXCHANGE_PATH, ProjectResponseSchema } from "../../shared/src/publish/api";
+import { ApiErrorBodySchema, CLI_TOKEN_EXCHANGE_PATH, ProjectResponseSchema } from "../../shared/src/publish/api";
 import { readAuthToken, readCfToken, serverApiUrl } from "./auth";
 import { CliError, errorMessage } from "./errors";
 
@@ -23,8 +23,8 @@ import { CliError, errorMessage } from "./errors";
 const parseBodyJson = (text: string): unknown =>
   Either.getOrNull(Schema.decodeUnknownEither(Schema.parseJson())(text));
 
-/** Matches an `{"error": "..."}` body, tolerating extra fields. */
-const decodeErrorBody = Schema.decodeUnknownOption(Schema.Struct({ error: Schema.String }));
+/** Matches the shared `{"error": "..."}` envelope, tolerating extra fields. */
+const decodeErrorBody = Schema.decodeUnknownOption(ApiErrorBodySchema);
 
 /** A completed API exchange: HTTP status plus the raw and JSON-decoded body. */
 export interface ApiResponse {

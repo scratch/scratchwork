@@ -70,6 +70,13 @@ export const CliTokenResponseSchema = Schema.Struct({
 /** The decoded CLI token-exchange response. */
 export type CliTokenResponse = typeof CliTokenResponseSchema.Type;
 
+/** The error envelope every non-2xx JSON API response carries. Decoded
+ * tolerantly on purpose: extra fields from a newer server are ignored. */
+export const ApiErrorBodySchema = Schema.Struct({ error: Schema.String });
+
+/** The decoded error envelope. */
+export type ApiErrorBody = typeof ApiErrorBodySchema.Type;
+
 /** A project's per-role grant lists (emails and @domain groups). */
 export const ProjectPermissionsSchema = Schema.Struct({
   read: Schema.Array(Schema.String),

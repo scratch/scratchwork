@@ -98,7 +98,7 @@ Six invariants (registry below). They live **directly in root `AGENTS.md`** — 
 
 `[x]` Root `AGENTS.md` (with `CLAUDE.md` symlinked to it): workspace map, `bun run ci`, the six invariants stated in full, and the standing rule "verify every diff against the invariants before committing."
 
-`[ ]` Mechanize invariants 1 and 2's checkable cores in `bun run ci`: the Effect-boundary lint test (no async/await/Promise outside an exact, reviewed initial allowlist) and the import-boundary test (cli ⇄ server only via shared). The remaining invariants' checks are described below and in their registry entries.
+`[x]` Mechanize invariants 1 and 2's checkable cores in `bun run ci`: the Effect-boundary lint test (no async/await/Promise outside an exact, reviewed initial allowlist) and the import-boundary test (cli ⇄ server only via shared). *(Landed as `scripts/check-boundaries.ts`, first step of the root ci gate: Effect-boundary lint with a 14-file rationale-carrying allowlist, import-boundary check including shared/renderer layering, and the explicit CLI route inventory checked against shared schema exports; the `{error}` envelope moved into `shared/src/publish/api.ts` as `ApiErrorBodySchema`.)*
 
 `[ ]` Component-scan conformance test in `bun run ci`: import both `collectComponentNames` implementations (`renderer/src/components.js` and `shared/src/site/components.ts`), run them over a shared table of adversarial markdown samples (nested backtick runs, tags in comments, fences), assert identical output. Guards the one sanctioned duplication (see invariant 2).
 
