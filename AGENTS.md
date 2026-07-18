@@ -7,18 +7,27 @@ this file covers how to change the code safely.
 
 ## Workspace map
 
-| Workspace | Package | What it is |
-|---|---|---|
-| `renderer/` | `scratchwork-renderer` | Build-once pipeline producing the single-file universal renderer (`index.html`). **Deliberately plain browser JS — the one exception to invariant 1.** |
-| `shared/` | `@scratchwork/shared` | Code shared between CLI and server: the publish API contract (`src/publish/api.ts`), site serving helpers, crypto digest boundary. The only code importable by both cli and server. |
-| `cli/` | `scratchwork-cli` | The `scratchwork` CLI, built with Effect: dev server with hot reload, publishing, login. |
-| `server/` | `scratchwork-server` | Deploy tooling scripts only; the server itself lives in the sub-workspaces below. |
-| `server/core/` | `@scratchwork/server-core` | Platform-neutral publishing server core: auth, routing, storage contracts. |
-| `server/deploy-aws/` | `@scratchwork/server-deploy-aws` | AWS Lambda + S3/DynamoDB adapters. |
-| `server/deploy-cloudflare/` | `@scratchwork/server-deploy-cloudflare` | Cloudflare Worker + R2/D1 adapters. |
-| `server/deploy-local/` | `@scratchwork/server-deploy-local` | Local Bun deploy target. |
-| `deploy/*` | `@scratchwork/deploy-*` | One deployment project per domain (generic-aws, cloudflare-vanilla, cloudflare-access, local-dev), each deployable with one command. |
-| `e2e/` | `@scratchwork/e2e` | Full-loop publish e2e: real server (local-dev, miniflare, LocalStack) driven by the real CLI, hermetic OAuth provider standing in for Google. |
+Package names are `@scratchwork/<dir>` for everything under `server/` and `deploy/`
+(plus `@scratchwork/shared` and `@scratchwork/e2e`); the two odd ones out are
+`scratchwork-renderer` and `scratchwork-cli`.
+
+- `renderer/` — build-once pipeline producing the single-file universal renderer
+  (`index.html`). **Deliberately plain browser JS — the one exception to invariant 1.**
+- `shared/` — code shared between CLI and server: the publish API contract
+  (`src/publish/api.ts`), site serving helpers, crypto digest boundary. The only code
+  importable by both cli and server.
+- `cli/` — the `scratchwork` CLI, built with Effect: dev server with hot reload,
+  publishing, login.
+- `server/` — deploy tooling scripts only; the server itself lives in its sub-workspaces:
+  - `server/core/` — platform-neutral publishing server core: auth, routing, storage
+    contracts.
+  - `server/deploy-aws/` — AWS Lambda + S3/DynamoDB adapters.
+  - `server/deploy-cloudflare/` — Cloudflare Worker + R2/D1 adapters.
+  - `server/deploy-local/` — local Bun deploy target.
+- `deploy/*` — one deployment project per domain (generic-aws, cloudflare-vanilla,
+  cloudflare-access, local-dev), each deployable with one command.
+- `e2e/` — full-loop publish e2e: real server (local-dev, miniflare, LocalStack) driven
+  by the real CLI, hermetic OAuth provider standing in for Google.
 
 `examples/` and `notes/` are deliberately outside the gate: examples are user-facing
 sample content, notes are working documents. Nothing in them is imported by shipped code.
