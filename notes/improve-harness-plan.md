@@ -117,7 +117,7 @@ Six invariants (registry below). They live **directly in root `AGENTS.md`** — 
 
 `[x]` Reusable backend conformance suites for `PrimitiveDb` and `ObjectStorage`, run unchanged against in-memory/file, D1/R2, and DynamoDB/S3 implementations. Cover conditional create/update conflicts, version/ETag behavior, pagination/cursor boundaries, missing records, concurrent writers, binary round trips, key validation, and identical error mapping. *(Landed as `server/core/test/conformance/{primitive-db,object-storage}.ts`, run from server/core (memory), server/deploy-local (file), and e2e (miniflare D1/R2, LocalStack DynamoDB/S3). Real bugs caught on first run: DynamoDB `list` without a prefix always threw ValidationException (unused `#key` expression name), and the local-file + memory storage backends had a TOCTOU letting every concurrent conditional create win — fixed with a write semaphore and check/write reordering.)*
 
-`[ ]` A `check-invariants` skill (`.claude/skills/check-invariants/SKILL.md`) for the agent-pass residue: diff against main → report obeys/violates with file:line evidence. Claude-only convenience; Codex and OpenCode rely on the AGENTS.md standing rule + CI.
+`[x]` A `check-invariants` skill (`.claude/skills/check-invariants/SKILL.md`) for the agent-pass residue: diff against main → report obeys/violates with file:line evidence. Claude-only convenience; Codex and OpenCode rely on the AGENTS.md standing rule + CI.
 
 `[ ]` Stretch: migrate the shared CLI API contract to `@effect/platform` `HttpApi` (see invariant 2) — the structural fix that makes contract drift impossible. Auth callbacks, published-content routes, health checks, and other server-only endpoints remain server-owned.
 
