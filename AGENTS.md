@@ -1,9 +1,6 @@
 # Working in this repository
 
-Scratchwork is a local development tool for static HTML and Markdown artifacts: a CLI
-(`scratchwork dev` / `publish` / `share`), a single-file Markdown renderer, and a
-publishing server that runs locally, on AWS, or on Cloudflare. `README.md` covers usage;
-this file covers how to change the code safely.
+Scratchwork is tool for publishing static HTML and Markdown artifacts publicly and privately: a CLI (`scratchwork dev` / `publish` / `share`), a single-file Markdown renderer, and a publishing server that runs locally, on AWS, or on Cloudflare. `README.md` covers usage; this file covers how to change the code safely.
 
 ## Workspace map
 
@@ -52,8 +49,8 @@ sample content, notes are working documents. Nothing in them is imported by ship
 ## Standing rule
 
 **Verify every diff against the six invariants below before committing.** Each invariant
-is enforced at up to three layers, strongest first: *structural* (the architecture makes
-violation impossible) → *mechanized* (a test in `bun run ci` fails) → *agent-pass* (the
+is enforced at up to three layers, strongest first: _structural_ (the architecture makes
+violation impossible) → _mechanized_ (a test in `bun run ci` fails) → _agent-pass_ (the
 judgment calls listed under each invariant — that's you). When you find a violation,
 fix it or flag it; never commit around it silently.
 
@@ -103,7 +100,7 @@ server-only endpoints stay in server.
 - **Sanctioned exception:** `renderer/src/components.js` deliberately duplicates the
   component-scan logic in `shared/src/site/components.ts` — the renderer is plain
   browser JS and must not depend on shared, and the CLI dev diagnostics must predict
-  what the renderer's loader will do. This is the *only* permitted duplication, and only
+  what the renderer's loader will do. This is the _only_ permitted duplication, and only
   because a ci conformance test asserts the two implementations agree. Don't "fix" it by
   hoisting, and don't cite it as precedent for new duplication.
 
