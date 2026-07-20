@@ -15,6 +15,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Either from "effect/Either";
 import * as Predicate from "effect/Predicate";
+import { isSafeProjectIdentifier } from "../../shared/src/site/identifiers";
 import { resolveProjectByPath, type ResolvedProjectRef } from "./api";
 import { normalizeServerUrl } from "./auth";
 import { CliError } from "./errors";
@@ -149,9 +150,9 @@ export function resolveProjectRef(input: {
         catch: () => new CliError({ code: 1, message: `scratchwork ${input.command}: invalid server` }),
       });
       const project = input.project;
-      if (project) return { server, project };
+      if (project) return yield* safeProjectRef(input.command, { server, project });
       const resolved = yield* resolveProjectByPath(server, projectUrl.pathname, input.command);
-      return { server, project: resolved.project };
+      return yield* safeProjectRef(input.command, { server, project: resolved.project });
     }
 
     const paths = yield* Path.Path;
@@ -167,8 +168,17 @@ export function resolveProjectRef(input: {
         message: `scratchwork ${input.command}: project is required`,
       }));
     }
-    return { server, project };
+    return yield* safeProjectRef(input.command, { server, project });
   });
+}
+
+/** Rejects a project name (from flags, a config file, or the server) that the
+ * contract's project-identifier grammar would refuse, so commands fail with a
+ * clear message instead of a request-encoding error. */
+function safeProjectRef(command: string, ref: ResolvedProjectRef): Effect.Effect<ResolvedProjectRef, CliError> {
+  return isSafeProjectIdentifier(ref.project)
+    ? Effect.succeed(ref)
+    : Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: unsafe project name ${ref.project}` }));
 }
 
 /** Maps a path argument to the directory whose config should be consulted. */

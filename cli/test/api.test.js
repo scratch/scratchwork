@@ -1,9 +1,10 @@
 /*
- * Tests for apiRequest's Cloudflare Access behavior, run against real loopback
- * HTTP servers (nothing mocked): the stored Access JWT and service-token env
- * vars ride outgoing requests as headers, and responses blocked by Cloudflare's
- * edge (403 + cf-mitigated, or an Access login page) fail with a re-auth hint
- * instead of leaking an HTML page into the terminal.
+ * Tests for the contract-derived API client's transport behavior, run against
+ * real loopback HTTP servers (nothing mocked): the bearer token, stored Access
+ * JWT, and service-token env vars ride outgoing requests as headers; responses
+ * blocked by Cloudflare's edge (403 + cf-mitigated, or an Access login page)
+ * fail with a re-auth hint; and other failures surface as ApiError with the
+ * extracted error text instead of leaking an HTML page into the terminal.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,11 +14,15 @@ import * as BunContext from "@effect/platform-bun/BunContext";
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { apiRequest } from "../src/api";
+import { apiClient, mapApiErrors } from "../src/api";
 import { writeAuthToken } from "../src/auth";
 
 const TestLayer = Layer.mergeAll(FetchHttpClient.layer, BunContext.layer);
 const run = (effect) => Effect.runPromise(Effect.provide(effect, TestLayer));
+
+/** Calls GET /api/me through the derived client. */
+const callMe = (origin, options = {}) =>
+  Effect.flatMap(apiClient(origin, options), (client) => client.me());
 
 let home;
 let previousHome;
@@ -32,38 +37,51 @@ afterAll(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** Serves one canned response for the duration of a test. */
+/** Serves one canned response for the duration of a test, capturing request headers. */
 function withServer(handler, use) {
-  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: handler });
+  const seen = { headers: null };
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (request) => {
+      seen.headers = Object.fromEntries(request.headers);
+      return handler(request);
+    },
+  });
   const origin = `http://127.0.0.1:${server.port}`;
-  return Promise.resolve(use(origin)).finally(() => server.stop(true));
+  return Promise.resolve(use(origin, seen)).finally(() => server.stop(true));
 }
 
-describe("apiRequest Cloudflare Access headers", () => {
+const ME_BODY = { authenticated: true, user: { id: "u1", email: "a@b.co" } };
+
+describe("apiClient Cloudflare Access headers", () => {
   afterEach(() => {
     delete process.env.SCRATCHWORK_CF_ACCESS_CLIENT_ID;
     delete process.env.SCRATCHWORK_CF_ACCESS_CLIENT_SECRET;
   });
 
-  test("sends the stored Access JWT as cf-access-token", async () => {
+  test("sends the bearer token and the stored Access JWT as cf-access-token", async () => {
     await withServer(
-      (request) => Response.json({ headers: Object.fromEntries(request.headers) }),
-      async (origin) => {
+      () => Response.json(ME_BODY),
+      async (origin, seen) => {
         await run(writeAuthToken(origin, "bearer-1", "a@b.co", "cf-jwt-1"));
-        const response = await run(apiRequest("scratchwork test", `${origin}/api/me`, { token: "bearer-1" }));
-        expect(response.json.headers["cf-access-token"]).toBe("cf-jwt-1");
-        expect(response.json.headers.authorization).toBe("Bearer bearer-1");
+        const body = await run(callMe(origin, { token: "bearer-1" }));
+        expect(seen.headers["cf-access-token"]).toBe("cf-jwt-1");
+        expect(seen.headers.authorization).toBe("Bearer bearer-1");
+        // The 2xx body is decoded through the shared contract schema.
+        expect(body).toEqual(ME_BODY);
       },
     );
   });
 
   test("sends nothing extra when no Access JWT is stored for the origin", async () => {
     await withServer(
-      (request) => Response.json({ headers: Object.fromEntries(request.headers) }),
-      async (origin) => {
-        const response = await run(apiRequest("scratchwork test", `${origin}/api/me`, {}));
-        expect(response.json.headers["cf-access-token"]).toBeUndefined();
-        expect(response.json.headers["cf-access-client-id"]).toBeUndefined();
+      () => Response.json(ME_BODY),
+      async (origin, seen) => {
+        await run(callMe(origin));
+        expect(seen.headers["cf-access-token"]).toBeUndefined();
+        expect(seen.headers["cf-access-client-id"]).toBeUndefined();
+        expect(seen.headers.authorization).toBeUndefined();
       },
     );
   });
@@ -72,11 +90,11 @@ describe("apiRequest Cloudflare Access headers", () => {
     process.env.SCRATCHWORK_CF_ACCESS_CLIENT_ID = "svc-id";
     process.env.SCRATCHWORK_CF_ACCESS_CLIENT_SECRET = "svc-secret";
     await withServer(
-      (request) => Response.json({ headers: Object.fromEntries(request.headers) }),
-      async (origin) => {
-        const response = await run(apiRequest("scratchwork test", `${origin}/api/me`, {}));
-        expect(response.json.headers["cf-access-client-id"]).toBe("svc-id");
-        expect(response.json.headers["cf-access-client-secret"]).toBe("svc-secret");
+      () => Response.json(ME_BODY),
+      async (origin, seen) => {
+        await run(callMe(origin));
+        expect(seen.headers["cf-access-client-id"]).toBe("svc-id");
+        expect(seen.headers["cf-access-client-secret"]).toBe("svc-secret");
       },
     );
   });
@@ -84,21 +102,26 @@ describe("apiRequest Cloudflare Access headers", () => {
   test("ignores a service-token id without a secret", async () => {
     process.env.SCRATCHWORK_CF_ACCESS_CLIENT_ID = "svc-id";
     await withServer(
-      (request) => Response.json({ headers: Object.fromEntries(request.headers) }),
-      async (origin) => {
-        const response = await run(apiRequest("scratchwork test", `${origin}/api/me`, {}));
-        expect(response.json.headers["cf-access-client-id"]).toBeUndefined();
+      () => Response.json(ME_BODY),
+      async (origin, seen) => {
+        await run(callMe(origin));
+        expect(seen.headers["cf-access-client-id"]).toBeUndefined();
       },
     );
   });
 });
 
-describe("apiRequest Cloudflare edge-block detection", () => {
+describe("apiClient Cloudflare edge-block detection", () => {
   test("a blocked CLI exchange explains the required narrow Access bypass", async () => {
     await withServer(
       () => new Response("Forbidden", { status: 403, headers: { "cf-mitigated": "challenge" } }),
       async (origin) => {
-        await expect(run(apiRequest("scratchwork login", `${origin}/auth/cli/token`, { method: "POST" })))
+        const exchange = Effect.flatMap(apiClient(origin), (client) =>
+          client["cli-token-exchange"]({
+            payload: { code: "not-a-real-code", codeVerifier: "v".repeat(43), redirectUri: "http://127.0.0.1:1/cb" },
+          }),
+        ).pipe(mapApiErrors("scratchwork login"));
+        await expect(run(exchange))
           .rejects.toThrow("configure a Bypass / Everyone policy limited to `/auth/cli/token`");
       },
     );
@@ -108,7 +131,7 @@ describe("apiRequest Cloudflare edge-block detection", () => {
     await withServer(
       () => new Response("Forbidden", { status: 403, headers: { "cf-mitigated": "challenge" } }),
       async (origin) => {
-        await expect(run(apiRequest("scratchwork publish", `${origin}/api/publish`, {})))
+        await expect(run(callMe(origin).pipe(mapApiErrors("scratchwork publish"))))
           .rejects.toThrow("Cloudflare Access blocked this request. Run `scratchwork login` again");
       },
     );
@@ -119,19 +142,21 @@ describe("apiRequest Cloudflare edge-block detection", () => {
     await withServer(
       () => new Response(loginPage, { headers: { "content-type": "text/html" } }),
       async (origin) => {
-        await expect(run(apiRequest("scratchwork projects", `${origin}/api/projects`, {})))
-          .rejects.toThrow("Cloudflare Access blocked this request");
+        const list = Effect.flatMap(apiClient(origin), (client) => client["projects-list"]())
+          .pipe(mapApiErrors("scratchwork projects"));
+        await expect(run(list)).rejects.toThrow("Cloudflare Access blocked this request");
       },
     );
   });
 
-  test("an ordinary 403 from the server is returned for the caller to interpret", async () => {
+  test("an ordinary error envelope surfaces as ApiError with its status and message", async () => {
     await withServer(
       () => Response.json({ error: "Forbidden" }, { status: 403 }),
       async (origin) => {
-        const response = await run(apiRequest("scratchwork test", `${origin}/api/me`, {}));
-        expect(response.status).toBe(403);
-        expect(response.json).toEqual({ error: "Forbidden" });
+        const error = await run(callMe(origin).pipe(Effect.flip));
+        expect(error._tag).toBe("ApiError");
+        expect(error.status).toBe(403);
+        expect(error.message).toBe("Forbidden");
       },
     );
   });
@@ -143,8 +168,10 @@ describe("apiRequest Cloudflare edge-block detection", () => {
         headers: { "content-type": "text/html" },
       }),
       async (origin) => {
-        const response = await run(apiRequest("scratchwork test", `${origin}/api/me`, {}));
-        expect(response.status).toBe(502);
+        const error = await run(callMe(origin).pipe(Effect.flip));
+        expect(error._tag).toBe("ApiError");
+        expect(error.status).toBe(502);
+        expect(error.message).toBe("server returned 502: 502 Bad Gateway");
       },
     );
   });

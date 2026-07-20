@@ -88,13 +88,16 @@ Effect Schemas in `shared/src/publish/api.ts` (extend there, never inline). Auth
 callbacks, published-content routing, health checks, deployment hooks, and other
 server-only endpoints stay in server.
 
-- Structural (planned): migrate the shared CLI API contract to `@effect/platform`
-  `HttpApi`, so the server implements it and the CLI derives its client from the same
-  object — duplication becomes impossible rather than forbidden.
+- Structural: the JSON API is defined once as an `@effect/platform` `HttpApi` object
+  (`ScratchworkApi` in `shared/src/publish/api.ts`). The CLI derives its client from it
+  (`HttpApiClient` in `cli/src/api.ts`), and the server's route registry, request
+  decoding, and response encoding derive from the same object
+  (`server/core/src/api-routes.ts`) — an endpoint, method, path, or schema that drifts
+  between the two sides cannot typecheck.
 - Mechanized: the import-boundary test in `bun run ci` — `cli/**` never imports from
-  `server/**` and vice versa; the only code importable by both is `shared/**`. Every
-  CLI-consumed JSON route's request/response schema is imported from shared against an
-  explicit route inventory.
+  `server/**` and vice versa; the only code importable by both is `shared/**`. The CLI
+  API-surface check fails on any hand-built `/api/` or `/auth/` URL in `cli/src`
+  outside the explicit browser-navigation allowlist.
 - Agent-pass: near-duplicate logic between cli and server that should be hoisted into
   shared (imports can't catch a reimplementation).
 - **Sanctioned exception:** `renderer/src/components.js` deliberately duplicates the
@@ -136,8 +139,10 @@ unclassified route is impossible and the default for an unspecified credential/r
 combination is denial.
 
 - Scope: the server API router/registry, route handlers, and shared CLI API contract.
-- Structural: the router dispatches only registered route definitions; handlers receive
-  the authenticated principal/authorized project capability produced by policy
+- Structural: the router dispatches only registered route definitions, and the registry
+  is a mapped type keyed by the shared contract's endpoint names — a contract endpoint
+  without a policy, or a policy for a nonexistent endpoint, is a compile error; handlers
+  receive the authenticated principal/authorized project capability produced by policy
   middleware rather than independently reconstructing it.
 - Mechanized: enumerate the registry and exercise credential kind × role × endpoint ×
   public/private status; fail on missing policy metadata and deny every unspecified cell.

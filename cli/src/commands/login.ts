@@ -15,20 +15,15 @@ import type * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import {
-  CLI_TOKEN_EXCHANGE_PATH,
-  CliTokenResponseSchema,
   type CliTokenRequest,
   type CliTokenResponse,
 } from "../../../shared/src/publish/api";
-import { apiJson } from "../api";
+import { apiClient, mapApiErrors } from "../api";
 import {
   generateLoginProof,
   loginUrl,
   normalizeServerUrl,
-  serverApiUrl,
   writeAuthToken,
   type LoginCallback,
 } from "../auth";
@@ -126,16 +121,8 @@ function exchangeLoginCode(
 ): Effect.Effect<CliTokenResponse, CliError, HttpClient.HttpClient | FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const body: CliTokenRequest = { code, codeVerifier, redirectUri };
-    const json = yield* apiJson("scratchwork login", serverApiUrl(server, CLI_TOKEN_EXCHANGE_PATH), {
-      method: "POST",
-      body,
-    });
-    // Tolerant decoding on purpose: unknown fields from a newer server are ignored.
-    const decoded = Schema.decodeUnknownOption(CliTokenResponseSchema)(json);
-    if (Option.isNone(decoded)) {
-      return yield* Effect.fail(new CliError({ code: 1, message: "scratchwork login: invalid server response" }));
-    }
-    return decoded.value;
+    const client = yield* apiClient(server);
+    return yield* client["cli-token-exchange"]({ payload: body }).pipe(mapApiErrors("scratchwork login"));
   });
 }
 

@@ -11,10 +11,13 @@
  *  2. Import boundary: cli never imports server and vice versa (the only code
  *     importable by both is shared); shared imports neither; renderer/src is
  *     standalone plain browser JS and imports none of them.
- *  3. CLI route inventory: every server route the CLI calls is listed below
- *     with the shared schemas defining its wire contract, and those schemas
- *     are exported by shared/src/publish/api.ts — so a newly added CLI call
- *     cannot ship without a shared contract entry.
+ *  3. CLI API surface: the CLI reaches every JSON endpoint through the client
+ *     derived from the shared HttpApi contract (ScratchworkApi in
+ *     shared/src/publish/api.ts, consumed by cli/src/api.ts), so a route and
+ *     its wire schemas cannot exist outside the contract. The only API-shaped
+ *     URLs the CLI may build by hand are the browser navigations on the
+ *     explicit allowlist below — any other /api/ or /auth/ literal in cli/src
+ *     fails this check.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -46,30 +49,14 @@ const ASYNC_BOUNDARIES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Invariant 2's explicit inventory of server routes the CLI consumes. `route`
- * is either a path literal as it appears in cli/src, a constant name imported
- * from shared, or a `/api/projects/:project` suffix route built through
- * projectApiUrl. Every schema name must be exported by
- * shared/src/publish/api.ts. Adding a CLI call to a route not listed here
- * fails this check; so does a stale entry for a call that no longer exists.
+ * Invariant 2's allowlist of API-shaped URLs the CLI may build by hand: only
+ * browser navigations, which redirect rather than answer JSON, and so have no
+ * wire schema to share. Every JSON call must go through the contract-derived
+ * client instead. A stale entry for a URL no longer built fails this check.
  */
-const CLI_ROUTES: ReadonlyArray<{ route: string; schemas: readonly string[]; note: string }> = [
-  { route: "/auth/login", schemas: [], note: "browser navigation that starts the login flow; redirects, not JSON" },
-  { route: "CLI_TOKEN_EXCHANGE_PATH", schemas: ["CliTokenRequestSchema", "CliTokenResponseSchema"], note: "back-channel code + PKCE exchange" },
-  { route: "/api/publish", schemas: ["PublishRequestBodySchema", "PublishResponseSchema"], note: "publish a bundle" },
-  { route: "/api/me", schemas: [], note: "identity echo printed verbatim as JSON; no decoded contract" },
-  { route: "/api/projects", schemas: ["ProjectsListResponseSchema"], note: "list the caller's projects" },
-  { route: "/api/resolve", schemas: ["ProjectResponseSchema"], note: "resolve a published content path to its project" },
-  { route: "/api/projects/:project", schemas: ["ProjectResponseSchema"], note: "project info (GET) and delete (DELETE)" },
-  { route: "/api/projects/:project/unpublish", schemas: ["ProjectResponseSchema"], note: "make private and clear every grant" },
-  { route: "/api/projects/:project/share", schemas: ["ShareResponseSchema"], note: "grant or revoke access" },
-  { route: "/api/projects/:project/bundle", schemas: ["PublishBundleSchema"], note: "download a project's bundle (clone)" },
-  { route: "error envelope", schemas: ["ApiErrorBodySchema"], note: "the {error} body every non-2xx JSON response carries" },
+const CLI_URL_ALLOWLIST: ReadonlyArray<{ route: string; file: string; note: string }> = [
+  { route: "/auth/login", file: "cli/src/auth.ts", note: "browser navigation that starts the login flow; redirects, not JSON" },
 ];
-
-/** The one place the parametrized project route is assembled from a template. */
-const PROJECT_ROUTE_BUILDER_FILE = "cli/src/api.ts";
-const PROJECT_ROUTE_BUILDER_PREFIX = "/api/projects/";
 
 const failures: string[] = [];
 
@@ -304,63 +291,46 @@ for (const file of importScope) {
   }
 }
 
-// ─── 3. CLI route inventory ─────────────────────────────────────────────────
+// ─── 3. CLI API surface ─────────────────────────────────────────────────────
 
 const cliSources = sources(["cli/src/**/*.ts"]);
-const usedRoutes = new Map<string, string>(); // route → first use site
-const recordRoute = (route: string, site: string) => {
-  if (!usedRoutes.has(route)) usedRoutes.set(route, site);
-};
-
+const allowlistSeen = new Set<string>();
 for (const file of cliSources) {
   const lexed = lex(read(file));
-  // Path-shaped string literals (catches raw fetches too). A template's value
-  // is its text before the first interpolation, so the projectApiUrl builder
-  // template surfaces as its "/api/projects/" prefix.
+  // Path-shaped string literals (catches raw fetches too). Every JSON route
+  // lives in the shared contract, so cli/src may only hand-build the browser
+  // navigations on the allowlist.
   for (const literal of lexed.strings) {
     if (!/^\/(?:api|auth)(?:\/|$)/.test(literal.value)) continue;
-    if (literal.value === PROJECT_ROUTE_BUILDER_PREFIX && literal.template && file === PROJECT_ROUTE_BUILDER_FILE) continue;
-    recordRoute(literal.value, `${file}:${literal.line}`);
-  }
-  lexed.code.split("\n").forEach((line, index) => {
-    const site = `${file}:${index + 1}`;
-    // Routes built through projectApiUrl(ref) / projectApiUrl(ref, "/suffix").
-    if (file !== PROJECT_ROUTE_BUILDER_FILE) {
-      for (const match of line.matchAll(/projectApiUrl\(\s*[^,()]+\s*(?:,\s*"([^"]*)")?\s*\)/g)) {
-        recordRoute(`/api/projects/:project${match[1] ?? ""}`, site);
-      }
+    const allowed = CLI_URL_ALLOWLIST.find((entry) => entry.route === literal.value && entry.file === file);
+    if (allowed != null) {
+      allowlistSeen.add(allowed.route);
+      continue;
     }
-    // Route constants imported from shared and passed to serverApiUrl.
-    for (const match of line.matchAll(/serverApiUrl\(\s*[^,()]+,\s*([A-Za-z_$][\w$]*)\s*\)/g)) {
-      recordRoute(match[1], site);
-    }
-  });
-}
-
-const inventory = new Set(CLI_ROUTES.map((entry) => entry.route));
-for (const [route, site] of usedRoutes) {
-  if (!inventory.has(route)) {
     failures.push(
-      `CLI route inventory (invariant 2): ${site} calls unlisted route "${route}". Define its request/response\n` +
-        "  schemas in shared/src/publish/api.ts and add the route to CLI_ROUTES in scripts/check-boundaries.ts.",
+      `CLI API surface (invariant 2): ${file}:${literal.line} hand-builds the URL "${literal.value}". Declare the\n` +
+        "  endpoint on ScratchworkApi in shared/src/publish/api.ts and call it through the derived client\n" +
+        "  (apiClient in cli/src/api.ts), or — only for a browser navigation — add it to CLI_URL_ALLOWLIST\n" +
+        "  in scripts/check-boundaries.ts with its rationale, in the same PR.",
     );
   }
 }
-for (const entry of CLI_ROUTES) {
-  if (entry.route === "error envelope") continue;
-  if (!usedRoutes.has(entry.route)) {
-    failures.push(`CLI route inventory: no CLI call to "${entry.route}" found — remove its stale CLI_ROUTES entry.`);
+for (const entry of CLI_URL_ALLOWLIST) {
+  if (!allowlistSeen.has(entry.route)) {
+    failures.push(`CLI API surface: "${entry.route}" is no longer built in ${entry.file} — remove its stale allowlist entry.`);
   }
 }
+
+// The contract object both sides derive from must exist, define endpoints,
+// and be what the CLI's client module actually consumes.
 const sharedApi: Record<string, unknown> = await import(join(root, "shared/src/publish/api.ts"));
-for (const entry of CLI_ROUTES) {
-  for (const name of entry.schemas) {
-    if (!(name in sharedApi)) {
-      failures.push(
-        `CLI route inventory: schema ${name} (route "${entry.route}") is not exported by shared/src/publish/api.ts.`,
-      );
-    }
-  }
+const contract = sharedApi.ScratchworkApi as { groups?: Record<string, { endpoints: Record<string, unknown> }> } | undefined;
+const contractEndpoints = Object.values(contract?.groups ?? {}).flatMap((group) => Object.keys(group.endpoints));
+if (contractEndpoints.length === 0) {
+  failures.push("CLI API surface: shared/src/publish/api.ts no longer exports the ScratchworkApi contract with endpoints.");
+}
+if (!/\bScratchworkApi\b/.test(lex(read("cli/src/api.ts")).code)) {
+  failures.push("CLI API surface: cli/src/api.ts no longer derives its client from the shared ScratchworkApi contract.");
 }
 
 // ─── Report ─────────────────────────────────────────────────────────────────
@@ -372,5 +342,5 @@ if (failures.length > 0) {
 }
 console.log(
   `check-boundaries: ${effectScope.length} files Effect-clean (${boundariesSeen.size} reviewed boundaries), ` +
-    `${importScope.length} files respect import boundaries, ${usedRoutes.size} CLI routes match the inventory.`,
+    `${importScope.length} files respect import boundaries, ${contractEndpoints.length} contract endpoints drive the CLI API surface.`,
 );

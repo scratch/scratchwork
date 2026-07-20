@@ -1,12 +1,18 @@
 /**
- * The server-owned API route-policy registry (AGENTS.md, invariant 4). Every
- * JSON endpoint is defined exactly once in API_ROUTES: its method and path,
- * how the caller authenticates, the minimum project role it demands, whether
- * it mutates state, and what its response may reveal. The dispatcher below is
- * the only way an API request reaches a handler, and it derives its behavior
- * from the same definitions the policy test matrix enumerates — so an
- * unregistered or policy-less route cannot exist, and unspecified
- * credential/role combinations are denied by construction:
+ * The server-owned API route-policy registry (AGENTS.md, invariant 4), keyed
+ * by the shared HttpApi contract (invariant 2). The contract object
+ * (ScratchworkApi in shared/src/publish/api.ts) is the single definition of
+ * every JSON endpoint's method, path, request payload, and success schema;
+ * API_POLICY below attaches the server's security policy and handler to every
+ * contract endpoint — the mapped type makes a contract endpoint without a
+ * policy (or a policy for a nonexistent endpoint) a compile error, and each
+ * handler's return type is checked against and encoded through the endpoint's
+ * declared success schema, so a response that drifts from the contract cannot
+ * typecheck. The dispatcher below is the only way an API request reaches a
+ * handler, and it derives its match table from the same definitions the
+ * policy test matrix enumerates — so an unregistered or policy-less route
+ * cannot exist, and unspecified credential/role combinations are denied by
+ * construction:
  *
  *  - every route rejects cross-origin browser calls before anything else;
  *  - `auth: "bearer"` resolves the principal or fails 401 before the handler;
@@ -15,8 +21,12 @@
  *    reading as 404 so unauthorized callers cannot probe which projects
  *    exist; roles above "read" are enforced by the SiteStore operation the
  *    handler calls (they are coupled to its conditional writes) and are
- *    declared here so the policy matrix can assert them end-to-end.
+ *    declared here so the policy matrix can assert them end-to-end;
+ *  - request bodies are size-capped per route and decoded strictly (errors:
+ *    "all", onExcessProperty: "error") through the contract payload schema
+ *    before the handler runs.
  */
+import type * as HttpApiEndpoint from "@effect/platform/HttpApiEndpoint";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import type * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
@@ -24,14 +34,11 @@ import * as Option from "effect/Option";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
 import {
-  CliTokenRequestSchema,
-  type CliTokenRequest,
-  type CliTokenResponse,
+  ScratchworkApi,
+  type EndpointPayload,
+  type EndpointSuccess,
   type ProjectInfo,
-  type ProjectResponse,
-  type ProjectsListResponse,
-  type PublishResponse,
-  type ShareResponse,
+  type ScratchworkEndpointName,
 } from "../../../shared/src/publish/api";
 import { accessGroupTerms, isSafeProjectIdentifier } from "./access";
 import {
@@ -54,9 +61,9 @@ import {
   publishedUrl,
   rejectCrossOriginApiRequest,
 } from "./http";
-import { readPublishRequest } from "./publish-request";
+import { MAX_PUBLISH_BODY_BYTES, normalizePublishRequest } from "./publish-request";
 import { projectForRequest } from "./routes";
-import { readShareRequest } from "./share-request";
+import { MAX_SHARE_BODY_BYTES, validateShareChanges } from "./share-request";
 import { type SiteRecord } from "./site-records";
 import {
   canReadProject,
@@ -69,17 +76,17 @@ import {
 } from "./site-store";
 import { StorageError } from "./storage";
 
-/** Effect type shared by every API handler. */
-type ApiEffect = Effect.Effect<
-  HttpServerResponse.HttpServerResponse,
-  HttpError | AuthError | SiteStoreError | StorageError,
-  ServerConfig | SiteStore | Auth | PrimitiveDb
->;
+/** Failures any API handler may raise. */
+type RouteError = HttpError | AuthError | SiteStoreError | StorageError;
+
+/** Services available to every API handler. */
+type RouteServices = ServerConfig | SiteStore | Auth | PrimitiveDb;
 
 /** What the policy middleware hands a handler: the request, its parsed URL,
- * the principal the declared auth mode resolved, and — for project routes —
- * the read-gated project capability. Handlers never reconstruct these. */
-export interface ApiContext {
+ * the principal the declared auth mode resolved, for project routes the
+ * read-gated project capability, and for payload endpoints the strictly
+ * decoded body. Handlers never reconstruct these. */
+export interface ApiContext<Name extends ScratchworkEndpointName = ScratchworkEndpointName> {
   readonly request: HttpServerRequest.HttpServerRequest;
   readonly url: URL;
   /** The authenticated principal: non-null for `auth: "bearer"` routes, the
@@ -89,15 +96,22 @@ export interface ApiContext {
   /** The loaded project for `/api/projects/:project` routes, already gated by
    * the read-access mask; null on fixed-path routes. */
   readonly site: LoadedSite | null;
+  /** The request body, size-capped and strictly decoded through the contract
+   * payload schema; `never` for endpoints that declare no payload. */
+  readonly payload: EndpointPayload<Name>;
 }
 
-/** One registered API route and its complete security policy. */
-export interface ApiRoute {
-  /** Stable route name used by the policy test matrix. */
-  readonly name: string;
-  readonly method: "GET" | "POST" | "DELETE";
-  /** Fixed pathname, or the project-parametrized form "/api/projects/:project(/action)". */
-  readonly path: string;
+/** The size cap applied while reading a payload endpoint's request body. */
+interface PayloadLimit {
+  readonly maxBytes: number;
+  /** The message of the 413 an oversized body receives. */
+  readonly message: string;
+}
+
+/** The security policy and handler attached to one contract endpoint. The
+ * handler must return the endpoint's declared success type; endpoints that
+ * declare a payload must declare a body size cap. */
+type ApiPolicy<Name extends ScratchworkEndpointName> = {
   /**
    * How the caller authenticates. "bearer": a valid bearer session token or
    * 401. "optional": bearer/cookie identity if present, anonymous otherwise.
@@ -130,7 +144,29 @@ export interface ApiRoute {
     | "project-content"
     | "session-token"
     | "status";
-  readonly handler: (context: ApiContext) => ApiEffect;
+  readonly handler: (context: ApiContext<Name>) => Effect.Effect<EndpointSuccess<Name>, RouteError, RouteServices>;
+} & ([EndpointPayload<Name>] extends [never] ? { readonly payloadLimit?: undefined }
+  : { readonly payloadLimit: PayloadLimit });
+
+/** One registered API route: a contract endpoint joined with its policy. */
+export interface ApiRoute {
+  /** Stable route name (the contract endpoint name) used by the policy test matrix. */
+  readonly name: ScratchworkEndpointName;
+  readonly method: string;
+  /** The contract path: fixed, or the project-parametrized form
+   * "/api/projects/:project(/action)". */
+  readonly path: string;
+  readonly auth: ApiPolicy<ScratchworkEndpointName>["auth"];
+  readonly minimumRole: ProjectRole | null;
+  readonly mutation: boolean;
+  readonly visibility: ApiPolicy<ScratchworkEndpointName>["visibility"];
+}
+
+/** An ApiRoute with the internals dispatch needs (type-erased handler). */
+interface RegisteredRoute extends ApiRoute {
+  readonly endpoint: HttpApiEndpoint.HttpApiEndpoint.AnyWithProps;
+  readonly payloadLimit: PayloadLimit | undefined;
+  readonly handler: (context: ApiContext<never>) => Effect.Effect<unknown, RouteError, RouteServices>;
 }
 
 /** Namespace of the one-time CLI code redemption records. Records are tiny (one per
@@ -146,20 +182,19 @@ const MAX_CLI_TOKEN_BODY_BYTES = 64 * 1024;
 
 /** Handles `POST /auth/cli/token`: the back-channel exchange of a one-time CLI
  * authorization code plus PKCE verifier for a bearer token. */
-function exchangeCliToken({ request }: ApiContext): ApiEffect {
+function exchangeCliToken({ request, payload }: ApiContext<"cli-token-exchange">) {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     const db = yield* PrimitiveDb;
-    const body = yield* readCliTokenRequest(request);
-    const payload = yield* decodeCliAuthorizationCode(body.code, config.auth);
+    const code = yield* decodeCliAuthorizationCode(payload.code, config.auth);
     // Burn the code before checking possession: the first redemption attempt
     // consumes it, so an intercepted code that is replayed — or raced with a wrong
     // verifier — fails closed instead of staying redeemable within its lifetime.
     yield* db.put(
       CLI_CODE_NAMESPACE,
-      payload.id,
+      code.id,
       { redeemedAt: Math.floor(Date.now() / 1000) },
-      { ifNoneMatch: "*", expiresAt: payload.expiresAt },
+      { ifNoneMatch: "*", expiresAt: code.expiresAt },
     ).pipe(
       Effect.mapError((error) =>
         error._tag === "PrimitiveDbConflict"
@@ -167,75 +202,51 @@ function exchangeCliToken({ request }: ApiContext): ApiEffect {
           : new HttpError({ status: 500, message: "Could not record the code redemption" }),
       ),
     );
-    const user = yield* verifyCliCodeExchange(payload, body.codeVerifier, body.redirectUri, config.auth);
-    const cfToken = yield* decryptCliCloudflareToken(payload, config.auth);
+    const user = yield* verifyCliCodeExchange(code, payload.codeVerifier, payload.redirectUri, config.auth);
+    const cfToken = yield* decryptCliCloudflareToken(code, config.auth);
     const token = yield* createSessionToken(user, config.auth);
-    const response: CliTokenResponse = {
+    return {
       token,
       server: appBaseUrl(request, config),
       email: user.email,
       ...(cfToken != null ? { cfToken } : {}),
     };
-    return jsonResponse(response, 200);
-  });
-}
-
-/** Reads, size-limits, and strictly decodes the CLI token-exchange body. */
-function readCliTokenRequest(
-  request: HttpServerRequest.HttpServerRequest,
-): Effect.Effect<CliTokenRequest, HttpError> {
-  return Effect.gen(function* () {
-    const text = yield* request.text.pipe(
-      HttpServerRequest.withMaxBodySize(Option.some(MAX_CLI_TOKEN_BODY_BYTES)),
-      Effect.mapError((cause) => new HttpError({ status: 413, message: "Request body is too large", cause })),
-    );
-    const parsed = yield* Schema.decodeUnknown(Schema.parseJson())(text).pipe(
-      Effect.mapError(() => new HttpError({ status: 400, message: "Invalid JSON body" })),
-    );
-    return yield* Schema.decodeUnknown(CliTokenRequestSchema)(parsed, {
-      errors: "all",
-      onExcessProperty: "error",
-    }).pipe(
-      Effect.mapError((error) =>
-        new HttpError({ status: 400, message: ParseResult.TreeFormatter.formatErrorSync(error) }),
-      ),
-    );
   });
 }
 
 /** Handles `GET /api/me`: reports the caller's own authentication state. */
-function me({ user }: ApiContext): ApiEffect {
-  return Effect.succeed(jsonResponse({ authenticated: user != null, user }, 200));
+function me({ user }: ApiContext<"me">) {
+  return Effect.succeed({ authenticated: user != null, user });
 }
 
 /** Handles `GET /health`. */
-function health(): ApiEffect {
-  return Effect.succeed(jsonResponse({ ok: true }, 200));
+function health() {
+  return Effect.succeed({ ok: true });
 }
 
 /** Handles `POST /api/publish` through bearer auth and SiteStore (which
  * enforces write — and admin for a public/private flip — on updates). */
-function publish({ request, user }: ApiContext): ApiEffect {
+function publish({ request, user, payload }: ApiContext<"publish">) {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
-    const publishRequest = yield* readPublishRequest(request);
+    const publishRequest = yield* normalizePublishRequest(payload);
     const siteStore = yield* SiteStore;
     const result = yield* siteStore.publish(publishRequest, user!, config);
     const url = publishedUrl(contentBaseUrl(request, config), result.project, result.openPath, config);
-    return jsonResponse({ ...result, url } satisfies PublishResponse, 200);
+    return { ...result, url };
   });
 }
 
 /** Handles `GET /api/projects`: the authenticated user's own project index. */
-function listProjects({ request, user }: ApiContext): ApiEffect {
+function listProjects({ request, user }: ApiContext<"projects-list">) {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     const siteStore = yield* SiteStore;
     const projects = yield* siteStore.listProjects(user!);
     const contentBase = contentBaseUrl(request, config);
-    return jsonResponse({
+    return {
       projects: projects.map((project) => projectSummary(project, contentBase, projectRole(project, user, config), config)),
-    } satisfies ProjectsListResponse, 200);
+    };
   });
 }
 
@@ -244,7 +255,7 @@ function listProjects({ request, user }: ApiContext): ApiEffect {
  * authorization, and URL-to-project resolution stay centralized. The project
  * subject comes from the query string, so the read gate runs here rather than
  * in the dispatcher — same mask, same policy. */
-function resolveProjectPath({ request, url, user }: ApiContext): ApiEffect {
+function resolveProjectPath({ request, url, user }: ApiContext<"resolve">) {
   return Effect.gen(function* () {
     const path = url.searchParams.get("path");
     if (path == null || !path.startsWith("/")) {
@@ -255,64 +266,64 @@ function resolveProjectPath({ request, url, user }: ApiContext): ApiEffect {
     const project = projectForRequest(path);
     const loaded = project == null ? null : yield* siteStore.loadProject(project);
     const site = yield* requireReadableSite(loaded, user, config);
-    return jsonResponse({
+    return {
       project: projectSummary(site.record, contentBaseUrl(request, config), projectRole(site.record, user, config), config),
-    } satisfies ProjectResponse, 200);
+    };
   });
 }
 
 /** Handles `GET /api/projects/:project`. */
-function projectInfo({ request, user, site }: ApiContext): ApiEffect {
+function projectInfo({ request, user, site }: ApiContext<"project-info">) {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
-    return jsonResponse({
+    return {
       project: projectSummary(site!.record, contentBaseUrl(request, config), projectRole(site!.record, user, config), config),
-    } satisfies ProjectResponse, 200);
+    };
   });
 }
 
 /** Handles `GET /api/projects/:project/bundle` for clone/read workflows. */
-function projectBundle({ site }: ApiContext): ApiEffect {
+function projectBundle({ site }: ApiContext<"project-bundle">) {
   return Effect.gen(function* () {
     const siteStore = yield* SiteStore;
     const bundle = yield* siteStore.bundle(site!.record.project);
     if (bundle == null) return yield* Effect.fail(new HttpError({ status: 404, message: "Project not found" }));
-    return jsonResponse({ bundle }, 200);
+    return { bundle };
   });
 }
 
 /** Handles `POST /api/projects/:project/unpublish` (SiteStore enforces admin). */
-function unpublishProject({ request, user, site }: ApiContext): ApiEffect {
+function unpublishProject({ request, user, site }: ApiContext<"project-unpublish">) {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     const siteStore = yield* SiteStore;
     const record = yield* siteStore.unpublish(site!.record.project, user!, config);
-    return jsonResponse({
+    return {
       project: projectSummary(record, contentBaseUrl(request, config), projectRole(record, user, config), config),
-    } satisfies ProjectResponse, 200);
+    };
   });
 }
 
 /** Handles `POST /api/projects/:project/share` (SiteStore enforces admin). */
-function shareProject({ request, user, site }: ApiContext): ApiEffect {
+function shareProject({ request, user, site, payload }: ApiContext<"project-share">) {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
-    const changes = yield* readShareRequest(request);
+    const changes = yield* validateShareChanges(payload);
     const siteStore = yield* SiteStore;
     const result = yield* siteStore.share(site!.record.project, user!, changes, config);
-    return jsonResponse({
+    return {
       project: projectSummary(result.record, contentBaseUrl(request, config), projectRole(result.record, user, config), config),
       warnings: result.warnings,
-    } satisfies ShareResponse, 200);
+    };
   });
 }
 
 /** Handles `DELETE /api/projects/:project` (SiteStore enforces owner). */
-function deleteProject({ user, site }: ApiContext): ApiEffect {
+function deleteProject({ user, site }: ApiContext<"project-delete">) {
   return Effect.gen(function* () {
     const siteStore = yield* SiteStore;
     yield* siteStore.deleteProject(site!.record.project, user!);
-    return jsonResponse({ ok: true }, 200);
+    return { ok: true };
   });
 }
 
@@ -320,20 +331,70 @@ function deleteProject({ user, site }: ApiContext): ApiEffect {
 // The registry
 // ---------------------------------------------------------------------------
 
+/**
+ * The complete security policy for every contract endpoint. The mapped type
+ * is the exhaustiveness proof: a new endpoint added to ScratchworkApi will
+ * not compile until it gets a policy here, and a policy for a removed
+ * endpoint is a compile error too.
+ */
+const API_POLICY: { readonly [Name in ScratchworkEndpointName]: ApiPolicy<Name> } = {
+  health: { auth: "optional", minimumRole: null, mutation: false, visibility: "status", handler: health },
+  "cli-token-exchange": {
+    auth: "code-exchange",
+    minimumRole: null,
+    mutation: true,
+    visibility: "session-token",
+    payloadLimit: { maxBytes: MAX_CLI_TOKEN_BODY_BYTES, message: "Request body is too large" },
+    handler: exchangeCliToken,
+  },
+  me: { auth: "optional", minimumRole: null, mutation: false, visibility: "identity", handler: me },
+  publish: {
+    auth: "bearer",
+    minimumRole: "write",
+    mutation: true,
+    visibility: "project-summary",
+    payloadLimit: { maxBytes: MAX_PUBLISH_BODY_BYTES, message: "Publish body is too large" },
+    handler: publish,
+  },
+  "projects-list": { auth: "bearer", minimumRole: null, mutation: false, visibility: "own-projects", handler: listProjects },
+  resolve: { auth: "bearer", minimumRole: "read", mutation: false, visibility: "project-summary", handler: resolveProjectPath },
+  "project-info": { auth: "bearer", minimumRole: "read", mutation: false, visibility: "project-summary", handler: projectInfo },
+  "project-bundle": { auth: "bearer", minimumRole: "read", mutation: false, visibility: "project-content", handler: projectBundle },
+  "project-unpublish": { auth: "bearer", minimumRole: "admin", mutation: true, visibility: "project-summary", handler: unpublishProject },
+  "project-share": {
+    auth: "bearer",
+    minimumRole: "admin",
+    mutation: true,
+    visibility: "project-summary",
+    payloadLimit: { maxBytes: MAX_SHARE_BODY_BYTES, message: "Share body is too large" },
+    handler: shareProject,
+  },
+  "project-delete": { auth: "bearer", minimumRole: "owner", mutation: true, visibility: "status", handler: deleteProject },
+};
+
+/** The registry: every contract endpoint joined with its policy, in contract
+ * order. Derived, never hand-listed — the contract is the route inventory. */
+const ROUTES: ReadonlyArray<RegisteredRoute> = Object.values(ScratchworkApi.groups).flatMap((group) =>
+  Object.values(group.endpoints).map((endpoint) => {
+    const name = endpoint.name as ScratchworkEndpointName;
+    const policy = API_POLICY[name];
+    return {
+      name,
+      method: endpoint.method,
+      path: endpoint.path,
+      auth: policy.auth,
+      minimumRole: policy.minimumRole,
+      mutation: policy.mutation,
+      visibility: policy.visibility,
+      payloadLimit: policy.payloadLimit,
+      endpoint: endpoint as unknown as HttpApiEndpoint.HttpApiEndpoint.AnyWithProps,
+      handler: policy.handler as unknown as RegisteredRoute["handler"],
+    };
+  }),
+);
+
 /** Every JSON endpoint this server exposes, with its complete policy. */
-export const API_ROUTES: ReadonlyArray<ApiRoute> = [
-  { name: "health", method: "GET", path: "/health", auth: "optional", minimumRole: null, mutation: false, visibility: "status", handler: health },
-  { name: "cli-token-exchange", method: "POST", path: "/auth/cli/token", auth: "code-exchange", minimumRole: null, mutation: true, visibility: "session-token", handler: exchangeCliToken },
-  { name: "me", method: "GET", path: "/api/me", auth: "optional", minimumRole: null, mutation: false, visibility: "identity", handler: me },
-  { name: "publish", method: "POST", path: "/api/publish", auth: "bearer", minimumRole: "write", mutation: true, visibility: "project-summary", handler: publish },
-  { name: "projects-list", method: "GET", path: "/api/projects", auth: "bearer", minimumRole: null, mutation: false, visibility: "own-projects", handler: listProjects },
-  { name: "resolve", method: "GET", path: "/api/resolve", auth: "bearer", minimumRole: "read", mutation: false, visibility: "project-summary", handler: resolveProjectPath },
-  { name: "project-info", method: "GET", path: "/api/projects/:project", auth: "bearer", minimumRole: "read", mutation: false, visibility: "project-summary", handler: projectInfo },
-  { name: "project-bundle", method: "GET", path: "/api/projects/:project/bundle", auth: "bearer", minimumRole: "read", mutation: false, visibility: "project-content", handler: projectBundle },
-  { name: "project-unpublish", method: "POST", path: "/api/projects/:project/unpublish", auth: "bearer", minimumRole: "admin", mutation: true, visibility: "project-summary", handler: unpublishProject },
-  { name: "project-share", method: "POST", path: "/api/projects/:project/share", auth: "bearer", minimumRole: "admin", mutation: true, visibility: "project-summary", handler: shareProject },
-  { name: "project-delete", method: "DELETE", path: "/api/projects/:project", auth: "bearer", minimumRole: "owner", mutation: true, visibility: "status", handler: deleteProject },
-];
+export const API_ROUTES: ReadonlyArray<ApiRoute> = ROUTES;
 
 // ---------------------------------------------------------------------------
 // Dispatch
@@ -355,7 +416,7 @@ export function dispatchApiRoute(
   ServerConfig | SiteStore | Auth | PrimitiveDb
 > {
   return Effect.gen(function* () {
-    const matches = API_ROUTES
+    const matches = ROUTES
       .map((route) => ({ route, params: matchPath(route.path, url.pathname) }))
       .filter((match) => match.params != null);
     if (matches.length === 0) {
@@ -374,14 +435,15 @@ export function dispatchApiRoute(
   });
 }
 
-/** Applies the declared policy in order — origin, principal, project gate —
- * then runs the handler with the resolved context. */
+/** Applies the declared policy in order — origin, principal, project gate,
+ * payload decode — then runs the handler and encodes its result through the
+ * endpoint's success schema. */
 function runRoute(
-  route: ApiRoute,
+  route: RegisteredRoute,
   project: string | null,
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
-): ApiEffect {
+): Effect.Effect<HttpServerResponse.HttpServerResponse, RouteError, RouteServices> {
   return Effect.gen(function* () {
     const config = yield* ServerConfig;
     yield* rejectCrossOriginApiRequest(request, appBaseUrl(request, config));
@@ -398,7 +460,47 @@ function runRoute(
       const siteStore = yield* SiteStore;
       site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
     }
-    return yield* route.handler({ request, url, user, site });
+
+    const payload = Option.isSome(route.endpoint.payloadSchema) && route.payloadLimit != null
+      ? yield* readEndpointPayload(request, route.endpoint.payloadSchema.value, route.payloadLimit)
+      : undefined;
+
+    const result = yield* route.handler({ request, url, user, site, payload: payload as never });
+    const body = yield* Schema.encodeUnknown(route.endpoint.successSchema as Schema.Schema<unknown, unknown>)(result).pipe(
+      Effect.mapError((cause) => new HttpError({ status: 500, message: "Could not encode the response", cause })),
+    );
+    return jsonResponse(body, 200);
+  });
+}
+
+/** Reads, size-limits, parses, and strictly decodes one request body through
+ * the contract payload schema. Decoding is deliberately strict — every
+ * problem is reported and unknown fields are errors — so protocol drift
+ * surfaces as a clear 400 instead of being silently dropped. */
+function readEndpointPayload(
+  request: HttpServerRequest.HttpServerRequest,
+  schema: Schema.Schema.Any,
+  limit: PayloadLimit,
+): Effect.Effect<unknown, HttpError> {
+  return Effect.gen(function* () {
+    const text = yield* request.text.pipe(
+      HttpServerRequest.withMaxBodySize(Option.some(limit.maxBytes)),
+      Effect.mapError((cause) => new HttpError({ status: 413, message: limit.message, cause })),
+    );
+    if (new TextEncoder().encode(text).byteLength > limit.maxBytes) {
+      return yield* Effect.fail(new HttpError({ status: 413, message: limit.message }));
+    }
+    const parsed = yield* Schema.decodeUnknown(Schema.parseJson())(text).pipe(
+      Effect.mapError(() => new HttpError({ status: 400, message: "Invalid JSON body" })),
+    );
+    return yield* Schema.decodeUnknown(schema as Schema.Schema<unknown, unknown>)(parsed, {
+      errors: "all",
+      onExcessProperty: "error",
+    }).pipe(
+      Effect.mapError((error) =>
+        new HttpError({ status: 400, message: ParseResult.TreeFormatter.formatErrorSync(error) }),
+      ),
+    );
   });
 }
 

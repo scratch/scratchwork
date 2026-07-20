@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
-import { decodePublishRequest, MAX_PUBLISH_FILE_BYTES, MAX_PUBLISH_FILES, MAX_PUBLISH_TOTAL_BYTES } from "../src/publish-request";
+import * as Schema from "effect/Schema";
+import { PublishRequestBodySchema } from "../../../shared/src/publish/api";
+import { MAX_PUBLISH_FILE_BYTES, MAX_PUBLISH_FILES, MAX_PUBLISH_TOTAL_BYTES, normalizePublishRequest } from "../src/publish-request";
 import { bundle } from "./helpers";
+
+/** The production decode path for a publish body: the dispatcher's strict
+ * contract-schema decode (see readEndpointPayload in api-routes.ts) followed
+ * by the server's cross-field normalization. */
+const decodePublishRequest = (value: unknown) =>
+  Schema.decodeUnknown(PublishRequestBodySchema)(value, { errors: "all", onExcessProperty: "error" }).pipe(
+    Effect.flatMap(normalizePublishRequest),
+  );
 
 describe("decodePublishRequest", () => {
   test("decodes a valid request", async () => {

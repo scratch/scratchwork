@@ -10,16 +10,12 @@ import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Either from "effect/Either";
 import * as Encoding from "effect/Encoding";
-import { ProjectsListResponseSchema } from "../../../shared/src/publish/api";
-import { PublishBundleSchema } from "../../../shared/src/publish/bundle";
 import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
-import { apiErrorText, apiJson, apiRequest, projectApiUrl } from "../api";
-import { readAuthToken, serverApiUrl } from "../auth";
+import { apiClient, mapApiErrors } from "../api";
+import { readAuthToken } from "../auth";
 import { SKIPPED_DIRECTORIES } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
 import { PROJECT_CONFIG_FILE, resolveProjectRef, resolveServerFromCwd, writeProjectConfig } from "../project-config";
@@ -36,7 +32,8 @@ export function runMe(
   return Effect.gen(function* () {
     const server = yield* resolveServerFromCwd(config.server, "me");
     const token = yield* readAuthToken(server);
-    const body = yield* apiJson("scratchwork me", serverApiUrl(server, "/api/me"), { token });
+    const client = yield* apiClient(server, { token });
+    const body = yield* client.me().pipe(mapApiErrors("scratchwork me"));
     yield* Console.log(JSON.stringify(body, null, 2));
   });
 }
@@ -48,11 +45,17 @@ export function runProjects(
   return Effect.gen(function* () {
     const server = yield* resolveServerFromCwd(config.server, "projects");
     const token = yield* readAuthToken(server);
-    const body = yield* apiJson("scratchwork projects", serverApiUrl(server, "/api/projects"), { token });
-    // Tolerant decoding on purpose: unknown fields from a newer server are ignored,
-    // and an undecodable body degrades to an empty listing (as it always has).
-    const decoded = Schema.decodeUnknownOption(ProjectsListResponseSchema)(body);
-    const projects = Option.isSome(decoded) ? decoded.value.projects : [];
+    const client = yield* apiClient(server, { token });
+    // An undecodable 2xx body degrades to an empty listing (as it always has);
+    // unknown fields from a newer server are ignored by the tolerant decode.
+    const body = yield* client["projects-list"]().pipe(
+      Effect.catchTags({
+        ParseError: () => Effect.succeed({ projects: [] }),
+        ResponseError: () => Effect.succeed({ projects: [] }),
+      }),
+      mapApiErrors("scratchwork projects"),
+    );
+    const projects = body.projects;
     if (projects.length === 0) {
       yield* Console.log("No projects.");
       return;
@@ -70,7 +73,10 @@ export function runInfo(
   return Effect.gen(function* () {
     const ref = yield* resolveProjectRef({ ...config, command: "info" });
     const token = yield* readAuthToken(ref.server);
-    const body = yield* apiJson("scratchwork info", projectApiUrl(ref), { token });
+    const client = yield* apiClient(ref.server, { token });
+    const body = yield* client["project-info"]({ path: { project: ref.project } }).pipe(
+      mapApiErrors("scratchwork info"),
+    );
     yield* Console.log(JSON.stringify(body, null, 2));
   });
 }
@@ -82,7 +88,10 @@ export function runUnpublish(
   return Effect.gen(function* () {
     const ref = yield* resolveProjectRef({ ...config, command: "unpublish" });
     const token = yield* readAuthToken(ref.server);
-    const body = yield* apiJson("scratchwork unpublish", projectApiUrl(ref, "/unpublish"), { method: "POST", token });
+    const client = yield* apiClient(ref.server, { token });
+    const body = yield* client["project-unpublish"]({ path: { project: ref.project } }).pipe(
+      mapApiErrors("scratchwork unpublish"),
+    );
     yield* Console.log(JSON.stringify(body, null, 2));
   });
 }
@@ -128,23 +137,23 @@ function runShareChange(
     }
     const ref = yield* resolveProjectRef({ command, pathOrUrl: refs[0], server: config.server, project: config.project });
     const token = yield* readAuthToken(ref.server);
-    const response = yield* apiRequest(`scratchwork ${command}`, projectApiUrl(ref, "/share"), {
-      method: "POST",
-      token,
-      body: change.add ? { add: targets, role: change.role } : { remove: targets },
-    });
-    // A missing project reads "Project not found"; a bare route-level "Not found" means
-    // the server predates the /share API and would otherwise be indistinguishable noise.
-    if (response.status === 404 && apiErrorText(response) === "Not found") {
-      return yield* Effect.fail(new CliError({
-        code: 1,
-        message: `scratchwork ${command}: ${ref.server} does not support sharing yet (no /share API). Update the server to a newer Scratchwork release and try again.`,
-      }));
-    }
-    if (!response.ok) {
-      return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: ${apiErrorText(response)}` }));
-    }
-    yield* Console.log(JSON.stringify(response.json, null, 2));
+    const client = yield* apiClient(ref.server, { token });
+    const response = yield* client["project-share"]({
+      path: { project: ref.project },
+      payload: change.add ? { add: targets, role: change.role } : { remove: targets },
+    }).pipe(
+      // A missing project reads "Project not found"; a bare route-level "Not found" means
+      // the server predates the /share API and would otherwise be indistinguishable noise.
+      Effect.catchIf(
+        (error) => error._tag === "ApiError" && error.status === 404 && error.message === "Not found",
+        () => Effect.fail(new CliError({
+          code: 1,
+          message: `scratchwork ${command}: ${ref.server} does not support sharing yet (no /share API). Update the server to a newer Scratchwork release and try again.`,
+        })),
+      ),
+      mapApiErrors(`scratchwork ${command}`),
+    );
+    yield* Console.log(JSON.stringify(response, null, 2));
   });
 }
 
@@ -155,7 +164,8 @@ export function runDelete(
   return Effect.gen(function* () {
     const ref = yield* resolveProjectRef({ ...config, command: "delete" });
     const token = yield* readAuthToken(ref.server);
-    yield* apiJson("scratchwork delete", projectApiUrl(ref), { method: "DELETE", token });
+    const client = yield* apiClient(ref.server, { token });
+    yield* client["project-delete"]({ path: { project: ref.project } }).pipe(mapApiErrors("scratchwork delete"));
     yield* Console.log(`Deleted ${ref.project}`);
   });
 }
@@ -172,13 +182,10 @@ export function runClone(
       return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork clone: unsafe project name ${ref.project}` }));
     }
     const token = yield* readAuthToken(ref.server);
-    const body = yield* apiJson("scratchwork clone", projectApiUrl(ref, "/bundle"), { token });
-    const envelope = Option.getOrNull(
-      Schema.decodeUnknownOption(Schema.Struct({ bundle: PublishBundleSchema }))(body),
+    const client = yield* apiClient(ref.server, { token });
+    const envelope = yield* client["project-bundle"]({ path: { project: ref.project } }).pipe(
+      mapApiErrors("scratchwork clone"),
     );
-    if (envelope == null) {
-      return yield* Effect.fail(new CliError({ code: 1, message: "scratchwork clone: invalid server response" }));
-    }
 
     const fs = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;

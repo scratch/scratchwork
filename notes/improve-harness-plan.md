@@ -119,7 +119,7 @@ Six invariants (registry below). They live **directly in root `AGENTS.md`** — 
 
 `[x]` A `check-invariants` skill (`.claude/skills/check-invariants/SKILL.md`) for the agent-pass residue: diff against main → report obeys/violates with file:line evidence. Claude-only convenience; Codex and OpenCode rely on the AGENTS.md standing rule + CI.
 
-`[ ]` Stretch: migrate the shared CLI API contract to `@effect/platform` `HttpApi` (see invariant 2) — the structural fix that makes contract drift impossible. Auth callbacks, published-content routes, health checks, and other server-only endpoints remain server-owned.
+`[x]` Stretch: migrate the shared CLI API contract to `@effect/platform` `HttpApi` (see invariant 2) — the structural fix that makes contract drift impossible. Auth callbacks, published-content routes, and other browser-facing endpoints remain server-owned. *(Landed: `ScratchworkApi` in `shared/src/publish/api.ts` declares every JSON endpoint once; the CLI client is `HttpApiClient`-derived (`cli/src/api.ts`, transport concerns — bearer/CF-Access headers, edge-block detection, `{error}`-envelope extraction — in one transformed HttpClient), and the server registry joins the contract endpoints with a mapped-type policy record (`server/core/src/api-routes.ts`) that strictly decodes payloads through and encodes responses with the contract schemas. The bespoke dispatcher stays — `HttpApiBuilder`'s router semantics (400 on bad path params, 404 on method mismatch, its own error envelope) conflict with the masking/405/origin behavior the policy matrix pins. The `/api/me` response gained a shared `MeResponseSchema`; the share request schema moved to shared; check-boundaries §3 became the no-hand-built-URLs check.)*
 
 ### Phase 6 — Housekeeping
 
