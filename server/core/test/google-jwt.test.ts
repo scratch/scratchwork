@@ -70,5 +70,39 @@ describe("verifyGoogleIdToken", () => {
       jwksUrl: "https://jwks2.test/certs",
     }))).rejects.toThrow("nonce");
   });
+
+  test("expectedIssuer replaces the Google issuers exactly", async () => {
+    const keyPair = await makeKeyPair();
+    globalThis.fetch = jwksFetch(keyPair.publicJwk);
+    const issuer = "https://localhost.emobix.co.uk:8443/test/a/scratchwork/";
+    const mint = (iss: string) => signJwt(keyPair.privateKey, {
+      iss,
+      aud: "client-id",
+      sub: "user-1",
+      email: "founder@example.com",
+      email_verified: true,
+      exp: now() + 600,
+      iat: now(),
+      nonce: "nonce-1",
+    });
+    // Fresh JWKS URL: the verifier caches keys per URL across tests.
+    const options = { clientId: "client-id", expectedNonce: "nonce-1", jwksUrl: "https://jwks3.test/certs" };
+
+    // A configured issuer is accepted…
+    const claims = await Effect.runPromise(verifyGoogleIdToken(await mint(issuer), { ...options, expectedIssuer: issuer }));
+    expect(claims.iss).toBe(issuer);
+
+    // …and replaces Google's, in both directions — no widening.
+    await expect(Effect.runPromise(verifyGoogleIdToken(await mint("https://accounts.google.com"), { ...options, expectedIssuer: issuer })))
+      .rejects.toThrow("issuer");
+    await expect(Effect.runPromise(verifyGoogleIdToken(await mint(issuer), options)))
+      .rejects.toThrow("issuer");
+
+    // Prefix/suffix variants of the expected issuer are not the issuer.
+    await expect(Effect.runPromise(verifyGoogleIdToken(await mint(issuer.slice(0, -1)), { ...options, expectedIssuer: issuer })))
+      .rejects.toThrow("issuer");
+    await expect(Effect.runPromise(verifyGoogleIdToken(await mint(`${issuer}extra`), { ...options, expectedIssuer: issuer })))
+      .rejects.toThrow("issuer");
+  });
 });
 

@@ -44,13 +44,16 @@ export function verifyGoogleIdToken(
     readonly clientId: string;
     readonly expectedNonce?: string;
     readonly jwksUrl?: string;
+    /** Accepted `iss` claim when a local test provider issues under its own URL
+     * (loopback-gated config); Google's issuers when absent. */
+    readonly expectedIssuer?: string;
     readonly nowSeconds?: number;
   },
 ): Effect.Effect<GoogleIdTokenClaims, GoogleJwtError> {
   return Effect.tryPromise({
     try: async () => {
       const payload = (await verifyRs256Jwt(token, options.jwksUrl ?? GOOGLE_JWKS_URL)) as unknown as GoogleIdTokenClaims;
-      validateClaims(payload, options.clientId, options.expectedNonce, options.nowSeconds ?? epochSeconds());
+      validateClaims(payload, options.clientId, options.expectedNonce, options.expectedIssuer, options.nowSeconds ?? epochSeconds());
       return payload;
     },
     catch: (cause) => new GoogleJwtError({ message: errorMessage(cause), cause }),
@@ -70,8 +73,11 @@ export type GoogleTokenResponse = typeof GoogleTokenResponseSchema.Type;
 const decodeTokenResponse = Schema.decodeUnknownOption(GoogleTokenResponseSchema);
 
 /** POSTs an authorization-code grant (with its PKCE verifier) to the token endpoint —
- * Google's, or the loopback-gated local test provider's. Network and JSON failures
- * surface as a thrown error or a null body for the caller to translate. */
+ * Google's, or the loopback-gated local test provider's. Client authentication is
+ * client_secret_basic (RFC 6749 §2.3.1: credentials form-urlencoded, then Basic) —
+ * the scheme servers are required to support, and the one the OIDC conformance
+ * suite's basic RP plan validates. Network and JSON failures surface as a thrown
+ * error or a null body for the caller to translate. */
 export async function postAuthorizationCodeGrant(
   tokenUrl: string,
   params: {
@@ -83,16 +89,20 @@ export async function postAuthorizationCodeGrant(
   },
 ): Promise<{ readonly ok: boolean; readonly json: GoogleTokenResponse | null }> {
   const body = new URLSearchParams({
-    client_id: params.clientId,
-    client_secret: params.clientSecret,
     code: params.code,
     code_verifier: params.codeVerifier,
     grant_type: "authorization_code",
     redirect_uri: params.redirectUri,
   });
+  const credentials = `${encodeURIComponent(params.clientId)}:${encodeURIComponent(params.clientSecret)}`;
   const response = await fetch(tokenUrl, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      // btoa is safe here: the percent-encoded credentials are pure ASCII. It is
+      // also the encoder available on every platform this core runs on.
+      authorization: `Basic ${btoa(credentials)}`,
+    },
     body,
   });
   const responseBody: unknown = await response.json().catch(() => null);
@@ -104,11 +114,13 @@ function validateClaims(
   claims: GoogleIdTokenClaims,
   clientId: string,
   expectedNonce: string | undefined,
+  expectedIssuer: string | undefined,
   now: number,
 ): void {
-  if (claims.iss !== "https://accounts.google.com" && claims.iss !== "accounts.google.com") {
-    throw new Error("Invalid ID token issuer");
-  }
+  const validIssuer = expectedIssuer == null
+    ? claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com"
+    : claims.iss === expectedIssuer;
+  if (!validIssuer) throw new Error("Invalid ID token issuer");
   const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!audiences.includes(clientId)) throw new Error("Invalid ID token audience");
   if (audiences.length > 1 && claims.azp !== clientId) throw new Error("Invalid ID token authorized party");

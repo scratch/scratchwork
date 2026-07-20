@@ -6,6 +6,7 @@
   "description": "Full-loop publish e2e: a real server (local-dev, Cloudflare Worker under miniflare, AWS handler against LocalStack) driven by the real CLI through login → publish → serve → share → revoke, with a hermetic OAuth provider standing in for Google.",
   "scripts": {
     "ci": "bun run typecheck && bun run test",
+    "conformance": "bun conformance/run.ts",
     "test": "bun test/run.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

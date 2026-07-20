@@ -1,0 +1,49 @@
+# OpenID Foundation conformance suite, pinned prebuilt images — the adversarial
+# OIDC provider for the RP conformance lane (run.ts). Derived from the project's
+# docker-compose-prebuilt.yml; images are pinned by construction rather than via
+# an IMAGE_TAG variable. Browse tags at
+# https://gitlab.com/openid/conformance-suite/container_registry
+services:
+  mongodb:
+    image: mongo:6.0.13
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500k"
+        max-file: "5"
+  nginx:
+    image: registry.gitlab.com/openid/conformance-suite/nginx:release-v5.2.0
+    ports:
+      - "8443:8443"
+    depends_on:
+      - server
+    # nginx resolves its "server" upstream at boot and dies if the Java server
+    # is not up yet (or crashed); retry instead of wedging the whole stack.
+    restart: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500k"
+        max-file: "5"
+  server:
+    image: registry.gitlab.com/openid/conformance-suite:release-v5.2.0
+    environment:
+      BASE_URL: https://localhost.emobix.co.uk:8443
+      MONGODB_HOST: mongodb
+      SPRING_PROFILES_ACTIVE: dev
+      # devmode auto-authenticates every UI/API request as an admin dummy user,
+      # so the runner needs no bearer token. Local use only — never expose 8443.
+      # -D (JVM property) form: the image ENTRYPOINT splices JAVA_EXTRA_ARGS in
+      # before -jar, where Spring's --flag form is not a valid JVM option.
+      JAVA_EXTRA_ARGS: -Dfintechlabs.devmode=true
+      OIDC_GOOGLE_CLIENTID: google-client
+      OIDC_GOOGLE_SECRET: google-secret
+      OIDC_GITLAB_CLIENTID: gitlab-client
+      OIDC_GITLAB_SECRET: gitlab-secret
+    depends_on:
+      - mongodb
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500k"
+        max-file: "5"

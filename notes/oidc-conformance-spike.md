@@ -1,94 +1,134 @@
-# Spike: OpenID Foundation RP conformance suite for Scratchwork
+# OIDC RP conformance: OpenID Foundation suite against Scratchwork
 
 Phase 3 of `improve-harness-plan.md` calls for three OAuth/OIDC test layers. The
-hermetic provider and the full-loop lanes exist (`e2e/`); this note is the spike
-for the second layer — running the [OpenID Foundation conformance
-suite](https://openid.net/certification/about-conformance-suite/) as an
-adversarial *provider* against Scratchwork's relying-party (RP) implementation —
-with the concrete automation plan and the gaps that must close before it can
-join `bun run ci`.
+hermetic provider and the full-loop lanes exist (`e2e/`); this note covers the
+second layer — the [OpenID Foundation conformance
+suite](https://openid.net/certification/about-conformance-suite/) run locally in
+Docker as an adversarial *provider* against Scratchwork's relying-party (RP)
+implementation. The lane is **implemented and was run for real** (2026-07-20,
+suite `release-v5.2.0`): `bun run conformance` in `e2e/` drives the full
+`oidcc-client-basic-certification-test-plan` (14 modules). What remains before it
+can join `bun run ci` is a product decision, recorded at the bottom.
 
-## What the suite is and how it runs locally
+## What landed
 
-The conformance suite is a Java service (plus MongoDB) published by the OpenID
-Foundation; it runs locally with Docker Compose per the [project
-docs](https://gitlab.com/openid/conformance-suite) ("Developers > Run locally").
-For RP testing the suite plays the OP: each test module exposes its own
-issuer/authorization/token/JWKS endpoints and misbehaves in a controlled way
-(wrong `iss`, tampered signatures, reused `state`, missing `exp`, …). The RP
-under test is certified by completing a plan such as
-`oidcc-client-basic-certification-test-plan` (Basic RP profile: authorization
-code flow).
+- **Expected-issuer override.** `SCRATCHWORK_LOCAL_OAUTH_ISSUER`, accepted only
+  together with the loopback-gated `SCRATCHWORK_LOCAL_OAUTH_*` endpoint overrides
+  (`server/core/src/config.ts`). It replaces — never widens — the Google issuer
+  check in `google-jwt.ts`, and is only an expected-claim string, never fetched,
+  so it may name the suite's non-loopback issuer URL.
+- **client_secret_basic.** The token-endpoint client authentication moved from
+  `client_secret_post` (credentials in the form body) to `client_secret_basic`
+  (RFC 6749 §2.3.1 Authorization header) in `postAuthorizationCodeGrant`. The
+  basic RP plan validates client auth with
+  `ExtractClientCredentialsFromBasicAuthorizationHeader` at FAILURE level, so
+  `client_secret_post` fails *every* module at the token endpoint; basic is also
+  the scheme RFC 6749 requires servers to support, and Google supports it. The
+  hermetic e2e provider now requires the basic header and rejects any
+  `client_secret` in the body, so a regression fails the ordinary e2e lanes.
+- **The lane itself.** `e2e/conformance/docker-compose.yml` (prebuilt suite
+  images pinned to `release-v5.2.0`; devmode, so the runner needs no API token)
+  and `e2e/conformance/run.ts` (suite lifecycle, REST driving via
+  `/api/plan` → `/api/runner` → `/api/runner/{id}/wait-state` → `/api/info/{id}`,
+  one fresh local-dev Scratchwork + fresh browser per module, per-module verdict
+  table). A loopback HTTP proxy inside the runner fronts the suite's
+  per-alias HTTPS endpoints, because the `SCRATCHWORK_LOCAL_OAUTH_*` overrides
+  deliberately accept only literal-loopback plain-HTTP URLs and the suite serves
+  HTTPS under `localhost.emobix.co.uk` (public DNS for 127.0.0.1) with a
+  self-signed certificate. TLS verification is disabled only inside the runner —
+  test infrastructure talking to a local container — never in product code.
 
-Two properties make it automatable:
+## Verified results (2026-07-20, suite release-v5.2.0)
 
-1. **REST API.** Plans and test modules are created and polled over HTTP
-   (`/api/plan`, `/api/runner`, `/api/log`), so a runner script can create the
-   plan, iterate modules, and read PASS/WARNING/FAIL verdicts without the UI.
-2. **RP driving.** Each module waits for the RP to start a flow. Scratchwork's
-   flow is started by `GET /auth/login` and completed by following redirects —
-   exactly what `e2e/src/harness.ts`'s `Browser` already does for the hermetic
-   provider.
+Every module the RP judges by *rejecting* a tampered ID token passes; every
+module that requires *completing* a login against the suite's OP stalls:
 
-## Wiring Scratchwork to the suite
+| Module | Result |
+|---|---|
+| oidcc-client-test-invalid-iss | PASSED |
+| oidcc-client-test-missing-sub | PASSED |
+| oidcc-client-test-invalid-aud | PASSED |
+| oidcc-client-test-missing-iat | PASSED |
+| oidcc-client-test-kid-absent-multiple-jwks | PASSED |
+| oidcc-client-test-invalid-sig-rs256 | PASSED |
+| oidcc-client-test-nonce-invalid | PASSED |
+| oidcc-client-test-idtoken-sig-none | SKIPPED (expected: we reject `alg=none`) |
+| oidcc-client-test | stuck WAITING → aborted |
+| oidcc-client-test-kid-absent-single-jwks | stuck WAITING → aborted |
+| oidcc-client-test-idtoken-sig-rs256 | stuck WAITING → aborted |
+| oidcc-client-test-userinfo-invalid-sub | stuck WAITING → aborted |
+| oidcc-client-test-scope-userinfo-claims | stuck WAITING → aborted |
+| oidcc-client-test-client-secret-basic | stuck WAITING → aborted |
 
-The loopback-gated `SCRATCHWORK_LOCAL_OAUTH_{AUTHORIZE,TOKEN,JWKS}_URL`
-overrides added in phase 3 point the server at any local OP, so most of the
-plumbing already exists. The spike found these concrete gaps:
+8/14 pass under the runner's criteria (PASSED, WARNING, or expected SKIPPED).
 
-- **Issuer check is hardcoded to Google.** `server/core/src/google-jwt.ts`
-  accepts only `https://accounts.google.com` / `accounts.google.com` as `iss`.
-  The conformance OP issues under its own URL. Needed: an expected-issuer field
-  alongside the local endpoint overrides (same loopback gating), defaulting to
-  Google. Without it every module fails at ID-token validation for the wrong
-  reason.
-- **Client authentication variant.** Scratchwork sends `client_id` +
-  `client_secret` in the token-request body → variant
-  `client_auth_type=client_secret_post`, `response_type=code`,
-  `response_mode=default`. The suite must be configured with the same static
-  client (`e2e` client id/secret) since Scratchwork does not do dynamic
-  registration.
-- **Claim requirements.** Scratchwork requires `email` and
-  `email_verified === true`. The certification modules do not all include email
-  claims; the suite's client configuration must request/seed an email for the
-  test user, or the affected modules will fail on Scratchwork's (deliberate)
-  extra strictness. This is configuration, not a code change — the strictness
-  is the point.
-- **One flow per module, sequentially.** Each module needs a fresh browser
-  transaction; the runner must not reuse state cookies across modules (a fresh
-  `Browser` per module, as the negative-lane tests already do).
+## Why the six stall — findings the original spike got wrong
 
-## Runner shape (next implementation step)
+Verified against the suite sources (release-v5.2.0):
 
-`e2e/conformance/run.ts` (not part of `bun test`; its own entry):
+1. **The suite's OP never puts email in the ID token.** For the code-flow plan
+   the ID token carries only `iss, sub, aud, nonce, iat, exp`
+   (`GenerateIdTokenClaims.java`). Email claims are served **only by the
+   userinfo endpoint** when the `email` scope is requested, and the test user is
+   **hardcoded** with `email_verified=false` (`OIDCCLoadUserInfo.java`) — there
+   is no configuration mechanism to change the user's claims. The original
+   spike's assumption that "the suite's client configuration must request/seed
+   an email for the test user" is wrong.
+2. **Positive modules finish only after a userinfo request.** With
+   `response_type=code`, `oidcc-client-test` (and the other positive modules)
+   fire FINISHED only once the RP calls userinfo
+   (`finishTestIfAllRequestsAreReceived`). Scratchwork never calls userinfo, and
+   it rejects the email-less ID token anyway ("ID token is missing email"), so
+   these modules wait forever; the runner aborts them after 60s.
+3. **`kid` handling.** `jwt-rs256.ts` requires a `kid` in every token header.
+   OIDC Core §10.1 allows omitting `kid` when the JWKS holds a single key, which
+   is exactly what `oidcc-client-test-kid-absent-single-jwks` exercises — even
+   with the email/userinfo gap closed, this module needs the verifier to accept
+   a kid-less token when the JWKS has exactly one RSA signing key. (The
+   multiple-keys variant passes: rejecting is allowed there.)
+4. **Negative modules self-finish.** After serving a tampered token, the suite
+   waits `waitTimeoutSeconds` (we set 5s); RP silence is scored as a correct
+   abort — no runner intervention needed. An RP that wrongly proceeds to
+   userinfo is FAILED (or SKIPPED for the token-endpoint-delivered
+   invalid-signature case, which OIDC Core tolerates).
 
-1. `docker compose up` the suite (pin the suite release tag; it ships
-   `builds/` images) with MongoDB, wait for `/api/server` health.
-2. `POST /api/plan?planName=oidcc-client-basic-certification-test-plan` with a
-   JSON config naming the static client and Scratchwork's redirect URI
-   (`http://localhost:<port>/auth/callback/google`).
-3. For each module in the plan: create the runner, start a local Scratchwork
-   (`deploy/local-dev` entrypoint, local endpoint overrides pointed at the
-   module's issuer), drive `GET /auth/login` with the harness `Browser`, poll
-   the module until `FINISHED`, record the verdict.
-4. Exit nonzero unless every module is PASS or WARNING (warnings printed).
+## The remaining product decision (needed before this joins `bun run ci`)
 
-Runtime estimate: ~30 modules × one full flow each — minutes, not seconds,
-plus the suite images. That is fine for a required lane but heavier than the
-rest of `bun run ci`.
+To turn the six stalled modules green, Scratchwork's RP needs, in a form Pete
+should sign off on:
 
-## Gate plan
+- **A userinfo request in the login flow** (bearer access token), with the
+  response's `sub` validated against the ID token's (`userinfo-invalid-sub`
+  expects a mismatch to abort the login).
+- **Email sourcing that tolerates the suite's OP**: accept an ID token without
+  an email claim when userinfo supplies the email instead — while keeping
+  `email_verified === true` as the policy gate for actually admitting the user.
+  (The suite's hardcoded `email_verified=false` user means the login should
+  still ultimately be *denied*; the conformance modules don't care — they finish
+  once userinfo is called — so strict policy and a green plan are compatible.)
+- **Single-key JWKS `kid` relaxation** in `jwt-rs256.ts` per OIDC Core §10.1
+  (finding 3), with adversarial tests (multiple keys + kid-less token must still
+  fail).
 
-Per `improve-harness-plan.md`, conformance coverage is **required before
-launch** and belongs in `bun run ci` rather than staying a manual lane. Order
-of work:
+None of this is needed for Google today (Google always sends `kid` and puts a
+verified email in the ID token), so it is conformance-driven hardening of the
+provider abstraction, not a bug fix. Once decided and implemented, re-run
+`bun run conformance`; when the plan is green and timed, wire it into `e2e`'s
+`ci` script per the gate plan — as a required lane, never quietly optional.
 
-1. Add the loopback-gated expected-issuer override (small; unblocks everything).
-2. Land `e2e/conformance/run.ts` + suite compose file, runnable on demand
-   (`bun run conformance` in `e2e/`).
-3. Once green and timed, wire it into `e2e`'s `ci` script. If measured runtime
-   is a real problem, split per the plan's rule: a separate required pre-merge
-   gate, never quietly optional.
+## Operational notes
+
+- First run pulls ~2GB of images; the suite (amd64 images, emulated on Apple
+  Silicon) takes a few minutes to boot. The runner starts the stack if it is not
+  already healthy and tears it down afterwards unless `CONFORMANCE_KEEP_SUITE`
+  is set (keep it up while iterating; the suite UI at
+  https://localhost.emobix.co.uk:8443 shows per-module logs).
+- The prebuilt image splices `JAVA_EXTRA_ARGS` in *before* `-jar`, so devmode
+  must be passed as `-Dfintechlabs.devmode=true` (the Spring `--flag` form only
+  works in the suite's own source-build compose).
+- `localhost.emobix.co.uk` resolves to 127.0.0.1 in public DNS; the runner
+  connects to 127.0.0.1 directly so DNS-rebind-protective resolvers don't break
+  it.
 
 ## Third layer reminder (not automated)
 

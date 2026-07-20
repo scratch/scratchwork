@@ -45,6 +45,10 @@ export interface OAuthProviderEndpoints {
   readonly authorizeUrl: string;
   readonly tokenUrl: string;
   readonly jwksUrl: string;
+  /** Expected ID-token `iss` claim when the local provider issues under its own
+   * URL (the OIDC conformance suite does); Google's issuers when absent. Only a
+   * comparison value — never dereferenced. */
+  readonly issuer?: string;
 }
 
 /** Built-in Google OAuth: the server runs the login flow itself. */
@@ -245,7 +249,10 @@ function readOAuthConfig(env: EnvVars, appUrl: string | undefined): Effect.Effec
 /** Parses the hermetic test provider's endpoints. Like the local Cloudflare JWKS
  * override, the LOCAL prefix and the loopback gates keep this out of production
  * configuration: the variables are accepted only when the app origin is loopback,
- * and every endpoint must itself be a loopback URL. Set all three or none. */
+ * and every endpoint must itself be a loopback URL. Set all three or none. The
+ * optional expected-issuer override rides on the same gate: it is meaningless
+ * without the endpoints, and it is only an expected-claim string, never fetched,
+ * so it may name a non-loopback issuer (the conformance suite's, for example). */
 function readLocalOAuthEndpoints(
   env: EnvVars,
   appUrl: string | undefined,
@@ -256,7 +263,17 @@ function readLocalOAuthEndpoints(
     "SCRATCHWORK_LOCAL_OAUTH_JWKS_URL",
   ] as const;
   const values = names.map((name) => env[name] || undefined);
-  if (values.every((value) => value == null)) return Effect.succeed({});
+  const issuer = env.SCRATCHWORK_LOCAL_OAUTH_ISSUER || undefined;
+  if (values.every((value) => value == null)) {
+    if (issuer != null) {
+      return Effect.fail(
+        new ServerConfigError({
+          message: "SCRATCHWORK_LOCAL_OAUTH_ISSUER is accepted only together with the SCRATCHWORK_LOCAL_OAUTH_* endpoint overrides",
+        }),
+      );
+    }
+    return Effect.succeed({});
+  }
   if (appUrl == null || !isLiteralLoopbackHost(new URL(appUrl).hostname)) {
     return Effect.fail(
       new ServerConfigError({
@@ -274,8 +291,23 @@ function readLocalOAuthEndpoints(
       return Effect.fail(invalidValue(names[index], value as string, 'a loopback URL, like "http://127.0.0.1:4300/authorize"'));
     }
   }
+  if (issuer != null && !isHttpUrl(issuer)) {
+    return Effect.fail(invalidValue("SCRATCHWORK_LOCAL_OAUTH_ISSUER", issuer, 'an http(s) issuer URL, like "https://localhost.emobix.co.uk:8443/test/a/scratchwork/"'));
+  }
   const [authorizeUrl, tokenUrl, jwksUrl] = values as [string, string, string];
-  return Effect.succeed({ localEndpoints: { authorizeUrl, tokenUrl, jwksUrl } });
+  return Effect.succeed({
+    localEndpoints: { authorizeUrl, tokenUrl, jwksUrl, ...(issuer == null ? {} : { issuer }) },
+  });
+}
+
+/** Returns true for a parseable http(s) URL. */
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /** Returns true for an http(s) URL whose host is loopback. */

@@ -749,6 +749,7 @@ function exchangeGoogleCode(
       clientId: config.clientId,
       expectedNonce: nonce,
       jwksUrl: config.localEndpoints?.jwksUrl,
+      expectedIssuer: config.localEndpoints?.issuer,
     }).pipe(
       Effect.mapError((cause) => new AuthError({ status: 401, message: cause.message, cause })),
     );
