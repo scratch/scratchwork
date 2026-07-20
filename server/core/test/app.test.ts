@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import { createSessionToken, issueCliAuthorizationCode, type AuthUser } from "../src/auth";
 import type { AuthConfig } from "../src/config";
 import { MemoryPrimitiveDbLive } from "../src/db";
@@ -376,11 +376,16 @@ describe("server app", () => {
       isPublic: true,
     }));
     expect(adminPublish.status).toBe(200);
-    const adminUnpublish = await adminHandler(post("/api/projects/site/unpublish", {}));
-    expect(adminUnpublish.status).toBe(200);
     const adminDelete = await adminHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
     expect(adminDelete.status).toBe(403);
     expect(await adminDelete.text()).toContain("owner");
+    const adminUnpublish = await adminHandler(post("/api/projects/site/unpublish", {}));
+    expect(adminUnpublish.status).toBe(200);
+    // Unpublishing cleared every grant, so the ex-admin is no longer a reader
+    // and the route policy masks the project's very existence.
+    const revokedDelete = await adminHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
+    expect(revokedDelete.status).toBe(403);
+    expect(await revokedDelete.text()).toContain("Project not found");
 
     const ownerDelete = await ownerHandler(new Request("https://scratch.test/api/projects/site", { method: "DELETE" }));
     expect(ownerDelete.status).toBe(200);
@@ -1189,7 +1194,7 @@ describe("server app", () => {
 
     async function s256(value: string): Promise<string> {
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-      return bytesToBase64Url(new Uint8Array(digest));
+      return Encoding.encodeBase64Url(new Uint8Array(digest));
     }
 
     async function issueCode(): Promise<string> {

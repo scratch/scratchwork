@@ -1,6 +1,9 @@
 /*
  * Error formatting for catch blocks and failure logs, shared so every
- * surface renders thrown values the same way.
+ * surface renders thrown values the same way. Deliberately retained under
+ * invariant 1: the error types themselves are Data.TaggedError, but Effect
+ * has no stdlib equivalent for reducing an unknown thrown value to its
+ * human-readable message.
  */
 
 /** Converts arbitrary thrown values into readable error messages. */

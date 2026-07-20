@@ -8,7 +8,6 @@
  * pointer is the single server-wide claim on the project name.
  */
 import * as Schema from "effect/Schema";
-import { isHex } from "../../../shared/src/encoding/hex";
 import { isSafeSitePath } from "../../../shared/src/site/paths";
 import { isSafeProjectIdentifier } from "./access";
 
@@ -27,7 +26,7 @@ const SiteOwnerSchema = Schema.Struct({
 const SiteFileObjectSchema = Schema.Struct({
   path: Schema.String.pipe(Schema.filter((path) => isSafeSitePath(path) || "Invalid site path")),
   objectKey: Schema.String,
-  sha256: Schema.String.pipe(Schema.filter((hash) => hash.length === 64 && isHex(hash) || "Invalid SHA-256")),
+  sha256: Schema.String.pipe(Schema.filter((hash) => /^[0-9a-f]{64}$/.test(hash) || "Invalid SHA-256")),
   size: Schema.Number.pipe(Schema.filter((size) => Number.isInteger(size) && size >= 0 || "Invalid file size")),
   contentType: Schema.String,
 });

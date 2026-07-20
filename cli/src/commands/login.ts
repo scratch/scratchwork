@@ -15,21 +15,15 @@ import type * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import {
-  CLI_TOKEN_EXCHANGE_PATH,
-  CliTokenResponseSchema,
   type CliTokenRequest,
   type CliTokenResponse,
 } from "../../../shared/src/publish/api";
-import { apiJson } from "../api";
+import { apiClient, mapApiErrors } from "../api";
 import {
-  decodeLoginCallback,
   generateLoginProof,
   loginUrl,
   normalizeServerUrl,
-  serverApiUrl,
   writeAuthToken,
   type LoginCallback,
 } from "../auth";
@@ -37,6 +31,7 @@ import { openBrowser } from "../browser";
 import { CliError, errorMessage } from "../errors";
 import { resolveServerFromCwd } from "../project-config";
 import type { LoginConfig } from "../types";
+import { serveLoginCallback } from "./login-callback-server";
 
 /** Everything runLogin and its callers need from the platform. */
 type LoginServices = CommandExecutor | FileSystem.FileSystem | Path.Path | HttpClient.HttpClient;
@@ -74,21 +69,15 @@ function awaitBrowserLogin(
     Effect.gen(function* () {
       const proof = yield* generateLoginProof();
       const done = yield* Deferred.make<LoginCallback>();
-      // The browser's callback response is held until the exchange settles, so
-      // the page reports what actually happened rather than assuming success.
-      let settleExchange: (ok: boolean) => void = () => {};
-      const exchangeSettled = new Promise<boolean>((resolve) => {
-        settleExchange = resolve;
-      });
       const callback = yield* Effect.acquireRelease(
         Effect.try({
-          try: () => serveLoginCallback(done, proof.state, exchangeSettled),
+          try: () => serveLoginCallback(done, proof.state),
           catch: (cause) => new CliError({ code: 1, message: `scratchwork login: ${errorMessage(cause)}` }),
         }),
-        (bunServer) => Effect.sync(() => {
+        (server) => Effect.sync(() => {
           // Interruption/timeout must release the browser's pending callback too.
-          settleExchange(false);
-          bunServer.stop(false);
+          server.settleExchange(false);
+          server.stop();
         }),
       );
       const redirectUri = `http://127.0.0.1:${callback.port}/callback`;
@@ -100,15 +89,15 @@ function awaitBrowserLogin(
 
       const outcome = yield* Deferred.await(done);
       if ("error" in outcome) {
-        settleExchange(false);
+        callback.settleExchange(false);
         return yield* Effect.fail(
           new CliError({ code: 1, message: `scratchwork login: the server reported a failed login (${outcome.error})` }),
         );
       }
       const result = yield* exchangeLoginCode(server, outcome.code, proof.codeVerifier, redirectUri).pipe(
-        Effect.tapError(() => Effect.sync(() => settleExchange(false))),
+        Effect.tapError(() => Effect.sync(() => callback.settleExchange(false))),
       );
-      settleExchange(true);
+      callback.settleExchange(true);
       // Give the browser a beat to receive the confirmation page before the
       // scope closes and stops the server.
       yield* Effect.sleep("250 millis");
@@ -132,51 +121,8 @@ function exchangeLoginCode(
 ): Effect.Effect<CliTokenResponse, CliError, HttpClient.HttpClient | FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const body: CliTokenRequest = { code, codeVerifier, redirectUri };
-    const json = yield* apiJson("scratchwork login", serverApiUrl(server, CLI_TOKEN_EXCHANGE_PATH), {
-      method: "POST",
-      body,
-    });
-    // Tolerant decoding on purpose: unknown fields from a newer server are ignored.
-    const decoded = Schema.decodeUnknownOption(CliTokenResponseSchema)(json);
-    if (Option.isNone(decoded)) {
-      return yield* Effect.fail(new CliError({ code: 1, message: "scratchwork login: invalid server response" }));
-    }
-    return decoded.value;
+    const client = yield* apiClient(server);
+    return yield* client["cli-token-exchange"]({ payload: body }).pipe(mapApiErrors("scratchwork login"));
   });
 }
 
-/** Starts the Bun loopback server that completes `done` on the first callback
- * carrying this login's state, answering with the exchange's real outcome. */
-function serveLoginCallback(
-  done: Deferred.Deferred<LoginCallback>,
-  expectedState: string,
-  exchangeSettled: Promise<boolean>,
-) {
-  return Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    async fetch(request) {
-      const url = new URL(request.url);
-      if (url.pathname !== "/callback") {
-        return new Response("Not found", { status: 404 });
-      }
-      const decoded = decodeLoginCallback(url, expectedState);
-      if (decoded == null) {
-        return new Response("Scratchwork login failed. Return to the terminal.\n", {
-          status: 400,
-          headers: { "content-type": "text/plain; charset=utf-8" },
-        });
-      }
-      Deferred.unsafeDone(done, Effect.succeed(decoded));
-      const ok = "code" in decoded && (await exchangeSettled);
-      return ok
-        ? new Response("Scratchwork login complete. You can close this tab.\n", {
-            headers: { "content-type": "text/plain; charset=utf-8" },
-          })
-        : new Response("Scratchwork login failed. Return to the terminal.\n", {
-            status: 400,
-            headers: { "content-type": "text/plain; charset=utf-8" },
-          });
-    },
-  });
-}

@@ -1,73 +1,58 @@
 /*
- * First tests owned by the shared workspace itself. shared code is also
- * exercised transitively through cli and server suites; these cover the
- * dependency-free codecs directly.
+ * Tests for the one retained base64 helper. The codecs themselves are
+ * effect/Encoding (exercised transitively through cli and server suites);
+ * what must hold here is that decodedBase64ByteLength accepts exactly the
+ * strings Encoding.decodeBase64 accepts and sizes them exactly.
  */
 import { describe, expect, test } from "bun:test";
-import {
-  base64ToBytes,
-  base64UrlToBytes,
-  bytesToBase64,
-  bytesToBase64Url,
-  decodedBase64ByteLength,
-} from "../src/encoding/base64";
-import { isRecord, parseJson } from "../src/util/json";
+import * as Either from "effect/Either";
+import * as Encoding from "effect/Encoding";
+import { decodedBase64ByteLength } from "../src/encoding/base64";
 
 const bytes = (...values: number[]) => Uint8Array.from(values);
 
-describe("base64", () => {
-  test("round-trips every 0–2 padding length", () => {
-    for (const input of [bytes(), bytes(1), bytes(1, 2), bytes(1, 2, 3), bytes(255, 0, 128, 7)]) {
-      expect(base64ToBytes(bytesToBase64(input))).toEqual(input);
+describe("decodedBase64ByteLength", () => {
+  test("matches actual decoded length for every 0–2 padding length", () => {
+    for (const input of [bytes(), bytes(9), bytes(9, 8), bytes(9, 8, 7), bytes(255, 0, 128, 7)]) {
+      expect(decodedBase64ByteLength(Encoding.encodeBase64(input))).toBe(input.length);
     }
-  });
-
-  test("matches the standard alphabet and padding", () => {
-    expect(bytesToBase64(new TextEncoder().encode("Ma"))).toBe("TWE=");
-    expect(base64ToBytes("TWFu")).toEqual(new TextEncoder().encode("Man"));
   });
 
   test("returns null for invalid input instead of throwing", () => {
-    expect(base64ToBytes("not base64!")).toBeNull();
-    expect(base64ToBytes("TWE")).toBeNull();
-    expect(base64ToBytes("TW==E===")).toBeNull();
-  });
-
-  test("decodedBase64ByteLength matches actual decoded length", () => {
-    for (const input of [bytes(), bytes(9), bytes(9, 8), bytes(9, 8, 7)]) {
-      expect(decodedBase64ByteLength(bytesToBase64(input))).toBe(input.length);
-    }
     expect(decodedBase64ByteLength("###")).toBeNull();
-  });
-});
-
-describe("base64url", () => {
-  test("round-trips without padding using the URL-safe alphabet", () => {
-    const input = bytes(251, 239, 190);
-    const encoded = bytesToBase64Url(input);
-    expect(encoded).not.toContain("=");
-    expect(encoded).not.toContain("+");
-    expect(encoded).not.toContain("/");
-    expect(base64UrlToBytes(encoded)).toEqual(input);
+    expect(decodedBase64ByteLength("TWE")).toBeNull();
+    expect(decodedBase64ByteLength("TW==E===")).toBeNull();
+    expect(decodedBase64ByteLength("TW E=")).toBeNull();
   });
 
-  test("returns null for standard-alphabet or truncated input", () => {
-    expect(base64UrlToBytes("++++")).toBeNull();
-    expect(base64UrlToBytes("TWFué")).toBeNull();
-    expect(base64UrlToBytes("A")).toBeNull();
-  });
-});
-
-describe("json", () => {
-  test("parseJson returns the value or null, never throws", () => {
-    expect(parseJson('{"a":1}')).toEqual({ a: 1 });
-    expect(parseJson("nope")).toBeNull();
-  });
-
-  test("isRecord accepts plain objects only", () => {
-    expect(isRecord({})).toBe(true);
-    expect(isRecord([])).toBe(false);
-    expect(isRecord(null)).toBe(false);
-    expect(isRecord("x")).toBe(false);
+  test("agrees with Encoding.decodeBase64 on acceptance and size", () => {
+    const corpus = [
+      "",
+      "TWE=",
+      "TWFu",
+      "TWFu\n",
+      "TWFu\r\n",
+      "AA==",
+      "====",
+      "A===",
+      "=AAA",
+      "TW=u",
+      "TWE",
+      "A",
+      "TW E=",
+      "TWFué",
+      "+/+/",
+      "-_-_",
+      Encoding.encodeBase64(bytes(1, 2, 3, 4, 5)),
+    ];
+    for (const value of corpus) {
+      const decoded = Encoding.decodeBase64(value);
+      const length = decodedBase64ByteLength(value);
+      if (Either.isRight(decoded)) {
+        expect(length).toBe(decoded.right.length);
+      } else {
+        expect(length).toBeNull();
+      }
+    }
   });
 });

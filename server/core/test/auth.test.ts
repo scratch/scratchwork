@@ -2,7 +2,7 @@ import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import {
   createSessionToken,
   decodeCliAuthorizationCode,
@@ -35,7 +35,7 @@ const CLI_VERIFIER = "test-code-verifier-test-code-verifier-test1";
 /** Computes the S256 challenge for a PKCE verifier. */
 async function s256(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-  return bytesToBase64Url(new Uint8Array(digest));
+  return Encoding.encodeBase64Url(new Uint8Array(digest));
 }
 
 /** Builds the /auth/login URL a CLI sends: loopback redirect, state echo, and challenge. */
@@ -618,6 +618,35 @@ describe("readServerConfig", () => {
     ).rejects.toThrow(
       "Cloudflare Access mode requires SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN, SCRATCHWORK_CF_ACCESS_AUD, SCRATCHWORK_SESSION_SECRET",
     );
+  });
+
+  test("enforces the 32-byte session-secret floor in both auth modes", async () => {
+    // Length is checkable; entropy is not — the floor is the mechanized part
+    // of invariant 3's secret hygiene. The bound is bytes, not characters.
+    const oauthEnv = (secret: string) => ({
+      SCRATCHWORK_AUTH: "oauth",
+      SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+      SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+      SCRATCHWORK_SESSION_SECRET: secret,
+    });
+
+    await expect(Effect.runPromise(readServerConfig(oauthEnv("a".repeat(31))))).rejects.toThrow(
+      "SCRATCHWORK_SESSION_SECRET must be at least 32 bytes",
+    );
+    expect((await Effect.runPromise(readServerConfig(oauthEnv("a".repeat(32))))).auth.sessionSecret).toHaveLength(32);
+
+    // 16 two-byte characters are 32 bytes; 15 of them plus one ASCII byte are 31.
+    await expect(Effect.runPromise(readServerConfig(oauthEnv("é".repeat(15) + "a")))).rejects.toThrow(
+      "at least 32 bytes",
+    );
+    await Effect.runPromise(readServerConfig(oauthEnv("é".repeat(16))));
+
+    await expect(Effect.runPromise(readServerConfig({
+      SCRATCHWORK_AUTH: "cloudflare-access",
+      SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN: "myteam",
+      SCRATCHWORK_CF_ACCESS_AUD: "aud-tag-1",
+      SCRATCHWORK_SESSION_SECRET: "a".repeat(31),
+    }))).rejects.toThrow("at least 32 bytes");
   });
 
   test("defaults to user-set project names", async () => {

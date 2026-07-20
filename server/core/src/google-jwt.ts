@@ -1,9 +1,15 @@
 /**
- * Verifies Google OAuth ID tokens: RS256 signature against Google's JWKS via the shared
- * machinery in jwt-rs256.ts, plus issuer/audience/expiry/email/nonce claim checks.
+ * The Google identity-provider back-channel: verifies Google OAuth ID tokens (RS256
+ * signature against Google's JWKS via the shared machinery in jwt-rs256.ts, plus
+ * issuer/audience/expiry/email/nonce claim checks) and POSTs the authorization-code
+ * grant to the token endpoint. Together with jwt-rs256.ts this is a deliberate
+ * Promise boundary under invariant 1 (raw fetch + Web Crypto); auth.ts wraps each
+ * entry point exactly once with Effect.tryPromise.
  */
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { errorMessage } from "../../../shared/src/util/errors";
 import { CLOCK_SKEW_SECONDS, verifyRs256Jwt } from "./jwt-rs256";
 
@@ -49,6 +55,48 @@ export function verifyGoogleIdToken(
     },
     catch: (cause) => new GoogleJwtError({ message: errorMessage(cause), cause }),
   });
+}
+
+/** Google's token-endpoint response shape, as much of it as the exchange needs —
+ * decoded tolerantly, so extra fields are ignored and a malformed body is null. */
+const GoogleTokenResponseSchema = Schema.Struct({
+  id_token: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  error_description: Schema.optional(Schema.String),
+});
+
+export type GoogleTokenResponse = typeof GoogleTokenResponseSchema.Type;
+
+const decodeTokenResponse = Schema.decodeUnknownOption(GoogleTokenResponseSchema);
+
+/** POSTs an authorization-code grant (with its PKCE verifier) to the token endpoint —
+ * Google's, or the loopback-gated local test provider's. Network and JSON failures
+ * surface as a thrown error or a null body for the caller to translate. */
+export async function postAuthorizationCodeGrant(
+  tokenUrl: string,
+  params: {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly code: string;
+    readonly codeVerifier: string;
+    readonly redirectUri: string;
+  },
+): Promise<{ readonly ok: boolean; readonly json: GoogleTokenResponse | null }> {
+  const body = new URLSearchParams({
+    client_id: params.clientId,
+    client_secret: params.clientSecret,
+    code: params.code,
+    code_verifier: params.codeVerifier,
+    grant_type: "authorization_code",
+    redirect_uri: params.redirectUri,
+  });
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const responseBody: unknown = await response.json().catch(() => null);
+  return { ok: response.ok, json: Option.getOrNull(decodeTokenResponse(responseBody)) };
 }
 
 /** Validates issuer, audience, time, email, and nonce claims. */

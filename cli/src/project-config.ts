@@ -13,8 +13,9 @@ import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { isRecord, parseJson } from "../../shared/src/util/json";
-import { nonEmpty } from "../../shared/src/util/strings";
+import * as Either from "effect/Either";
+import * as Predicate from "effect/Predicate";
+import { isSafeProjectIdentifier } from "../../shared/src/site/identifiers";
 import { resolveProjectByPath, type ResolvedProjectRef } from "./api";
 import { normalizeServerUrl } from "./auth";
 import { CliError } from "./errors";
@@ -60,7 +61,7 @@ export function readProjectConfig(
       const path = paths.join(current, PROJECT_CONFIG_FILE);
       if (yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false)))) {
         const text = yield* fs.readFileString(path).pipe(Effect.catchAll(() => Effect.succeed("")));
-        const parsed = parseJson(text);
+        const parsed = Either.getOrNull(Schema.decodeUnknownEither(Schema.parseJson())(text));
         yield* rejectLegacyConfig(parsed, path);
         const config = decodeProjectConfig(parsed);
         return config == null ? null : { directory: current, config };
@@ -74,7 +75,7 @@ export function readProjectConfig(
 
 /** Fails with an explicit error when a config still carries workspace-era fields. */
 function rejectLegacyConfig(value: unknown, path: string): Effect.Effect<void, CliError> {
-  if (!isRecord(value)) return Effect.void;
+  if (!Predicate.isRecord(value)) return Effect.void;
   const legacy = ["workspace", "routePath"].filter((key) => key in value);
   if (legacy.length === 0) return Effect.void;
   return Effect.fail(new CliError({
@@ -103,7 +104,7 @@ export function resolveServer(
   command: string,
 ): Effect.Effect<string, CliError> {
   return Effect.gen(function* () {
-    const server = nonEmpty(explicit) ?? nonEmpty(config?.server);
+    const server = explicit || config?.server || undefined;
     if (server == null) {
       return yield* Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: server is required` }));
     }
@@ -145,13 +146,13 @@ export function resolveProjectRef(input: {
     const projectUrl = parseProjectUrl(input.pathOrUrl);
     if (projectUrl != null) {
       const server = yield* Effect.try({
-        try: () => normalizeServerUrl(nonEmpty(input.server) ?? projectUrl.server),
+        try: () => normalizeServerUrl(input.server || projectUrl.server),
         catch: () => new CliError({ code: 1, message: `scratchwork ${input.command}: invalid server` }),
       });
-      const project = nonEmpty(input.project);
-      if (project != null) return { server, project };
+      const project = input.project;
+      if (project) return yield* safeProjectRef(input.command, { server, project });
       const resolved = yield* resolveProjectByPath(server, projectUrl.pathname, input.command);
-      return { server, project: resolved.project };
+      return yield* safeProjectRef(input.command, { server, project: resolved.project });
     }
 
     const paths = yield* Path.Path;
@@ -160,15 +161,24 @@ export function resolveProjectRef(input: {
     const lookup = yield* readProjectConfig(statPath);
     const config = lookup?.config ?? null;
     const server = yield* resolveServer(input.server, config, input.command);
-    const project = nonEmpty(input.project) ?? nonEmpty(config?.project);
+    const project = input.project || config?.project || undefined;
     if (project == null) {
       return yield* Effect.fail(new CliError({
         code: 1,
         message: `scratchwork ${input.command}: project is required`,
       }));
     }
-    return { server, project };
+    return yield* safeProjectRef(input.command, { server, project });
   });
+}
+
+/** Rejects a project name (from flags, a config file, or the server) that the
+ * contract's project-identifier grammar would refuse, so commands fail with a
+ * clear message instead of a request-encoding error. */
+function safeProjectRef(command: string, ref: ResolvedProjectRef): Effect.Effect<ResolvedProjectRef, CliError> {
+  return isSafeProjectIdentifier(ref.project)
+    ? Effect.succeed(ref)
+    : Effect.fail(new CliError({ code: 1, message: `scratchwork ${command}: unsafe project name ${ref.project}` }));
 }
 
 /** Maps a path argument to the directory whose config should be consulted. */

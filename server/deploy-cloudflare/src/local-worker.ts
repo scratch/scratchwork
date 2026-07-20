@@ -3,7 +3,7 @@
  * adds at the edge, then delegates to the production Worker. Wrangler supplies local R2
  * and D1 bindings; this wrapper supplies the one edge feature Miniflare cannot emulate.
  */
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
 import worker from "./worker";
 
@@ -80,7 +80,7 @@ export async function issueLocalAccessAssertion(env: LocalAccessEnv, now = epoch
     key,
     toArrayBuffer(new TextEncoder().encode(signed)),
   );
-  return `${signed}.${bytesToBase64Url(new Uint8Array(signature))}`;
+  return `${signed}.${Encoding.encodeBase64Url(new Uint8Array(signature))}`;
 }
 
 /** Imports and caches the generated private key for the life of the local isolate. */
@@ -107,7 +107,7 @@ function normalizedTeamDomain(value: string): string {
 }
 
 function encodeJson(value: unknown): string {
-  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+  return Encoding.encodeBase64Url(new TextEncoder().encode(JSON.stringify(value)));
 }
 
 function epochSeconds(): number {

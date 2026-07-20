@@ -1,4 +1,4 @@
-import { bytesToBase64Url } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
 
 /** Slug alphabet without ambiguous characters (no 0/1/i/l/o), safe to read aloud or retype. */
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -12,7 +12,7 @@ export function randomSlug(): string {
 
 /** Generates a random revision identifier for immutable site revisions. */
 export function randomRevisionId(): string {
-  return bytesToBase64Url(randomBytes(REVISION_BYTES));
+  return Encoding.encodeBase64Url(randomBytes(REVISION_BYTES));
 }
 
 /** Compares two strings in constant time per character; unequal lengths return false immediately. */

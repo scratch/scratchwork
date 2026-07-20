@@ -9,11 +9,11 @@ import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
+import * as Schema from "effect/Schema";
 import { homedir } from "node:os";
-import { bytesToBase64Url } from "../../shared/src/encoding/base64";
-import { nonEmpty } from "../../shared/src/util/strings";
+import { sha256Base64Url } from "../../shared/src/crypto/digest";
 import { isLoopbackHost } from "../../shared/src/util/url";
-import { isRecord, parseJson } from "../../shared/src/util/json";
 import { CliError, errorMessage } from "./errors";
 
 const AUTH_FILE = "auth.json";
@@ -22,18 +22,29 @@ const DEFAULT_APP_SUBDOMAIN = "app";
 /** One stored login: the bearer token for a server plus who/when it was issued.
  * `cfToken` is the Cloudflare Access JWT relayed by a cloudflare-access server at
  * login; the CLI presents it on API requests so they pass Cloudflare's edge. */
-export interface AuthRecord {
-  readonly token: string;
-  readonly email?: string;
-  readonly cfToken?: string;
-  readonly updatedAt: string;
-}
+const AuthRecordSchema = Schema.Struct({
+  token: Schema.String,
+  email: Schema.optionalWith(Schema.String, { nullable: true }),
+  cfToken: Schema.optionalWith(Schema.String, { nullable: true }),
+  updatedAt: Schema.String,
+});
 
-/** On-disk shape of auth.json: tokens keyed by normalized server origin. */
-interface AuthFile {
-  readonly version: 1;
-  readonly servers: Record<string, AuthRecord>;
-}
+/** One decoded stored login. */
+export type AuthRecord = typeof AuthRecordSchema.Type;
+
+/** On-disk shape of auth.json: tokens keyed by normalized server origin. The file
+ * is user-editable, so unknown fields are tolerated on read — but the decode drops
+ * them, so the next write rewrites the file with only the fields declared here. */
+const AuthFileSchema = Schema.Struct({
+  version: Schema.Literal(1),
+  servers: Schema.Record({ key: Schema.String, value: AuthRecordSchema }),
+});
+
+/** The decoded auth.json contents. */
+type AuthFile = typeof AuthFileSchema.Type;
+
+/** Decodes the raw auth.json text, tolerating unknown fields. */
+const decodeAuthFile = Schema.decodeUnknownEither(Schema.parseJson(AuthFileSchema));
 
 /** The transaction material a login generates before opening the browser: the
  * PKCE verifier (kept local), its S256 challenge (sent to the server), and the
@@ -153,14 +164,14 @@ export function loginUrl(server: string, callbackUrl: string, proof: LoginProof)
 
 /** Generates the per-login PKCE verifier/challenge pair and callback state. */
 export function generateLoginProof(): Effect.Effect<LoginProof, CliError> {
-  return Effect.tryPromise({
-    try: async () => {
-      const state = randomUrlSafe(16);
-      const codeVerifier = randomUrlSafe(32);
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
-      return { state, codeVerifier, codeChallenge: bytesToBase64Url(new Uint8Array(digest)) };
-    },
-    catch: (cause) => new CliError({ code: 1, message: `scratchwork login: ${errorMessage(cause)}` }),
+  return Effect.gen(function* () {
+    const state = yield* Effect.sync(() => randomUrlSafe(16));
+    const codeVerifier = yield* Effect.sync(() => randomUrlSafe(32));
+    const codeChallenge = yield* Effect.tryPromise({
+      try: () => sha256Base64Url(codeVerifier),
+      catch: (cause) => new CliError({ code: 1, message: `scratchwork login: ${errorMessage(cause)}` }),
+    });
+    return { state, codeVerifier, codeChallenge };
   });
 }
 
@@ -168,10 +179,10 @@ export function generateLoginProof(): Effect.Effect<LoginProof, CliError> {
  * a competing local process, a stray request, a mismatched transaction — is null. */
 export function decodeLoginCallback(url: URL, expectedState: string): LoginCallback | null {
   if (url.searchParams.get("state") !== expectedState) return null;
-  const error = nonEmpty(url.searchParams.get("error") ?? undefined);
-  if (error != null) return { error: sanitizeLoginError(error) };
-  const code = nonEmpty(url.searchParams.get("code") ?? undefined);
-  return code == null ? null : { code };
+  const error = url.searchParams.get("error");
+  if (error) return { error: sanitizeLoginError(error) };
+  const code = url.searchParams.get("code");
+  return code ? { code } : null;
 }
 
 /** Keeps a hostile server from injecting terminal controls through the browser
@@ -184,7 +195,7 @@ function sanitizeLoginError(error: string): string {
 function randomUrlSafe(bytes: number): string {
   const buffer = new Uint8Array(bytes);
   crypto.getRandomValues(buffer);
-  return bytesToBase64Url(buffer);
+  return Encoding.encodeBase64Url(buffer);
 }
 
 /**
@@ -205,14 +216,12 @@ function readAuthFile(): Effect.Effect<AuthFile, CliError, FileSystem.FileSystem
         new CliError({ code: 1, message: `scratchwork: auth file ${path} is unreadable (${errorMessage(error)}); fix or remove it` }),
       ),
     );
-    if (text == null) return { version: 1, servers: {} };
-    const parsed = parseJson(text);
-    if (!isAuthFile(parsed)) {
-      return yield* Effect.fail(
+    if (text == null) return { version: 1, servers: {} } as const;
+    return yield* decodeAuthFile(text).pipe(
+      Effect.mapError(() =>
         new CliError({ code: 1, message: `scratchwork: auth file ${path} is corrupt; fix or remove it` }),
-      );
-    }
-    return parsed;
+      ),
+    );
   });
 }
 
@@ -248,17 +257,6 @@ function candidateServers(server: string): ReadonlyArray<string> {
     /* not a URL; look up the literal key only */
   }
   return [...new Set(candidates)];
-}
-
-/** Validates the parsed shape of auth.json. */
-function isAuthFile(value: unknown): value is AuthFile {
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.servers)) return false;
-  for (const record of Object.values(value.servers)) {
-    if (!isRecord(record) || typeof record.token !== "string" || typeof record.updatedAt !== "string") return false;
-    if (record.email != null && typeof record.email !== "string") return false;
-    if (record.cfToken != null && typeof record.cfToken !== "string") return false;
-  }
-  return true;
 }
 
 /** Checks whether a server string already carries an explicit URL scheme. */

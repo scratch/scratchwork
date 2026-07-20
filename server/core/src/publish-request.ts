@@ -1,11 +1,12 @@
-import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
+/*
+ * Cross-field validation and normalization for POST /api/publish. The wire
+ * shape is the shared PublishRequestBodySchema (decoded strictly by the
+ * dispatcher in api-routes.ts); this module applies the server's size policy
+ * and normalizes the open path.
+ */
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as ParseResult from "effect/ParseResult";
-import * as Schema from "effect/Schema";
 import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
-import { PublishRequestBodySchema, type PublishRequestBody } from "../../../shared/src/publish/api";
-import { parseJson } from "../../../shared/src/util/json";
+import { type PublishRequestBody } from "../../../shared/src/publish/api";
 import { HttpError } from "./http";
 
 /** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
@@ -26,47 +27,8 @@ export interface PublishRequest extends Omit<PublishRequestBody, "openPath"> {
   readonly totalBytes: number;
 }
 
-/** Reads, size-limits, parses, and validates a publish request body. */
-export function readPublishRequest(
-  request: HttpServerRequest.HttpServerRequest,
-): Effect.Effect<PublishRequest, HttpError> {
-  return Effect.gen(function* () {
-    const text = yield* request.text.pipe(
-      HttpServerRequest.withMaxBodySize(Option.some(MAX_PUBLISH_BODY_BYTES)),
-      Effect.mapError((cause) =>
-        new HttpError({ status: 413, message: "Publish body is too large", cause }),
-      ),
-    );
-    if (new TextEncoder().encode(text).byteLength > MAX_PUBLISH_BODY_BYTES) {
-      return yield* Effect.fail(new HttpError({ status: 413, message: "Publish body is too large" }));
-    }
-    const parsed = parseJson(text);
-    if (parsed == null) {
-      return yield* Effect.fail(new HttpError({ status: 400, message: "Invalid JSON body" }));
-    }
-    return yield* decodePublishRequest(parsed);
-  });
-}
-
-/** Decodes an unknown JSON value into a normalized publish request. Decoding is
- * deliberately strict — every problem is reported and unknown fields are errors —
- * so protocol drift surfaces as a clear 400 instead of being silently dropped. */
-export function decodePublishRequest(value: unknown): Effect.Effect<PublishRequest, HttpError> {
-  return Effect.gen(function* () {
-    const raw = yield* Schema.decodeUnknown(PublishRequestBodySchema)(value, {
-      errors: "all",
-      onExcessProperty: "error",
-    }).pipe(
-      Effect.mapError((error) =>
-        new HttpError({ status: 400, message: ParseResult.TreeFormatter.formatErrorSync(error) }),
-      ),
-    );
-    return yield* normalizePublishRequest(raw);
-  });
-}
-
 /** Applies cross-field publish validation and computes decoded bundle size. */
-function normalizePublishRequest(raw: PublishRequestBody): Effect.Effect<PublishRequest, HttpError> {
+export function normalizePublishRequest(raw: PublishRequestBody): Effect.Effect<PublishRequest, HttpError> {
   return Effect.gen(function* () {
     if (raw.bundle.files.length === 0) {
       return yield* Effect.fail(new HttpError({ status: 400, message: "Publish bundle must contain files" }));
@@ -75,13 +37,10 @@ function normalizePublishRequest(raw: PublishRequestBody): Effect.Effect<Publish
       return yield* Effect.fail(new HttpError({ status: 413, message: "Publish bundle has too many files" }));
     }
 
-    const seen = new Set<string>();
+    // Path uniqueness and base64 validity are already guaranteed by the shared
+    // bundle schema; the size math still needs each file's decoded byte length.
     let totalBytes = 0;
     for (const file of raw.bundle.files) {
-      if (seen.has(file.path)) {
-        return yield* Effect.fail(new HttpError({ status: 400, message: `Duplicate file path: ${file.path}` }));
-      }
-      seen.add(file.path);
       const bytes = decodedBase64ByteLength(file.contentBase64);
       if (bytes == null) {
         return yield* Effect.fail(new HttpError({ status: 400, message: `Invalid base64 content: ${file.path}` }));

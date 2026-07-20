@@ -4,8 +4,7 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
-import { bytesToHex } from "../../../shared/src/encoding/hex";
+import { sha256Hex as sha256HexDigest } from "../../../shared/src/crypto/digest";
 import { isWithinRoot } from "../../../shared/src/util/fs";
 
 /** Raised when a storage backend cannot complete a read or write. */
@@ -72,6 +71,11 @@ export function LocalObjectStorageLive(
       const fs = yield* FileSystem.FileSystem;
       const paths = yield* Path.Path;
       const root = paths.resolve(process.cwd(), directory);
+      // Conditional writes read the current object before deciding; without
+      // mutual exclusion two concurrent ifNoneMatch creates both pass the
+      // check and both win. One lock keeps the read-check-write atomic —
+      // the local target is a single low-throughput process.
+      const writeLock = yield* Effect.makeSemaphore(1);
 
       /** Resolves one object key to an absolute path under the storage root. */
       const resolveKey = (key: string): Effect.Effect<string, StorageError> =>
@@ -125,7 +129,7 @@ export function LocalObjectStorageLive(
       const putObject: ObjectStorageShape["putObject"] = (key, value, options) =>
         resolveKey(key).pipe(
           Effect.flatMap((path) =>
-            Effect.gen(function* () {
+            writeLock.withPermits(1)(Effect.gen(function* () {
               const existing = yield* readExisting(path);
               if (options?.ifNoneMatch === "*" && existing != null) {
                 return yield* Effect.fail(
@@ -149,7 +153,7 @@ export function LocalObjectStorageLive(
               yield* fs.makeDirectory(paths.dirname(path), { recursive: true });
               yield* fs.writeFile(path, value);
               return { etag: yield* sha256Hex(value) };
-            }).pipe(
+            })).pipe(
               Effect.catchTags({
                 SystemError: (error) =>
                   Effect.fail(new StorageError({ message: `Could not write object: ${key}`, cause: error })),
@@ -191,7 +195,7 @@ export function safeObjectKey(key: string): boolean {
 /** Computes a SHA-256 digest as lowercase hex, used for ETags and content addressing. */
 export function sha256Hex(bytes: Uint8Array): Effect.Effect<string, StorageError> {
   return Effect.tryPromise({
-    try: async () => bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes)))),
+    try: () => sha256HexDigest(bytes),
     catch: (cause) => new StorageError({ message: "Could not hash bytes", cause }),
   });
 }

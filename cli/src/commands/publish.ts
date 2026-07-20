@@ -10,20 +10,17 @@ import type * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import { bytesToBase64, decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
+import * as Encoding from "effect/Encoding";
+import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
 import {
-  PublishResponseSchema,
   type PublishRequestBody,
   type PublishResponse,
 } from "../../../shared/src/publish/api";
 import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
 import { isSafeProjectIdentifier, slugifyIdentifier } from "../../../shared/src/site/identifiers";
 import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
-import { nonEmpty } from "../../../shared/src/util/strings";
-import { apiErrorText, apiRequest } from "../api";
-import { readAuthToken, serverApiUrl } from "../auth";
+import { apiClient, mapApiErrors } from "../api";
+import { readAuthToken } from "../auth";
 import { openBrowser } from "../browser";
 import { resolveDevTarget, SKIPPED_DIRECTORIES } from "../dev/target";
 import { CliError, errorMessage } from "../errors";
@@ -115,7 +112,7 @@ function createBundle(
       fs.readFile(paths.join(root, ...sitePath.split("/"))).pipe(
         Effect.map((bytes) => ({
           path: sitePath,
-          contentBase64: bytesToBase64(bytes),
+          contentBase64: Encoding.encodeBase64(bytes),
         })),
       ),
     );
@@ -178,32 +175,19 @@ function postPublish(
   authToken: string | undefined,
 ): Effect.Effect<PublishResponse, CliError, FileSystem.FileSystem | HttpClient.HttpClient | Path.Path> {
   return Effect.gen(function* () {
-    const response = yield* apiRequest("scratchwork publish", serverApiUrl(server, "/api/publish"), {
-      method: "POST",
-      token: authToken,
-      body,
-    });
-    if (response.status === 401) {
-      return yield* Effect.fail(
-        new PublishAuthRequired({
-          code: 1,
-          message: `scratchwork publish: authentication required. Run \`scratchwork login ${server}\`.`,
-        }),
-      );
-    }
-    if (!response.ok) {
-      return yield* Effect.fail(
-        new CliError({ code: 1, message: `scratchwork publish: ${apiErrorText(response)}` }),
-      );
-    }
-    // Tolerant decoding on purpose: unknown fields from a newer server are ignored.
-    const parsed = Schema.decodeUnknownOption(PublishResponseSchema)(response.json);
-    if (Option.isNone(parsed)) {
-      return yield* Effect.fail(
-        new CliError({ code: 1, message: "scratchwork publish: invalid server response" }),
-      );
-    }
-    return parsed.value;
+    const client = yield* apiClient(server, { token: authToken });
+    return yield* client.publish({ payload: body }).pipe(
+      Effect.catchIf(
+        (error) => error._tag === "ApiError" && error.status === 401,
+        () => Effect.fail(
+          new PublishAuthRequired({
+            code: 1,
+            message: `scratchwork publish: authentication required. Run \`scratchwork login ${server}\`.`,
+          }),
+        ),
+      ),
+      mapApiErrors("scratchwork publish"),
+    );
   });
 }
 
@@ -279,8 +263,8 @@ function resolveProjectName(
   target: { readonly root: string; readonly file?: string },
 ): Effect.Effect<string | undefined, CliError, Path.Path> {
   return Effect.gen(function* () {
-    const explicit = nonEmpty(config.project) ?? nonEmpty(projectConfig?.project);
-    if (explicit != null) {
+    const explicit = config.project || projectConfig?.project;
+    if (explicit) {
       if (!isSafeProjectIdentifier(explicit)) {
         return yield* Effect.fail(new CliError({
           code: 1,
@@ -291,7 +275,7 @@ function resolveProjectName(
     }
 
     const derived = target.file != null ? fileStem(target.file) : yield* basename(target.root);
-    return nonEmpty(slugifyIdentifier(derived, ""));
+    return slugifyIdentifier(derived, "") || undefined;
   });
 }
 

@@ -7,10 +7,11 @@
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Either from "effect/Either";
+import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
-import { base64ToBytes, bytesToBase64 } from "../../../shared/src/encoding/base64";
 import type { PublishResponse } from "../../../shared/src/publish/api";
 import { contentType } from "../../../shared/src/site/content";
 import {
@@ -487,7 +488,7 @@ function projectBundle(
         Effect.flatMap((object) =>
           object == null
             ? Effect.fail(new SiteStoreError({ status: 500, message: `Missing published object: ${file.path}` }))
-            : Effect.succeed({ path: file.path, contentBase64: bytesToBase64(object.body) }),
+            : Effect.succeed({ path: file.path, contentBase64: Encoding.encodeBase64(object.body) }),
         ),
       ),
     );
@@ -505,10 +506,9 @@ function buildRevision(
   return Effect.gen(function* () {
     const files: Array<SiteFileObject> = [];
     for (const file of request.bundle.files) {
-      const bytes = base64ToBytes(file.contentBase64);
-      if (bytes == null) {
-        return yield* Effect.fail(new SiteStoreError({ status: 400, message: `Invalid base64 content: ${file.path}` }));
-      }
+      const bytes = yield* Encoding.decodeBase64(file.contentBase64).pipe(
+        Either.mapLeft(() => new SiteStoreError({ status: 400, message: `Invalid base64 content: ${file.path}` })),
+      );
       const hash = yield* sha256Hex(bytes);
       const objectKey = blobObjectKey(hash);
       yield* storage.putObject(objectKey, bytes, {

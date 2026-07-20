@@ -77,18 +77,18 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 The invariant starts out violated by existing code, not just guarding new code: much of `shared/src` is hand-rolled utility with a direct Effect stdlib equivalent. Pre-launch churn is accepted here: the goal is to delegate effects, errors, validation, encoding, resource lifetime, concurrency, and test services to Effect wherever it has a maintained equivalent, reducing repository-owned semantics and maximizing the guarantees available to callers.
 
-`[ ]` Migrate `shared/src` to Effect-native and update call sites in cli and server as each util is replaced:
+`[x]` Migrate `shared/src` to Effect-native and update call sites in cli and server as each util is replaced:
 
-- `util/json.ts` (`isRecord`, `parseJson`) → `Schema` decoding
-- `encoding/{base64,hex,bytes}.ts` → `effect/Encoding`
-- `util/strings.ts`, `util/errors.ts` → Effect stdlib / `Data.TaggedError` where they're error-shaped
-- `site/*` contract and serving helpers → Effect types at the exported surface
+- `util/json.ts` (`isRecord`, `parseJson`) → `Schema` decoding *(deleted; call sites use `Schema.parseJson(...)` decoding and `Predicate.isRecord`)*
+- `encoding/{base64,hex,bytes}.ts` → `effect/Encoding` *(hand-rolled codecs deleted; `base64.ts` retains only `decodedBase64ByteLength` — size-without-decode has no Effect equivalent — with a conformance test pinning agreement with `Encoding.decodeBase64`; `bytes.ts`'s `toArrayBuffer` retained with documented rationale, Encoding covers codecs not BufferSource conversion)*
+- `util/strings.ts`, `util/errors.ts` → Effect stdlib / `Data.TaggedError` where they're error-shaped *(`strings.ts` deleted — `nonEmpty` collapsed into plain `||` fallbacks; `errors.ts` retained with documented rationale: no Effect stdlib equivalent for unknown-thrown-value → message)*
+- `site/*` contract and serving helpers → Effect types at the exported surface *(routing/serve/html/renderer/files were already Effect; `publish/bundle.ts` is now the single Schema definition of the bundle wire format — `decodePublishBundle` deleted, path uniqueness enforced in the schema; remaining `site/*` helpers are pure total functions, which is the Effect-idiomatic shape for them)*
 
-`[ ]` Sweep cli and server for remaining hand-rolled equivalents once shared is clean. Before replacing a helper, preserve its intended behavior with characterization/adversarial tests; after migration, delete the old implementation rather than retaining parallel paths.
+`[x]` Sweep cli and server for remaining hand-rolled equivalents once shared is clean. Before replacing a helper, preserve its intended behavior with characterization/adversarial tests; after migration, delete the old implementation rather than retaining parallel paths. *(auth.json validation → Schema in `cli/src/auth.ts`; JWKS env parsing → Schema in `server/core/src/config.ts`; API error-body sniffing → Schema in `cli/src/api.ts`; `db.ts` JSON codecs already Effect-native with domain validation and stay.)*
 
-`[ ]` Extract the async Web Crypto helpers (`hmac` in `auth.ts`, and any similar inline `crypto.subtle` use) into a small dedicated boundary module so `auth.ts` itself stays subject to the Effect-boundary lint. The allowlist stays file-level; boundary files stay tiny.
+`[x]` Extract the async Web Crypto helpers (`hmac` in `auth.ts`, and any similar inline `crypto.subtle` use) into a small dedicated boundary module so `auth.ts` itself stays subject to the Effect-boundary lint. The allowlist stays file-level; boundary files stay tiny. *(Boundary set is now six small documented files: `server/core/src/auth-crypto.ts` (HMAC + AES-GCM), `shared/src/crypto/digest.ts` (SHA-256 for PKCE/content hashing, shared by cli and server), `cli/src/commands/login-callback-server.ts` (Bun.serve loopback), plus the pre-existing `jwt-rs256.ts`/`google-jwt.ts`/`cloudflare-jwt.ts` provider boundary — the Google token-endpoint POST moved from `auth.ts` into `google-jwt.ts`. `auth.ts` and `login.ts` contain no async/await/Promise.)*
 
-`[ ]` Bring existing signed payloads into invariant 3 compliance: add a discriminating `kind` to session and OAuth-state payloads, add the CLI authorization-code payload, version the format change deliberately, and verify every kind only through the shared signed-value codec.
+`[x]` Bring existing signed payloads into invariant 3 compliance: add a discriminating `kind` to session and OAuth-state payloads, add the CLI authorization-code payload, version the format change deliberately, and verify every kind only through the shared signed-value codec. *(Landed with Phase 3: all four payload schemas carry `version` + `kind` literals and every kind signs/verifies only through `signValue`/`verifySignedValue`; the exhaustive adversarial corpus remains Phase 5.)*
 
 - Exempt: `shared/src/site/default-renderer.generated.js` (build artifact written by `renderer/build.js`, not source).
 
@@ -96,91 +96,49 @@ The invariant starts out violated by existing code, not just guarding new code: 
 
 Six invariants (registry below). They live **directly in root `AGENTS.md`** — the one file Claude (via `CLAUDE.md` symlink), Codex, and OpenCode all read natively — rather than behind a pointer agents might skip. Once moved, AGENTS.md is the sole normative prose copy and this plan links to it rather than retaining a second editable copy; anything a script can check graduates into `bun run ci` (agents drift; CI doesn't).
 
-`[ ]` Root `AGENTS.md` (with `CLAUDE.md` symlinked to it): workspace map, `bun run ci`, the six invariants stated in full, and the standing rule "verify every diff against the invariants before committing."
+`[x]` Root `AGENTS.md` (with `CLAUDE.md` symlinked to it): workspace map, `bun run ci`, the six invariants stated in full, and the standing rule "verify every diff against the invariants before committing."
 
-`[ ]` Mechanize invariants 1 and 2's checkable cores in `bun run ci`: the Effect-boundary lint test (no async/await/Promise outside an exact, reviewed initial allowlist) and the import-boundary test (cli ⇄ server only via shared). The remaining invariants' checks are described below and in their registry entries.
+`[x]` Mechanize invariants 1 and 2's checkable cores in `bun run ci`: the Effect-boundary lint test (no async/await/Promise outside an exact, reviewed initial allowlist) and the import-boundary test (cli ⇄ server only via shared). *(Landed as `scripts/check-boundaries.ts`, first step of the root ci gate: Effect-boundary lint with a 14-file rationale-carrying allowlist, import-boundary check including shared/renderer layering, and the explicit CLI route inventory checked against shared schema exports; the `{error}` envelope moved into `shared/src/publish/api.ts` as `ApiErrorBodySchema`.)*
 
-`[ ]` Component-scan conformance test in `bun run ci`: import both `collectComponentNames` implementations (`renderer/src/components.js` and `shared/src/site/components.ts`), run them over a shared table of adversarial markdown samples (nested backtick runs, tags in comments, fences), assert identical output. Guards the one sanctioned duplication (see invariant 2).
+`[x]` Component-scan conformance test in `bun run ci`: import both `collectComponentNames` implementations (`renderer/src/components.js` and `shared/src/site/components.ts`), run them over a shared table of adversarial markdown samples (nested backtick runs, tags in comments, fences), assert identical output. Guards the one sanctioned duplication (see invariant 2). *(Landed as `shared/test/component-scan-conformance.test.ts`: a 23-sample adversarial table plus an every-prefix stress sweep.)*
 
-`[ ]` Adversarial token corpus test in `bun run ci`, split by property:
+`[x]` Adversarial token corpus test in `bun run ci`, split by property *(landed as `server/core/test/token-corpus.test.ts` — all four kinds through their production verification paths; hardened `verifySignedValue` along the way: exact two-segment parse, canonical-base64url re-encode check, strict excess-property decode, finite timestamps, future-issuance rejection, 16KB length cap)*:
 
 - Integrity: for each token kind (session, OAuth state, CLI authorization code, project-access handoff/cookie), a valid token rejects every single-byte bit-flip of encoded payload and signature.
 - Typed meaning: correctly sign malformed payloads and reject missing/extra/wrong-type fields, wrong `kind`/`version`/provider/use/project/scope/audience/nonce, extreme and boundary timestamps, future issuance, and every cross-kind pairing.
 - Parser hardening: reject truncation, empty/extra/swapped segments, duplicate delimiters, prefix/suffix garbage, non-canonical base64url, and oversized inputs.
 - Lifecycle: reject expiry and disallowed replay; explicitly document which short-lived stateless tokens remain replayable within their lifetime.
 
-`[ ]` Session-secret length floor: retain the existing config failure below 32 bytes and add the missing regression test in `bun run ci` (length is checkable; entropy is not).
+`[x]` Session-secret length floor: retain the existing config failure below 32 bytes and add the missing regression test in `bun run ci` (length is checkable; entropy is not). *(In `server/core/test/auth.test.ts`: 31/32-byte boundary, multibyte bytes-not-chars, both auth modes.)*
 
-`[ ]` Server-owned route-policy registry: define API routes once in production code (prefer `server/core/src/api-routes.ts`, or the server implementation layer when `HttpApi` lands), with handler, method/path, authentication mode, minimum project role, mutation/origin policy, and response-visibility policy attached to each entry. The router dispatches from this registry; the test matrix is generated from the same definitions rather than maintained as a second list. CI fails if an API route has no policy and exercises credential kind × role × endpoint × public/private status, denying every unspecified combination.
+`[x]` Server-owned route-policy registry: define API routes once in production code (prefer `server/core/src/api-routes.ts`, or the server implementation layer when `HttpApi` lands), with handler, method/path, authentication mode, minimum project role, mutation/origin policy, and response-visibility policy attached to each entry. The router dispatches from this registry; the test matrix is generated from the same definitions rather than maintained as a second list. CI fails if an API route has no policy and exercises credential kind × role × endpoint × public/private status, denying every unspecified combination. *(Landed: `api-routes.ts` registry + policy middleware (origin → principal → read-gated project capability), `test/api-policy.test.ts` matrix over 7 credential kinds × public/private. Tightenings that fell out: every JSON route now rejects cross-origin browser calls (previously only some mutations), sub-read callers get the existence mask on all project routes including delete, and delete of a missing project is now 404 rather than silently ok.)*
 
-`[ ]` Cookie/origin browser-security suite: use real app/content/homepage hostnames in a headless browser to prove secure-cookie-name selection, host/path scoping, SameSite behavior, cross-origin mutation rejection, safe redirects, private subresource isolation, and that arbitrary published JavaScript cannot plant or override an app session. This is narrowly scoped browser security coverage; browser rendering fidelity remains a non-goal.
+`[x]` Cookie/origin browser-security suite: use real app/content/homepage hostnames in a headless browser to prove secure-cookie-name selection, host/path scoping, SameSite behavior, cross-origin mutation rejection, safe redirects, private subresource isolation, and that arbitrary published JavaScript cannot plant or override an app session. This is narrowly scoped browser security coverage; browser rendering fidelity remains a non-goal. *(Landed as `e2e/test/browser-security.test.ts`: real headless Chromium (system Chrome, else auto-installed) against local-dev with localhost / pages.localhost / home.localhost origins — host-only session scoping verified on the wire, path-scoped handoff cookies, JS cookie-planting defeated by the *.localhost public-suffix rule and signature verification, Referer-gated private subresources, form-POST Origin rejection, sanitized returnTo redirects, and homepage-origin isolation. Secure-name (__Host-) selection over HTTPS remains covered at the unit level — the loopback lanes are deliberately plain HTTP.)*
 
-`[ ]` Reusable backend conformance suites for `PrimitiveDb` and `ObjectStorage`, run unchanged against in-memory/file, D1/R2, and DynamoDB/S3 implementations. Cover conditional create/update conflicts, version/ETag behavior, pagination/cursor boundaries, missing records, concurrent writers, binary round trips, key validation, and identical error mapping.
+`[x]` Reusable backend conformance suites for `PrimitiveDb` and `ObjectStorage`, run unchanged against in-memory/file, D1/R2, and DynamoDB/S3 implementations. Cover conditional create/update conflicts, version/ETag behavior, pagination/cursor boundaries, missing records, concurrent writers, binary round trips, key validation, and identical error mapping. *(Landed as `server/core/test/conformance/{primitive-db,object-storage}.ts`, run from server/core (memory), server/deploy-local (file), and e2e (miniflare D1/R2, LocalStack DynamoDB/S3). Real bugs caught on first run: DynamoDB `list` without a prefix always threw ValidationException (unused `#key` expression name), and the local-file + memory storage backends had a TOCTOU letting every concurrent conditional create win — fixed with a write semaphore and check/write reordering.)*
 
-`[ ]` A `check-invariants` skill (`.claude/skills/check-invariants/SKILL.md`) for the agent-pass residue: diff against main → report obeys/violates with file:line evidence. Claude-only convenience; Codex and OpenCode rely on the AGENTS.md standing rule + CI.
+`[x]` A `check-invariants` skill (`.claude/skills/check-invariants/SKILL.md`) for the agent-pass residue: diff against main → report obeys/violates with file:line evidence. Claude-only convenience; Codex and OpenCode rely on the AGENTS.md standing rule + CI.
 
-`[ ]` Stretch: migrate the shared CLI API contract to `@effect/platform` `HttpApi` (see invariant 2) — the structural fix that makes contract drift impossible. Auth callbacks, published-content routes, health checks, and other server-only endpoints remain server-owned.
+`[x]` Stretch: migrate the shared CLI API contract to `@effect/platform` `HttpApi` (see invariant 2) — the structural fix that makes contract drift impossible. Auth callbacks, published-content routes, and other browser-facing endpoints remain server-owned. *(Landed: `ScratchworkApi` in `shared/src/publish/api.ts` declares every JSON endpoint once; the CLI client is `HttpApiClient`-derived (`cli/src/api.ts`, transport concerns — bearer/CF-Access headers, edge-block detection, `{error}`-envelope extraction — in one transformed HttpClient), and the server registry joins the contract endpoints with a mapped-type policy record (`server/core/src/api-routes.ts`) that strictly decodes payloads through and encodes responses with the contract schemas. The bespoke dispatcher stays — `HttpApiBuilder`'s router semantics (400 on bad path params, 404 on method mismatch, its own error envelope) conflict with the masking/405/origin behavior the policy matrix pins. The `/api/me` response gained a shared `MeResponseSchema`; the share request schema moved to shared; check-boundaries §3 became the no-hand-built-URLs check.)*
 
 ### Phase 6 — Housekeeping
 
-`[ ]` Confirm `examples/` and `notes/` are exempt from the gate on purpose, and document the exemption in `AGENTS.md`.
+`[x]` Confirm `examples/` and `notes/` are exempt from the gate on purpose, and document the exemption in `AGENTS.md`.
 
 ## Invariants registry
 
-Six invariants, each enforced at three layers, strongest first: **structural** (the architecture makes violation impossible) → **mechanized** (a test in `bun run ci` fails) → **agent-pass** (judgment calls, per the standing rule in AGENTS.md).
+The six invariants now live in full in the root [`AGENTS.md`](../AGENTS.md) (with
+`CLAUDE.md` symlinked to it) — the sole normative copy. Each is enforced at up to three
+layers, strongest first: **structural** (the architecture makes violation impossible) →
+**mechanized** (a test in `bun run ci` fails) → **agent-pass** (judgment calls, per the
+standing rule in AGENTS.md). In brief:
 
-### 1. Effect-native everywhere
-
-All cli, server, and shared functionality is written against Effect: Effect types for errors and async, the Effect runtime, and the Effect standard library (Schema, platform, Encoding, stdlib data structures) instead of hand-rolled equivalents. The deliberate objective is maximal delegation: if Effect already owns a capability with equal or better semantics, use it rather than retaining a repository implementation. Pre-launch migration churn is accepted in exchange for fewer locally maintained semantics, stronger types at boundaries, service substitution in tests, controlled resource lifetime/concurrency, and a smaller custom surface after launch. Promise/async appears only at documented edges whose APIs inherently return Promises (Web Crypto/provider SDK/platform entrypoints); the initial allowlist names every such file and why it is a boundary.
-
-- Scope: `cli/src/**`, `server/**/src/**`, `shared/src/**`. (`renderer/` is the sole exception — deliberately plain browser JS.)
-- Mechanized: a ci test that fails on `async function` / `await` / `new Promise` / `.then(` in scope outside the exact reviewed allowlist of boundary files. New boundary = add its rationale to the allowlist in the same PR, which makes the exception reviewable; the baseline may shrink but not grow silently. The allowlist is file-level, so boundary files must stay tiny: extract async helpers into a dedicated module rather than allowlisting a large file (Phase 4 does this for `auth.ts`'s Web Crypto helpers).
-- Agent-pass: the parts a grep can't judge — Schema over hand-rolled validation, Effect stdlib over reimplemented utilities, services/layers over ambient dependencies, scoped resources over manual cleanup, error channels over thrown exceptions, and no parallel legacy implementation left behind after a migration.
-
-### 2. CLI↔server contracts live in `shared`
-
-Anything the CLI and server both use — types, schemas, helpers — is exposed from `shared/`, never duplicated. The CLI-consumed JSON API contract is defined once, as Effect Schemas in `shared/src/publish/api.ts` (already the case today; extend there, never inline). Auth callbacks, published-content routing, health checks, deployment hooks, and other server-only endpoints stay in server.
-
-- Structural (Phase 5 stretch): migrate the shared CLI API contract to `@effect/platform` `HttpApi`, so the server implements it and the CLI derives its client from the same object — duplication becomes impossible rather than forbidden.
-- Mechanized: boundary test in ci — `cli/**` never imports from `server/**` and vice versa; the only code importable by both is `shared/**`. Plus: every CLI-consumed JSON route's request/response schema is imported from shared, not defined locally. Maintain an explicit inventory of those routes so a newly added CLI call cannot escape the check.
-- Agent-pass: near-duplicate logic between cli and server that should be hoisted into shared (imports can't catch a reimplementation).
-- **Sanctioned exception:** `renderer/src/components.js` deliberately duplicates the component-scan logic in `shared/src/site/components.ts` — the renderer is plain browser JS and must not depend on shared, and the CLI dev diagnostics must predict what the renderer's loader will do. This is the *only* permitted duplication, and only because a ci conformance test (Phase 5) asserts the two implementations agree; don't "fix" it by hoisting, and don't cite it as precedent for new duplication.
-
-### 3. Auth goes through the chokepoints
-
-The auth code stays reviewable because its security-critical operations are singular. Every MAC/tag comparison goes through `timingSafeEqual` (`server/core/src/tokens.ts`); every HMAC token is minted by `signValue` and verified by `verifySignedValue` (`server/core/src/auth.ts`); every RS256 JWT is verified via `jwt-rs256.ts`. Every token payload, including session and OAuth state, carries a `version` and discriminating `kind` claim so cross-kind confusion fails Schema decoding. No new comparison, signing, verification, or credential-transport path is introduced outside the chokepoints.
-
-- Scope: `server/core/src/{auth,tokens,cookies,jwt-rs256,google-jwt,cloudflare-jwt,access}.ts`, `cli/src/{auth,api}.ts`, `cli/src/commands/login.ts`, and anything new that touches credentials.
-- Mechanized: the adversarial token corpus (Phase 5) and OAuth full-loop tests (Phase 3) — integrity, typed meaning, parser hardening, lifecycle, PKCE/callback binding, and secret-length checks.
-- Agent-pass: no `===` on cryptographic secrets/tags, no inline `crypto.subtle` signing/verifying outside the chokepoint modules, and every token kind gets `version` + `kind` claims and corpus coverage in the same PR.
-- **Accepted trade-off** (decided, don't "fix" without Pete): sessions are stateless HMAC — no single-token revocation (levers: allow-list removal, `SESSION_VERSION` bump). The old bearer-token-in-loopback-query flow is not accepted: replace it with the Phase 3 short-lived code + PKCE exchange before launch.
-
-### 4. API routes declare security policy and deny by default
-
-Every API route is registered once with its handler and explicit authentication mode, minimum project role, mutation/origin policy, and response-visibility policy. Dispatch and the authorization matrix derive from that production registry, so adding an unclassified route is impossible and the default for an unspecified credential/role combination is denial.
-
-- Scope: the server API router/registry, route handlers, and shared CLI API contract.
-- Structural: the router dispatches only registered route definitions; handlers receive the authenticated principal/authorized project capability produced by policy middleware rather than independently reconstructing it.
-- Mechanized: enumerate the registry and exercise credential kind × role × endpoint × public/private status; fail on missing policy metadata and deny every unspecified cell.
-- Agent-pass: sensitive response fields are gated by the declared visibility policy, and no handler bypasses the registry or performs a weaker inline substitute.
-
-### 5. Browser origins and credentials stay isolated
-
-The app, content, and homepage origins are separate security principals. HTTPS accepts only the intended secure-prefixed cookie names; cookies remain host/path scoped; published content cannot plant or override an app session; mutations reject untrusted origins; redirects remain on their intended origin/path; and production proxy/origin trust is explicit.
-
-- Scope: `server/core/src/{app,auth,cookies,http,config}.ts`, deployment proxy configuration, and published-content headers.
-- Structural: cookie readers require the resolved origin mode instead of accepting both secure and local names; production public origins/trusted proxies are explicit configuration.
-- Mechanized: the cross-host headless-browser security suite plus handler-level adversarial origin/redirect tests.
-- Agent-pass: any new cookie, redirect, forwarded header, CORS rule, or cross-origin flow receives an explicit threat-boundary review.
-
-### 6. Storage adapters have identical observable semantics
-
-Every `PrimitiveDb` and `ObjectStorage` implementation honors the same contract for conditional writes, versions/ETags, pagination, missing values, key validation, concurrency, binary data, and typed failures. A deploy target cannot weaken ownership or consistency guarantees through adapter drift.
-
-- Scope: in-memory/file implementations and D1/R2, DynamoDB/S3 deploy adapters.
-- Structural: all deploy implementations satisfy the same Effect service interfaces and use shared contract fixtures.
-- Mechanized: run the reusable adapter conformance suite unchanged against every implementation, using miniflare and LocalStack where required.
-- Agent-pass: provider-specific retries/eventual-consistency behavior is documented and mapped without changing the core contract.
+1. **Effect-native everywhere** — cli/server/shared code is written against Effect; async/Promise only in the reviewed boundary-file allowlist.
+2. **CLI↔server contracts live in `shared`** — never duplicated; the renderer component-scan is the one sanctioned, conformance-tested exception.
+3. **Auth goes through the chokepoints** — `timingSafeEqual`, `signValue`/`verifySignedValue`, `jwt-rs256.ts`; every payload carries `version` + `kind`.
+4. **API routes declare security policy and deny by default** — one registry with auth mode, role, origin, and visibility policy per route.
+5. **Browser origins and credentials stay isolated** — app/content/homepage are separate principals; cookies, redirects, and origin trust are explicit.
+6. **Storage adapters have identical observable semantics** — one conformance suite across in-memory/file, D1/R2, DynamoDB/S3.
 
 ## Non-goals (for this branch)
 

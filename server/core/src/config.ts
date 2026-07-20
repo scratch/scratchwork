@@ -2,7 +2,7 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { nonEmpty } from "../../../shared/src/util/strings";
+import * as Schema from "effect/Schema";
 import { isLoopbackHost } from "../../../shared/src/util/url";
 import { isReservedSlug, isSafeProjectIdentifier, normalizeAccessGroup, safeDomain, type AccessGroup } from "./access";
 
@@ -106,11 +106,11 @@ export function readServerConfig(
     }
 
     const appUrl = yield* readPublicUrl(
-      nonEmpty(env.SCRATCHWORK_APP_URL) ?? urlFromDomain(env.SCRATCHWORK_APP_DOMAIN),
+      env.SCRATCHWORK_APP_URL || urlFromDomain(env.SCRATCHWORK_APP_DOMAIN),
       "SCRATCHWORK_APP_URL",
     );
     const contentUrl = yield* readPublicUrl(
-      nonEmpty(env.SCRATCHWORK_CONTENT_URL) ?? urlFromDomain(env.SCRATCHWORK_CONTENT_DOMAIN),
+      env.SCRATCHWORK_CONTENT_URL || urlFromDomain(env.SCRATCHWORK_CONTENT_DOMAIN),
       "SCRATCHWORK_CONTENT_URL",
     );
 
@@ -157,8 +157,8 @@ function readHomepage(
   contentUrl: string | undefined,
 ): Effect.Effect<Pick<ServerConfigShape, "homepageUrls" | "homepageProject">, ServerConfigError> {
   return Effect.gen(function* () {
-    const domains = nonEmpty(env.SCRATCHWORK_HOMEPAGE_DOMAINS?.trim());
-    const project = nonEmpty(env.SCRATCHWORK_HOMEPAGE_PROJECT?.trim());
+    const domains = env.SCRATCHWORK_HOMEPAGE_DOMAINS?.trim() || undefined;
+    const project = env.SCRATCHWORK_HOMEPAGE_PROJECT?.trim() || undefined;
     if (domains == null && project == null) return { homepageUrls: [] };
     if (domains == null || project == null) {
       return yield* Effect.fail(
@@ -255,7 +255,7 @@ function readLocalOAuthEndpoints(
     "SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL",
     "SCRATCHWORK_LOCAL_OAUTH_JWKS_URL",
   ] as const;
-  const values = names.map((name) => nonEmpty(env[name]));
+  const values = names.map((name) => env[name] || undefined);
   if (values.every((value) => value == null)) return Effect.succeed({});
   if (appUrl == null || !isLiteralLoopbackHost(new URL(appUrl).hostname)) {
     return Effect.fail(
@@ -299,8 +299,8 @@ function isLiteralLoopbackHost(hostname: string): boolean {
 /** Parses required Cloudflare Access settings from environment variables. */
 function readCloudflareAccessConfig(env: EnvVars, appUrl: string | undefined): Effect.Effect<CloudflareAccessAuthConfig, ServerConfigError> {
   return Effect.gen(function* () {
-    const teamDomainValue = nonEmpty(env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN?.trim());
-    const audience = nonEmpty(env.SCRATCHWORK_CF_ACCESS_AUD?.trim());
+    const teamDomainValue = env.SCRATCHWORK_CF_ACCESS_TEAM_DOMAIN?.trim() || undefined;
+    const audience = env.SCRATCHWORK_CF_ACCESS_AUD?.trim() || undefined;
     const sessionSecret = env.SCRATCHWORK_SESSION_SECRET;
 
     if (teamDomainValue == null || audience == null || !sessionSecret) {
@@ -333,6 +333,13 @@ function readCloudflareAccessConfig(env: EnvVars, appUrl: string | undefined): E
   });
 }
 
+/** A JWKS document: JSON with a non-empty array of object-shaped keys. */
+const LocalJwksSchema = Schema.parseJson(Schema.Struct({
+  keys: Schema.Array(Schema.Object).pipe(
+    Schema.filter((keys) => keys.length > 0 || "keys must not be empty"),
+  ),
+}));
+
 /** Parses the generated public JWKS used by the offline Access simulator. Keeping the
  * override behind a LOCAL-prefixed variable prevents it from becoming part of normal
  * Cloudflare deployment configuration. */
@@ -348,21 +355,12 @@ function readLocalCloudflareJwks(
       }),
     );
   }
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (typeof parsed !== "object" || parsed == null || !Array.isArray((parsed as { readonly keys?: unknown }).keys)) {
-      throw new Error("keys is not an array");
-    }
-    const keys = (parsed as { readonly keys: ReadonlyArray<unknown> }).keys;
-    if (keys.length === 0 || keys.some((key) => typeof key !== "object" || key == null)) {
-      throw new Error("keys is empty or invalid");
-    }
-    return Effect.succeed({ localJwks: keys as ReadonlyArray<JsonWebKey & { readonly kid?: string }> });
-  } catch {
-    return Effect.fail(
+  return Schema.decodeUnknown(LocalJwksSchema)(value).pipe(
+    Effect.map((parsed) => ({ localJwks: parsed.keys as ReadonlyArray<JsonWebKey & { readonly kid?: string }> })),
+    Effect.mapError(() =>
       invalidValue("SCRATCHWORK_LOCAL_CF_ACCESS_JWKS", value, "a generated JWKS JSON document with at least one public key"),
-    );
-  }
+    ),
+  );
 }
 
 /** Parses the auth settings every mode shares: the session-signing secret (validated
@@ -413,7 +411,7 @@ const RETIRED_ENV_VARS: ReadonlyArray<readonly [string, string]> = [
 /** Fails when a retired environment variable is still set. */
 function rejectRetiredEnvVars(env: EnvVars): Effect.Effect<void, ServerConfigError> {
   for (const [name, replacement] of RETIRED_ENV_VARS) {
-    if (nonEmpty(env[name]) != null) {
+    if (env[name]) {
       return Effect.fail(new ServerConfigError({ message: `${name} is no longer supported: use ${replacement} instead` }));
     }
   }
