@@ -6,9 +6,9 @@ second layer — the [OpenID Foundation conformance
 suite](https://openid.net/certification/about-conformance-suite/) run locally in
 Docker as an adversarial *provider* against Scratchwork's relying-party (RP)
 implementation. The lane is **implemented and was run for real** (2026-07-20,
-suite `release-v5.2.0`): `bun run conformance` in `e2e/` drives the full
-`oidcc-client-basic-certification-test-plan` (14 modules). What remains before it
-can join `bun run ci` is a product decision, recorded at the bottom.
+suite `release-v5.2.0`): `bun run conformance` in `e2e/` runs the
+`oidcc-client-basic-certification-test-plan`, scoped by decision (bottom of this
+note) to the seven modules that judge the RP by *rejecting* tampered ID tokens.
 
 ## What landed
 
@@ -60,7 +60,9 @@ module that requires *completing* a login against the suite's OP stalls:
 | oidcc-client-test-scope-userinfo-claims | stuck WAITING → aborted |
 | oidcc-client-test-client-secret-basic | stuck WAITING → aborted |
 
-8/14 pass under the runner's criteria (PASSED, WARNING, or expected SKIPPED).
+That baseline run of the full plan: 8/14 green (7 PASSED + the expected
+SKIPPED). Following the decision below, the lane's required set is now exactly
+the seven PASSED modules.
 
 ## Why the six stall — findings the original spike got wrong
 
@@ -92,29 +94,30 @@ Verified against the suite sources (release-v5.2.0):
    userinfo is FAILED (or SKIPPED for the token-endpoint-delivered
    invalid-signature case, which OIDC Core tolerates).
 
-## The remaining product decision (needed before this joins `bun run ci`)
+## Decision (Pete, 2026-07-20): keep the RP as is; require only the rejection modules
 
-To turn the six stalled modules green, Scratchwork's RP needs, in a form Pete
-should sign off on:
+Greening the six stalled modules would have required adding a userinfo request
+to the production login flow, a second identity-claims source reconciled with
+the ID token, and a live bearer access token (today the ID token is the *only*
+credential Scratchwork consumes — the access token is ignored). Google never
+exercises any of that (it always sends `kid` and a verified email in the ID
+token), so it would be permanently dead code in the auth core whose only caller
+is the conformance suite — inverting the harness's purpose. The stalled modules
+measure conformance to a generic multi-provider RP profile, not resistance to
+attack; the modules that matter for security all pass.
 
-- **A userinfo request in the login flow** (bearer access token), with the
-  response's `sub` validated against the ID token's (`userinfo-invalid-sub`
-  expects a mismatch to abort the login).
-- **Email sourcing that tolerates the suite's OP**: accept an ID token without
-  an email claim when userinfo supplies the email instead — while keeping
-  `email_verified === true` as the policy gate for actually admitting the user.
-  (The suite's hardcoded `email_verified=false` user means the login should
-  still ultimately be *denied*; the conformance modules don't care — they finish
-  once userinfo is called — so strict policy and a green plan are compatible.)
-- **Single-key JWKS `kid` relaxation** in `jwt-rs256.ts` per OIDC Core §10.1
-  (finding 3), with adversarial tests (multiple keys + kid-less token must still
-  fail).
+Accordingly the lane's required assertion set is the **seven
+tampered-token-rejection modules** (`REQUIRED_MODULES` in
+`e2e/conformance/run.ts`); the other seven are **not-applicable-by-design**, not
+aspirational — the runner skips them and logs the skip. This narrows the plan's
+original "conformance coverage required before launch" from certification-green
+to security-modules-green, deliberately. Formal OpenID certification is off the
+table unless the product decision above is revisited.
 
-None of this is needed for Google today (Google always sends `kid` and puts a
-verified email in the ID token), so it is conformance-driven hardening of the
-provider abstraction, not a bug fix. Once decided and implemented, re-run
-`bun run conformance`; when the plan is green and timed, wire it into `e2e`'s
-`ci` script per the gate plan — as a required lane, never quietly optional.
+(`oidcc-client-test-idtoken-sig-none` — the RP refusing an `alg=none` token,
+recorded by the suite as SKIPPED — is also excluded from the required set, but
+the equivalent guarantee is pinned locally: `jwt-rs256.ts` accepts only RS256,
+and the token corpus + hermetic-provider lanes cover algorithm confusion.)
 
 ## Operational notes
 

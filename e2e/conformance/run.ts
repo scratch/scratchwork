@@ -15,14 +15,14 @@
  *      pointed at the suite through a loopback HTTP proxy, create the runner, wait
  *      for WAITING, drive GET /auth/login with the harness Browser, then wait for
  *      FINISHED/INTERRUPTED and record the verdict.
- *   4. Exit nonzero unless every module is PASSED, WARNING, or an expected SKIPPED.
+ *   4. Exit nonzero unless every required module is PASSED or WARNING.
  *
- * Current status (see the spike note): the 8 modules judged by the RP *rejecting*
- * a tampered ID token pass; the 6 that require completing a login against the
- * suite's OP stall, because Scratchwork requires an email claim in the ID token
- * (the suite's OP only ever serves email via userinfo, with email_verified=false)
- * and never calls the userinfo endpoint. Closing that is a product decision, not
- * a harness one.
+ * Scope (decided 2026-07-20, recorded in the spike note): the lane runs exactly
+ * the seven modules judged by the RP *rejecting* a tampered ID token. The rest of
+ * the plan requires completing a login against the suite's OP — a userinfo call
+ * and email sourced outside the ID token — which Scratchwork deliberately does
+ * not do (single-provider RP; the ID token is the only credential it consumes).
+ * Those modules are not-applicable-by-design, not aspirational.
  *
  * The loopback proxy exists because the SCRATCHWORK_LOCAL_OAUTH_* overrides —
  * deliberately — accept only literal-loopback plain-HTTP endpoints, while the
@@ -48,10 +48,20 @@ const SESSION_SECRET = "scratchwork-conformance-session-secret-32b";
 const WAIT_TIMEOUT_SECONDS = 5;
 /** Client-side cap per module before declaring it stuck and aborting it. */
 const MODULE_CAP_MS = 60_000;
-/** Modules whose deliberate outcome is SKIPPED, mirroring run-test-plan.py's
- * expected-skips mechanism (any other SKIPPED still fails the lane): Scratchwork
- * rejects alg=none ID tokens, which this module records as the RP opting out. */
-const EXPECTED_SKIPS: ReadonlySet<string> = new Set(["oidcc-client-test-idtoken-sig-none"]);
+/** The required assertion set: every module the plan judges by the RP rejecting a
+ * tampered ID token. The plan's other modules only finish after a completed login
+ * (userinfo call, email outside the ID token) and are N/A by design — see the
+ * scope note in the header. A plan module missing from this set is skipped and
+ * logged; a set entry missing from the plan fails the run (renamed upstream). */
+const REQUIRED_MODULES: ReadonlyArray<string> = [
+  "oidcc-client-test-invalid-iss",
+  "oidcc-client-test-missing-sub",
+  "oidcc-client-test-invalid-aud",
+  "oidcc-client-test-missing-iat",
+  "oidcc-client-test-kid-absent-multiple-jwks",
+  "oidcc-client-test-invalid-sig-rs256",
+  "oidcc-client-test-nonce-invalid",
+];
 
 /** Fetches a suite URL: connects to 127.0.0.1 for the suite's public-DNS loopback
  * hostname (so runs survive DNS-rebind-protective resolvers) and skips TLS
@@ -238,9 +248,16 @@ const proxy = startProxy(issuer);
 const outcomes: ModuleOutcome[] = [];
 try {
   const plan = await createPlan();
-  console.log(`plan ${plan.id}: ${plan.modules.length} modules (issuer ${issuer})`);
+  const planModules = plan.modules.map((entry) => entry.testModule);
+  const missing = REQUIRED_MODULES.filter((name) => !planModules.includes(name));
+  if (missing.length > 0) {
+    throw new Error(`required modules missing from the plan (renamed upstream?): ${missing.join(", ")}`);
+  }
+  const skipped = planModules.filter((name) => !REQUIRED_MODULES.includes(name));
+  console.log(`plan ${plan.id}: running ${REQUIRED_MODULES.length} of ${planModules.length} modules (issuer ${issuer})`);
+  console.log(`skipped as N/A by design: ${skipped.join(", ")}`);
 
-  for (const { testModule } of plan.modules) {
+  for (const testModule of REQUIRED_MODULES) {
     const backend = await startBackend("local-dev", {
       port: rpPort,
       providerEnv: proxy.env,
@@ -275,15 +292,12 @@ try {
   if (startedSuite && process.env.CONFORMANCE_KEEP_SUITE == null) await compose(["down"]);
 }
 
-const passed = (outcome: ModuleOutcome): boolean =>
-  outcome.result === "PASSED" || outcome.result === "WARNING"
-  || (outcome.result === "SKIPPED" && EXPECTED_SKIPS.has(outcome.module));
-const failed = outcomes.filter((outcome) => !passed(outcome));
+const failed = outcomes.filter((outcome) => outcome.result !== "PASSED" && outcome.result !== "WARNING");
 console.log(`\n${"module".padEnd(48)} result`);
 for (const outcome of outcomes) {
   console.log(`${outcome.module.padEnd(48)} ${outcome.result}${outcome.note == null ? "" : `  [${outcome.note}]`}`);
 }
-console.log(`\n${outcomes.length - failed.length}/${outcomes.length} modules passed (PASSED, WARNING, or expected SKIPPED).`);
+console.log(`\n${outcomes.length - failed.length}/${outcomes.length} required modules passed (PASSED or WARNING).`);
 if (failed.length > 0) {
   console.error(`failed: ${failed.map((outcome) => outcome.module).join(", ")}`);
   console.error(`inspect logs in the suite UI: ${SUITE_BASE}/plan-detail.html (or /api/log/{moduleId})`);
