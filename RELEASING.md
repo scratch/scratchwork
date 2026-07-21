@@ -20,9 +20,9 @@ with confirmation gates at the irreversible steps:
    Publishes `@scratchwork/shared`, `@scratchwork/server-core`, and the three
    `@scratchwork/server-deploy-*` packages in dependency order.
 6. **Homepage:** republish the install entry points so
-   `https://scratchwork.dev/install.sh` serves the current docs:
-   `scratchwork publish docs --project www` (with the production server
-   credentials). Automating this in release.yml is a follow-up.
+   `https://scratchwork.dev/install.sh` serves the current content:
+   `scratchwork publish scratchwork.dev --project www --public` (with the
+   production server credentials). Automating this in release.yml is a follow-up.
 7. **Smoke:** on a machine (or clean container) without Scratchwork:
    `curl -fsSL https://scratchwork.dev/install.sh | bash` and check
    `scratchwork --version` prints X.Y.Z.

@@ -26,8 +26,11 @@ Package names are `@scratchwork/<dir>` for everything under `server/` and `deplo
 - `e2e/` — full-loop publish e2e: real server (local-dev, miniflare, LocalStack) driven
   by the real CLI, hermetic OAuth provider standing in for Google.
 
-`examples/` and `notes/` are deliberately outside the gate: examples are user-facing
-sample content, notes are working documents. Nothing in them is imported by shipped code.
+`examples/`, `notes/`, and `scratchwork.dev/` are deliberately outside the gate:
+examples are user-facing sample content, notes are working documents, and
+`scratchwork.dev/` is the published homepage project (landing page plus the
+`install.sh` / `install.md` entry points — the install script alone is exercised by
+`scripts/check-install-sh.ts` in the gate). Nothing in them is imported by shipped code.
 
 ## Build and test
 

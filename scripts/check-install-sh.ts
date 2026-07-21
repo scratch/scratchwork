@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /*
- * Mechanized checks for docs/install.sh (notes/distribution-plan.md Phase 3),
+ * Mechanized checks for scratchwork.dev/install.sh (notes/distribution-plan.md
+ * Phase 3),
  * run inside the root `bun run ci`:
  *
  *   1. `sh -n` syntax check.
@@ -16,13 +17,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "./workspaces";
 
-const script = join(repoRoot, "docs", "install.sh");
+const script = join(repoRoot, "scratchwork.dev", "install.sh");
 const failures: string[] = [];
 
 // ── 1. Syntax ───────────────────────────────────────────────────────────────
 const syntax = Bun.spawnSync(["sh", "-n", script], { stderr: "pipe" });
 if (!syntax.success) {
-  failures.push(`sh -n docs/install.sh failed:\n${syntax.stderr.toString()}`);
+  failures.push(`sh -n scratchwork.dev/install.sh failed:\n${syntax.stderr.toString()}`);
 }
 
 // ── 2. Hermetic fixture ─────────────────────────────────────────────────────

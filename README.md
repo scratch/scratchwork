@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/scratchwork-logo.svg" alt="Scratchwork" width="480" />
+  <img src="scratchwork.dev/scratchwork-logo.svg" alt="Scratchwork" width="480" />
 </p>
 
 Scratchwork is a local development tool for static HTML and Markdown artifacts created by your coding agent.
@@ -58,7 +58,7 @@ changing to another directory.
 
 ## Working with Markdown
 
-Scratchwork renders Markdown with an embedded default renderer, and Markdown files can reference React components from nearby component files. See [`docs/index.md`](docs/index.md) for live examples.
+Scratchwork renders Markdown with an embedded default renderer, and Markdown files can reference React components from nearby component files. See [`scratchwork.dev/index.md`](scratchwork.dev/index.md) for live examples.
 
 To use the docs page as a starting point for your own project, run:
 

@@ -45,9 +45,9 @@ name → component map; consulted **before** lazy-loading `components/*.js`).
 The renderer embeds **no** images — no favicon, no logo, no Scratchwork-specific
 components. Branding lives with the project content instead:
 
-- The sample project (`docs/`) ships `scratchwork-logo.svg` (figure + wordmark)
+- The sample project (`scratchwork.dev/`) ships `scratchwork-logo.svg` (figure + wordmark)
   and uses it directly in `index.md`, plus a `MadeWithScratchwork` component
-  under `docs/components/`.
+  under `scratchwork.dev/components/`.
 - The `scratchwork dev` server serves the Scratchwork figure mark as the **default
   favicon** when a project ships none of its own (see `../cli/src/dev/server.ts`
   and `../cli/assets/figure.svg`).
@@ -125,7 +125,7 @@ statements (not full MDX), footnotes, and definition lists.
 
 There is no CSS framework. Rendered markdown is styled by `prose.css` (scoped to
 `.scratchwork-prose`). Components style themselves with inline `style` or a small
-scoped `<style>` injected once (see `docs/components/Counter.js`). Raw HTML
+scoped `<style>` injected once (see `scratchwork.dev/components/Counter.js`). Raw HTML
 in markdown can use inline `style="..."` — the renderer converts the string to a
 React style object.
 
