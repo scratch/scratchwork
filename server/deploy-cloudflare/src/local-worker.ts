@@ -4,8 +4,8 @@
  * and D1 bindings; this wrapper supplies the one edge feature Miniflare cannot emulate.
  */
 import * as Encoding from "effect/Encoding";
-import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
-import worker from "./worker";
+import { toArrayBuffer } from "@scratchwork/shared/encoding/bytes";
+import worker from "./worker.ts";
 
 interface LocalAccessEnv extends Record<string, unknown> {
   readonly SCRATCHWORK_LOCAL_CF_ACCESS_PRIVATE_JWK: string;

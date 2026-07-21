@@ -15,9 +15,9 @@ Package names are `@scratchwork/<dir>` for everything under `server/` and `deplo
   importable by both cli and server.
 - `cli/` — the `scratchwork` CLI, built with Effect: dev server with hot reload,
   publishing, login.
-- `server/` — deploy tooling scripts only; the server itself lives in its sub-workspaces:
+- `server/` — the server workspaces (the directory itself is not a workspace):
   - `server/core/` — platform-neutral publishing server core: auth, routing, storage
-    contracts.
+    contracts, and the deploy-script tooling (`src/deploy/`).
   - `server/deploy-aws/` — AWS Lambda + S3/DynamoDB adapters.
   - `server/deploy-cloudflare/` — Cloudflare Worker + R2/D1 adapters.
   - `server/deploy-local/` — local Bun deploy target.

@@ -39,8 +39,8 @@ import {
   type EndpointSuccess,
   type ProjectInfo,
   type ScratchworkEndpointName,
-} from "../../../shared/src/publish/api";
-import { accessGroupTerms, isSafeProjectIdentifier } from "./access";
+} from "@scratchwork/shared/publish/api";
+import { accessGroupTerms, isSafeProjectIdentifier } from "./access.ts";
 import {
   Auth,
   AuthError,
@@ -49,9 +49,9 @@ import {
   decryptCliCloudflareToken,
   verifyCliCodeExchange,
   type AuthUser,
-} from "./auth";
-import { ServerConfig, type ServerConfigShape } from "./config";
-import { PrimitiveDb } from "./db";
+} from "./auth.ts";
+import { ServerConfig, type ServerConfigShape } from "./config.ts";
+import { PrimitiveDb } from "./db.ts";
 import {
   appBaseUrl,
   contentBaseUrl,
@@ -60,11 +60,11 @@ import {
   projectUrl,
   publishedUrl,
   rejectCrossOriginApiRequest,
-} from "./http";
-import { MAX_PUBLISH_BODY_BYTES, normalizePublishRequest } from "./publish-request";
-import { projectForRequest } from "./routes";
-import { MAX_SHARE_BODY_BYTES, validateShareChanges } from "./share-request";
-import { type SiteRecord } from "./site-records";
+} from "./http.ts";
+import { MAX_PUBLISH_BODY_BYTES, normalizePublishRequest } from "./publish-request.ts";
+import { projectForRequest } from "./routes.ts";
+import { MAX_SHARE_BODY_BYTES, validateShareChanges } from "./share-request.ts";
+import { type SiteRecord } from "./site-records.ts";
 import {
   canReadProject,
   projectRole,
@@ -73,8 +73,8 @@ import {
   SiteStoreError,
   type LoadedSite,
   type ProjectRole,
-} from "./site-store";
-import { StorageError } from "./storage";
+} from "./site-store.ts";
+import { StorageError } from "./storage.ts";
 
 /** Failures any API handler may raise. */
 type RouteError = HttpError | AuthError | SiteStoreError | StorageError;

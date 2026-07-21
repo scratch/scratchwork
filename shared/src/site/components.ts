@@ -5,7 +5,7 @@
  * this file in sync with renderer/src/components.js so dev diagnostics agree
  * with what the renderer actually loads.
  */
-import { dirnameSitePath, joinSitePath, type SitePath } from "./paths";
+import { dirnameSitePath, joinSitePath, type SitePath } from "./paths.ts";
 
 /**
  * Blanks out `inline code` spans in a line so their contents are not scanned.

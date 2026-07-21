@@ -18,7 +18,6 @@
   },
   "include": [
     "src/**/*.ts",
-    "test/**/*.ts",
-    "../server/core/src/assets.d.ts"
+    "test/**/*.ts"
   ]
 }

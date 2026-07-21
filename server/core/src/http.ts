@@ -2,8 +2,8 @@ import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import { isLoopbackHost } from "../../../shared/src/util/url";
-import type { ServerConfigShape } from "./config";
+import { isLoopbackHost } from "@scratchwork/shared/util/url";
+import type { ServerConfigShape } from "./config.ts";
 
 /** Generic HTTP failure; `status` becomes the response status and `message` the error body. */
 export class HttpError extends Data.TaggedError("HttpError")<{

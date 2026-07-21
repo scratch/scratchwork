@@ -8,7 +8,6 @@
     "renderer",
     "shared",
     "cli",
-    "server",
     "server/core",
     "server/deploy-aws",
     "server/deploy-cloudflare",
@@ -19,7 +18,7 @@
   "scripts": {
     "build": "cd cli && bun run build",
     "build:renderer": "cd renderer && bun run build",
-    "ci": "bun scripts/check-boundaries.ts && bun scripts/each-workspace.ts ci && bun scripts/check-generated-fresh.ts",
+    "ci": "bun scripts/check-boundaries.ts && bun scripts/check-versions.ts && bun scripts/each-workspace.ts ci && bun scripts/check-install-sh.ts && bun scripts/check-npm-pack.ts && bun scripts/generate-assets.ts && bun scripts/check-generated-fresh.ts",
     "deploy:generic-aws": "cd deploy/generic-aws && bun run deploy",
     "deploy:cloudflare-vanilla": "cd deploy/cloudflare-vanilla && bun run deploy",
     "deploy:cloudflare-access": "cd deploy/cloudflare-access && bun run deploy",

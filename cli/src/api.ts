@@ -29,7 +29,7 @@ import * as Either from "effect/Either";
 import * as Option from "effect/Option";
 import type * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
-import { ApiErrorBodySchema, CLI_TOKEN_EXCHANGE_PATH, ScratchworkApi } from "../../shared/src/publish/api";
+import { ApiErrorBodySchema, CLI_TOKEN_EXCHANGE_PATH, ScratchworkApi } from "@scratchwork/shared/publish/api";
 import { readAuthToken, readCfToken } from "./auth";
 import { CliError, errorMessage } from "./errors";
 

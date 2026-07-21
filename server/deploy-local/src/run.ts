@@ -13,7 +13,7 @@ import {
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { serverConfigEnvEntries, type ScratchworkServerConfig } from "../../scripts/server-settings";
+import { serverConfigEnvEntries, type ScratchworkServerConfig } from "@scratchwork/server-core/deploy/server-settings";
 
 /** Options for a local run: the deploy project's `server` settings plus an env override
  * for tests. Using the shared config shape lets a deploy project run one config module

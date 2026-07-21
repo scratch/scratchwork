@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import type { HtmlTransform } from "../../../shared/src/site/html";
+import type { HtmlTransform } from "@scratchwork/shared/site/html";
 import { errorMessage, CliError } from "../errors";
 import { status } from "./output";
 import type { DevState, ReloadPayload } from "./types";

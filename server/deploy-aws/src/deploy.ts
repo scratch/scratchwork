@@ -6,8 +6,8 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { definedEnv, loadDeployEnv, type DeployEnv } from "../../scripts/env";
-import { createRunner, type RunOptions, type RunResult } from "../../scripts/proc";
+import { definedEnv, loadDeployEnv, type DeployEnv } from "@scratchwork/server-core/deploy/env";
+import { createRunner, type RunOptions, type RunResult } from "@scratchwork/server-core/deploy/proc";
 import {
   deployArgv,
   homepagePublishHint,
@@ -17,7 +17,7 @@ import {
   validateDeploymentConfig,
   type DeployServerOptions,
   type ScratchworkServerConfig,
-} from "../../scripts/server-settings";
+} from "@scratchwork/server-core/deploy/server-settings";
 
 /** Deploy options and server settings, shared with the other deploy packages. */
 export type { DeployServerOptions as AwsDeployOptions, ScratchworkServerConfig };

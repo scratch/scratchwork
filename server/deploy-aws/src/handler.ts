@@ -6,8 +6,8 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context as LambdaContext,
 } from "aws-lambda";
-import { DynamoDbPrimitiveDbLive } from "./dynamodb-db";
-import { S3ObjectStorageLive } from "./s3-storage";
+import { DynamoDbPrimitiveDbLive } from "./dynamodb-db.ts";
+import { S3ObjectStorageLive } from "./s3-storage.ts";
 
 const env = process.env as EnvVars;
 /** The full service graph for the Lambda runtime, built from process.env. */

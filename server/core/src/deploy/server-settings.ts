@@ -5,8 +5,8 @@
  */
 import * as Effect from "effect/Effect";
 import * as Either from "effect/Either";
-import { readServerConfig } from "../core/src/config";
-import type { DeployEnv } from "./env";
+import { readServerConfig } from "../config.ts";
+import type { DeployEnv } from "./env.ts";
 
 /** The `server` section of a deploy project's config, mapped onto SCRATCHWORK_* env vars. */
 export interface ScratchworkServerConfig {

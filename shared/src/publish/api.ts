@@ -17,8 +17,8 @@ import * as HttpApiEndpoint from "@effect/platform/HttpApiEndpoint";
 import * as HttpApiGroup from "@effect/platform/HttpApiGroup";
 import * as HttpApiSchema from "@effect/platform/HttpApiSchema";
 import * as Schema from "effect/Schema";
-import { isSafeProjectIdentifier } from "../site/identifiers";
-import { PublishBundleSchema } from "./bundle";
+import { isSafeProjectIdentifier } from "../site/identifiers.ts";
+import { PublishBundleSchema } from "./bundle.ts";
 
 export { PublishBundleSchema };
 

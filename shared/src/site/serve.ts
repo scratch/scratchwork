@@ -9,20 +9,20 @@
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
-import { contentType, defaultCacheControl, isMarkdownPath } from "./content";
-import { SiteFileError, SiteFiles } from "./files";
-import { applyHtmlTransforms, type HtmlTransform } from "./html";
+import { contentType, defaultCacheControl, isMarkdownPath } from "./content.ts";
+import { SiteFileError, SiteFiles } from "./files.ts";
+import { applyHtmlTransforms, type HtmlTransform } from "./html.ts";
 import {
   resolveMarkdownRenderer,
   type MarkdownRenderer,
-} from "./renderer";
+} from "./renderer.ts";
 import {
   FAVICON_SVG_PATH,
   parseRouteRequest,
   resolveRoute,
   SiteRouteError,
   type ResolvedRoute,
-} from "./routing";
+} from "./routing.ts";
 
 /** Which renderer shell answered a Markdown route, for logging/diagnostics. */
 export type RendererSource =

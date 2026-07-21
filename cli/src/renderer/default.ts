@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   defaultRendererHtml,
   defaultRendererSourceHash,
-} from "../../../shared/src/site/default-renderer.generated.js";
+} from "@scratchwork/shared/site/default-renderer.generated.js";
 
 const rendererRootUrl = new URL("../../../renderer/", import.meta.url);
 const rendererRoot = fileURLToPath(rendererRootUrl);

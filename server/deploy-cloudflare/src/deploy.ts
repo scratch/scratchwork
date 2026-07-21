@@ -10,8 +10,8 @@ import Cloudflare, { APIError, toFile } from "cloudflare";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { copyEnv, definedEnv, loadDeployEnv, type DeployEnv } from "../../scripts/env";
-import { createRunner } from "../../scripts/proc";
+import { copyEnv, definedEnv, loadDeployEnv, type DeployEnv } from "@scratchwork/server-core/deploy/env";
+import { createRunner } from "@scratchwork/server-core/deploy/proc";
 import {
   deployArgv,
   homepagePublishHint,
@@ -23,7 +23,7 @@ import {
   type DeployServerOptions,
   type ResolvedScratchworkServerConfig,
   type ScratchworkServerConfig,
-} from "../../scripts/server-settings";
+} from "@scratchwork/server-core/deploy/server-settings";
 
 /** Worker compatibility date shared by production deploys and conformance lanes. */
 export const DEFAULT_CLOUDFLARE_COMPATIBILITY_DATE = "2026-06-01";

@@ -1,8 +1,14 @@
 # Cloudflare deploy package
 
-Deploys the Scratchwork server as a Cloudflare Worker backed by R2 and D1. It can
-also run that exact Worker locally through Wrangler/workerd, with persistent local R2
-and D1 bindings.
+Deploys the [Scratchwork](https://github.com/scratch/scratchwork) server as a
+Cloudflare Worker backed by R2 and D1. It can also run that exact Worker locally
+through Wrangler/workerd, with persistent local R2 and D1 bindings.
+
+Published to npm as `@scratchwork/server-deploy-cloudflare`: built ESM
+JavaScript with type declarations, works under Node ≥ 22 or Bun (the Worker
+itself runs on Cloudflare's runtime). To deploy your own server, start from the
+walkthrough in the repository's `server/README.md` and the
+`deploy/cloudflare-vanilla` template. MIT license.
 
 ## Local Cloudflare runtime
 

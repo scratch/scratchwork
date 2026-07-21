@@ -8,8 +8,8 @@
  * pointer is the single server-wide claim on the project name.
  */
 import * as Schema from "effect/Schema";
-import { isSafeSitePath } from "../../../shared/src/site/paths";
-import { isSafeProjectIdentifier } from "./access";
+import { isSafeSitePath } from "@scratchwork/shared/site/paths";
+import { isSafeProjectIdentifier } from "./access.ts";
 
 /** DB namespace of mutable project pointers, keyed by bare project name. */
 export const PROJECTS_NAMESPACE = "projects";

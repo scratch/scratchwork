@@ -3,7 +3,7 @@
  * path segment — its globally unique name — so a request path maps to at most one project
  * plus a site-file remainder. No storage or service dependencies.
  */
-import { isSafeProjectIdentifier } from "./access";
+import { isSafeProjectIdentifier } from "./access.ts";
 
 /** Maps a request pathname to the only project it can belong to: its decoded first
  * segment. Returns null when the path has no segments or the decoded segment is not a

@@ -13,7 +13,10 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // Every generated file committed to the repo. dist/ outputs are gitignored
 // and don't belong here.
-const artifacts = ["shared/src/site/default-renderer.generated.js"];
+const artifacts = [
+  "shared/src/site/default-renderer.generated.js",
+  "shared/src/assets/figure-svg.generated.ts",
+];
 
 const status = Bun.spawnSync(
   ["git", "status", "--porcelain", "--", ...artifacts],

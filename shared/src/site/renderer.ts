@@ -4,9 +4,9 @@
  * fallback shell (the one embedded in the CLI/server) is used.
  */
 import * as Effect from "effect/Effect";
-import { SiteFileError, SiteFiles } from "./files";
-import { isMarkedMarkdownRenderer } from "./marker";
-import { dirnameSitePath, joinSitePath, type SitePath } from "./paths";
+import { SiteFileError, SiteFiles } from "./files.ts";
+import { isMarkedMarkdownRenderer } from "./marker.ts";
+import { dirnameSitePath, joinSitePath, type SitePath } from "./paths.ts";
 
 /** The renderer shell to serve for a Markdown route, and where it came from. */
 export type MarkdownRenderer =

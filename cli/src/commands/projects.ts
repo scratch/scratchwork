@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Either from "effect/Either";
 import * as Encoding from "effect/Encoding";
-import { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
+import { isSafeProjectIdentifier } from "@scratchwork/shared/site/identifiers";
 import { apiClient, mapApiErrors } from "../api";
 import { readAuthToken } from "../auth";
 import { SKIPPED_DIRECTORIES } from "../dev/target";

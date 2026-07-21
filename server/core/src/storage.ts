@@ -4,8 +4,8 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { sha256Hex as sha256HexDigest } from "../../../shared/src/crypto/digest";
-import { isWithinRoot } from "../../../shared/src/util/fs";
+import { sha256Hex as sha256HexDigest } from "@scratchwork/shared/crypto/digest";
+import { isWithinRoot } from "@scratchwork/shared/util/fs";
 
 /** Raised when a storage backend cannot complete a read or write. */
 export class StorageError extends Data.TaggedError("StorageError")<{

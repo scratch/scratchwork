@@ -11,14 +11,14 @@ import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
-import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
+import { decodedBase64ByteLength } from "@scratchwork/shared/encoding/base64";
 import {
   type PublishRequestBody,
   type PublishResponse,
-} from "../../../shared/src/publish/api";
-import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "../../../shared/src/publish/bundle";
-import { isSafeProjectIdentifier, slugifyIdentifier } from "../../../shared/src/site/identifiers";
-import { isSafeSitePath, type SitePath } from "../../../shared/src/site/paths";
+} from "@scratchwork/shared/publish/api";
+import { PUBLISH_BUNDLE_VERSION, type PublishBundle } from "@scratchwork/shared/publish/bundle";
+import { isSafeProjectIdentifier, slugifyIdentifier } from "@scratchwork/shared/site/identifiers";
+import { isSafeSitePath, type SitePath } from "@scratchwork/shared/site/paths";
 import { apiClient, mapApiErrors } from "../api";
 import { readAuthToken } from "../auth";
 import { openBrowser } from "../browser";

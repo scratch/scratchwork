@@ -38,6 +38,8 @@ const ASYNC_BOUNDARIES: Readonly<Record<string, string>> = {
   "server/core/src/google-jwt.ts": "Google OAuth token-endpoint POST + JWKS fetch — the identity-provider edge",
   "server/core/src/cloudflare-jwt.ts": "Cloudflare Access JWKS fetch — the identity-provider edge",
   "cli/src/commands/login-callback-server.ts": "Bun.serve loopback listener — platform entrypoint for the login callback",
+  "server/core/src/deploy/env.ts": "deploy tooling — dotenv loading for deploy scripts (plain Promise-based, runs once on a developer's machine)",
+  "server/core/src/deploy/proc.ts": "deploy tooling — node:child_process spawning for deploy scripts (Promise-based, runs once on a developer's machine)",
   "server/deploy-aws/src/handler.ts": "AWS Lambda entrypoint — the platform's contract is Promise-based",
   "server/deploy-aws/src/s3-storage.ts": "AWS SDK S3 Promise APIs wrapped into the ObjectStorage service",
   "server/deploy-aws/src/deploy.ts": "deploy tooling — deliberately plain Promise-based script code (runs once on a developer's machine)",

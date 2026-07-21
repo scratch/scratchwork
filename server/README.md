@@ -190,3 +190,40 @@ SCRATCHWORK_SESSION_SECRET=use-at-least-32-random-bytes
 Cloudflare deploy attaches non-secret auth values to the Worker as plain-text bindings and uploads `SCRATCHWORK_GOOGLE_CLIENT_SECRET` plus `SCRATCHWORK_SESSION_SECRET` through the Workers secrets API. AWS deploy sends `SCRATCHWORK_*` values to Lambda environment variables.
 
 Set `SCRATCHWORK_APP_URL` and `SCRATCHWORK_CONTENT_URL` (or the `appDomain`/`contentDomain` config values) behind a custom domain or proxy so publish responses return the public URL. Use the same value for both on a single-host server.
+
+## Deploy your own (from npm)
+
+The server packages are published to npm as built JavaScript with type
+declarations, so you can deploy a Scratchwork server from a fresh directory
+without cloning this repository. Example for Cloudflare:
+
+```sh
+mkdir my-scratchwork && cd my-scratchwork
+bun add @scratchwork/server-deploy-cloudflare   # or: npm install @scratchwork/server-deploy-cloudflare
+```
+
+Copy the config shape from this repo's `deploy/cloudflare-vanilla` project —
+a `server-config.ts` describing your domains and auth, a `cloudflare-config.ts`
+naming the Worker/bucket/database, and a two-line `deploy.ts`:
+
+```ts
+// deploy.ts
+import { deployServer } from "@scratchwork/server-deploy-cloudflare";
+import { config } from "./cloudflare-config";
+
+await deployServer(config, { envFile: ".env" });
+```
+
+Put `CLOUDFLARE_API_TOKEN` and the auth secrets in `.env`, then run the deploy
+with either runtime:
+
+```sh
+bun deploy.ts    # Bun
+node deploy.ts   # Node 24+ runs your own TypeScript files directly
+```
+
+The AWS equivalent starts from `deploy/generic-aws` and
+`@scratchwork/server-deploy-aws`; a local single-machine server uses
+`@scratchwork/server-deploy-local` under Bun. A `scratchwork server init`
+scaffolder is future work — for now the `deploy/*` projects are the templates
+you copy.

@@ -36,7 +36,7 @@ export function accessGroupMatches(group: AccessGroup, principal: AccessPrincipa
   return terms.some((term) => termMatches(term, principal));
 }
 
-export { isSafeProjectIdentifier } from "../../../shared/src/site/identifiers";
+export { isSafeProjectIdentifier } from "@scratchwork/shared/site/identifiers";
 
 /** Names that cannot be claimed as projects. Projects live at single top-level path
  * segments, so a project name is also a root path on the content host: server-owned

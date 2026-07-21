@@ -1,2 +1,2 @@
-export { runLocalServer, type RunLocalServerOptions } from "./run";
-export type { ScratchworkServerConfig } from "../../scripts/server-settings";
+export { runLocalServer, type RunLocalServerOptions } from "./run.ts";
+export type { ScratchworkServerConfig } from "@scratchwork/server-core/deploy/server-settings";

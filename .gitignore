@@ -2,6 +2,10 @@
 node_modules/
 dist/
 
+# Release staging written by scripts/package-release.ts and
+# scripts/build-packages.ts; assets upload to GitHub Releases / npm, never git.
+release/
+
 # Local environment files. Keep .env.example files committed.
 **/.env
 **/.env.*

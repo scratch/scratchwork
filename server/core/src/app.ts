@@ -12,17 +12,17 @@ import type * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
-import { SiteFiles } from "../../../shared/src/site/files";
-import { servePath } from "../../../shared/src/site/serve";
-import { defaultRendererHtml } from "../../../shared/src/site/default-renderer.generated.js";
-import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
-import { isSafeProjectIdentifier } from "./access";
-import { dispatchApiRoute, requireReadableSite } from "./api-routes";
-import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth";
-import { ServerConfig, type ServerConfigShape } from "./config";
-import { PrimitiveDb } from "./db";
-import { projectAccessCookie, projectAccessCookieValues } from "./cookies";
-import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages";
+import { SiteFiles } from "@scratchwork/shared/site/files";
+import { servePath } from "@scratchwork/shared/site/serve";
+import { defaultRendererHtml } from "@scratchwork/shared/site/default-renderer.generated.js";
+import { FIGURE_SVG } from "@scratchwork/shared/assets/figure-svg.generated";
+import { isSafeProjectIdentifier } from "./access.ts";
+import { dispatchApiRoute, requireReadableSite } from "./api-routes.ts";
+import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth.ts";
+import { ServerConfig, type ServerConfigShape } from "./config.ts";
+import { PrimitiveDb } from "./db.ts";
+import { projectAccessCookie, projectAccessCookieValues } from "./cookies.ts";
+import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages.ts";
 import {
   appBaseUrl,
   contentBaseUrl,
@@ -31,10 +31,10 @@ import {
   requestBaseUrl,
   sameOrigin,
   securityHeaders,
-} from "./http";
-import { projectForRequest, routeRest } from "./routes";
-import { canReadProject, SiteStore, SiteStoreError, type LoadedSite } from "./site-store";
-import { StorageError } from "./storage";
+} from "./http.ts";
+import { projectForRequest, routeRest } from "./routes.ts";
+import { canReadProject, SiteStore, SiteStoreError, type LoadedSite } from "./site-store.ts";
+import { StorageError } from "./storage.ts";
 
 const NO_STORE = "no-store, must-revalidate";
 /**

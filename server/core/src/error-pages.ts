@@ -6,8 +6,8 @@
  */
 import type * as HttpServerRequest from "@effect/platform/HttpServerRequest";
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
-import FIGURE_SVG from "../../../shared/assets/figure.svg" with { type: "text" };
-import { errorJson, securityHeaders } from "./http";
+import { FIGURE_SVG } from "@scratchwork/shared/assets/figure-svg.generated";
+import { errorJson, securityHeaders } from "./http.ts";
 
 /** One link rendered as a button on an error page. */
 export interface ErrorPageAction {

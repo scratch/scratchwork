@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadDeployEnv } from "./env";
+import { loadDeployEnv } from "../src/deploy/env.ts";
 
 describe("loadDeployEnv", () => {
   test("loads server, package, explicit env files with shell precedence", async () => {

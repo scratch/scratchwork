@@ -1,10 +1,10 @@
 import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Effect from "effect/Effect";
-import { contentType } from "../../../shared/src/site/content";
-import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
-import type { SitePath } from "../../../shared/src/site/paths";
-import type { SiteRevisionRecord } from "./site-records";
-import type { ObjectStorageShape } from "./storage";
+import { contentType } from "@scratchwork/shared/site/content";
+import { SiteFileError, SiteFiles } from "@scratchwork/shared/site/files";
+import type { SitePath } from "@scratchwork/shared/site/paths";
+import type { SiteRevisionRecord } from "./site-records.ts";
+import type { ObjectStorageShape } from "./storage.ts";
 
 /** Builds a SiteFiles service backed by revision metadata and object storage. */
 export function makeObjectSiteFiles(
