@@ -91,9 +91,11 @@ interface RunResult {
 }
 
 let caseNumber = 0;
-function runInstall(env: Record<string, string>): RunResult {
+// Async spawn is load-bearing: the install script curls the Bun.serve fixture in
+// this same process, and spawnSync would block the event loop that serves it.
+async function runInstall(env: Record<string, string>): Promise<RunResult> {
   const installDir = join(work, `install-${caseNumber++}`);
-  const proc = Bun.spawnSync(["sh", script], {
+  const proc = Bun.spawn(["sh", script], {
     env: {
       PATH: env.FAKE_UNAME_S ? `${fakeBin}:${process.env.PATH}` : process.env.PATH,
       HOME: work,
@@ -104,7 +106,12 @@ function runInstall(env: Record<string, string>): RunResult {
     stdout: "pipe",
     stderr: "pipe",
   });
-  return { code: proc.exitCode, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { code, stdout, stderr };
 }
 
 function expect(name: string, condition: boolean, detail: RunResult) {
@@ -114,29 +121,29 @@ function expect(name: string, condition: boolean, detail: RunResult) {
 }
 
 // Latest install on the real host platform.
-let result = runInstall({});
+let result = await runInstall({});
 expect("latest install should succeed and run the binary", result.code === 0 && result.stdout.includes("9.9.9"), result);
 
 // Pinned version install.
-result = runInstall({ SCRATCHWORK_VERSION: "8.8.8" });
+result = await runInstall({ SCRATCHWORK_VERSION: "8.8.8" });
 expect("pinned install should fetch v8.8.8", result.code === 0 && result.stdout.includes("8.8.8"), result);
 
 // Checksum tampering must be rejected.
 tamperChecksums = true;
-result = runInstall({});
+result = await runInstall({});
 expect("tampered checksums must fail with a mismatch", result.code !== 0 && result.stderr.includes("checksum mismatch"), result);
 tamperChecksums = false;
 
 // Platform mapping: unsupported OS and architecture fail with clear errors...
-result = runInstall({ FAKE_UNAME_S: "FreeBSD", FAKE_UNAME_M: "x86_64" });
+result = await runInstall({ FAKE_UNAME_S: "FreeBSD", FAKE_UNAME_M: "x86_64" });
 expect("unsupported OS must fail before downloading", result.code !== 0 && result.stderr.includes("unsupported operating system"), result);
-result = runInstall({ FAKE_UNAME_S: "Linux", FAKE_UNAME_M: "riscv64" });
+result = await runInstall({ FAKE_UNAME_S: "Linux", FAKE_UNAME_M: "riscv64" });
 expect("unsupported architecture must fail", result.code !== 0 && result.stderr.includes("unsupported architecture"), result);
 
 // ...and supported uname spellings map to the right release asset.
-result = runInstall({ FAKE_UNAME_S: "Linux", FAKE_UNAME_M: "aarch64" });
+result = await runInstall({ FAKE_UNAME_S: "Linux", FAKE_UNAME_M: "aarch64" });
 expect("Linux/aarch64 must map to the linux-arm64 asset", result.code === 0 && result.stdout.includes("(linux-arm64)"), result);
-result = runInstall({ FAKE_UNAME_S: "Darwin", FAKE_UNAME_M: "arm64" });
+result = await runInstall({ FAKE_UNAME_S: "Darwin", FAKE_UNAME_M: "arm64" });
 expect("Darwin/arm64 must map to the darwin-arm64 asset", result.code === 0 && result.stdout.includes("(darwin-arm64)"), result);
 
 server.stop(true);
