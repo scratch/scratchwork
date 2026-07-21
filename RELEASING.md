@@ -1,7 +1,9 @@
 # Releasing Scratchwork
 
 One version for the whole repo (CLI binaries + npm packages), one tag per
-release. Short enough to actually follow:
+release. Short enough to actually follow — or ask an agent to run the
+`/release` skill (`.claude/skills/release/SKILL.md`), which drives this loop
+with confirmation gates at the irreversible steps:
 
 1. **Bump:** `bun scripts/set-version.ts X.Y.Z` (stamps root + every
    workspace; `bun run ci` enforces lockstep).
