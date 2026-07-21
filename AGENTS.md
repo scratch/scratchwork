@@ -23,14 +23,19 @@ Package names are `@scratchwork/<dir>` for everything under `server/` and `deplo
   - `server/deploy-local/` — local Bun deploy target.
 - `deploy/*` — one deployment project per domain (generic-aws, cloudflare-vanilla,
   cloudflare-access, local-dev), each deployable with one command.
+- `scratchwork.dev/` — the scratchwork.dev site: `server/` is its Cloudflare
+  deployment workspace (same shape as `deploy/*`), `www/` the homepage project
+  published to it (content, not a workspace).
 - `e2e/` — full-loop publish e2e: real server (local-dev, miniflare, LocalStack) driven
   by the real CLI, hermetic OAuth provider standing in for Google.
 
-`examples/`, `notes/`, and `scratchwork.dev/` are deliberately outside the gate:
+`examples/`, `notes/`, and `scratchwork.dev/www/` are deliberately outside the gate:
 examples are user-facing sample content, notes are working documents, and
-`scratchwork.dev/` is the published homepage project (landing page plus the
+`scratchwork.dev/www/` is the published homepage project (landing page plus the
 `install.sh` / `install.md` entry points — the install script alone is exercised by
 `scripts/check-install-sh.ts` in the gate). Nothing in them is imported by shipped code.
+`scratchwork.dev/server/` is different: it is the deployment workspace for the
+scratchwork.dev server, inside the gate like the `deploy/*` projects.
 
 ## Build and test
 

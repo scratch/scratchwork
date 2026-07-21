@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 /*
- * Mechanized checks for scratchwork.dev/install.sh (notes/distribution-plan.md
- * Phase 3),
- * run inside the root `bun run ci`:
+ * Mechanized checks for scratchwork.dev/www/install.sh (notes/distribution-plan.md
+ * Phase 3), run inside the root `bun run ci`:
  *
  *   1. `sh -n` syntax check.
  *   2. Full install loop against a local HTTP fixture standing in for GitHub
@@ -17,13 +16,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoRoot } from "./workspaces";
 
-const script = join(repoRoot, "scratchwork.dev", "install.sh");
+const script = join(repoRoot, "scratchwork.dev", "www", "install.sh");
 const failures: string[] = [];
 
 // ── 1. Syntax ───────────────────────────────────────────────────────────────
 const syntax = Bun.spawnSync(["sh", "-n", script], { stderr: "pipe" });
 if (!syntax.success) {
-  failures.push(`sh -n scratchwork.dev/install.sh failed:\n${syntax.stderr.toString()}`);
+  failures.push(`sh -n scratchwork.dev/www/install.sh failed:\n${syntax.stderr.toString()}`);
 }
 
 // ── 2. Hermetic fixture ─────────────────────────────────────────────────────

@@ -13,6 +13,7 @@
     "server/deploy-cloudflare",
     "server/deploy-local",
     "deploy/*",
+    "scratchwork.dev/server",
     "e2e"
   ],
   "scripts": {
@@ -22,11 +23,13 @@
     "deploy:generic-aws": "cd deploy/generic-aws && bun run deploy",
     "deploy:cloudflare-vanilla": "cd deploy/cloudflare-vanilla && bun run deploy",
     "deploy:cloudflare-access": "cd deploy/cloudflare-access && bun run deploy",
+    "deploy:scratchwork-dev": "cd scratchwork.dev/server && bun run deploy",
     "local:generic-aws": "cd deploy/generic-aws && bun run local",
     "local:cloudflare": "cd server/deploy-cloudflare && bun run dev",
     "local:cloudflare-access": "cd deploy/cloudflare-access && bun run local",
     "local:local-dev": "cd deploy/local-dev && bun run local",
     "local:cloudflare-vanilla": "cd deploy/cloudflare-vanilla && bun run local",
+    "local:scratchwork-dev": "cd scratchwork.dev/server && bun run local",
     "dev:renderer": "cd renderer && bun run dev",
     "test": "bun scripts/each-workspace.ts test",
     "typecheck": "bun scripts/each-workspace.ts typecheck"

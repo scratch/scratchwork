@@ -21,7 +21,7 @@ with confirmation gates at the irreversible steps:
    `@scratchwork/server-deploy-*` packages in dependency order.
 6. **Homepage:** republish the install entry points so
    `https://scratchwork.dev/install.sh` serves the current content:
-   `scratchwork publish scratchwork.dev --project www --public` (with the
+   `scratchwork publish scratchwork.dev/www --project www --public` (with the
    production server credentials). Automating this in release.yml is a follow-up.
 7. **Smoke:** on a machine (or clean container) without Scratchwork:
    `curl -fsSL https://scratchwork.dev/install.sh | bash` and check

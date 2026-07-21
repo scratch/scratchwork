@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "scratchwork",
@@ -103,6 +104,17 @@
       },
       "devDependencies": {
         "esbuild": "^0.21.5",
+      },
+    },
+    "scratchwork.dev/server": {
+      "name": "@scratchwork/deploy-scratchwork-dev",
+      "version": "0.1.0",
+      "dependencies": {
+        "@scratchwork/server-deploy-cloudflare": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
       },
     },
     "server/core": {
@@ -443,6 +455,8 @@
     "@scratchwork/deploy-generic-aws": ["@scratchwork/deploy-generic-aws@workspace:deploy/generic-aws"],
 
     "@scratchwork/deploy-local-dev": ["@scratchwork/deploy-local-dev@workspace:deploy/local-dev"],
+
+    "@scratchwork/deploy-scratchwork-dev": ["@scratchwork/deploy-scratchwork-dev@workspace:scratchwork.dev/server"],
 
     "@scratchwork/e2e": ["@scratchwork/e2e@workspace:e2e"],
 

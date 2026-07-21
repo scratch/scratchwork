@@ -59,7 +59,7 @@ Everything else (branches, PRs, dry runs) proceeds without asking.
 
 ### 5. Homepage republish
 
-- **Gate:** confirm, then `scratchwork publish scratchwork.dev --project www --public`
+- **Gate:** confirm, then `scratchwork publish scratchwork.dev/www --project www --public`
   with production credentials, so `https://scratchwork.dev/install.sh` serves the current content.
   This needs an interactive `scratchwork login` against production — if not logged
   in, hand this step to the user rather than skipping it silently.
