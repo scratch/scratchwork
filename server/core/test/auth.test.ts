@@ -612,6 +612,51 @@ describe("readServerConfig", () => {
     });
   });
 
+  test("local OAuth issuer override rides the endpoint gate", async () => {
+    const base = {
+      SCRATCHWORK_AUTH: "oauth",
+      SCRATCHWORK_GOOGLE_CLIENT_ID: "client-id",
+      SCRATCHWORK_GOOGLE_CLIENT_SECRET: "client-secret",
+      SCRATCHWORK_SESSION_SECRET: "session-secret-session-secret-32-bytes",
+      SCRATCHWORK_APP_URL: "http://localhost:3001",
+    };
+    const endpoints = {
+      SCRATCHWORK_LOCAL_OAUTH_AUTHORIZE_URL: "http://127.0.0.1:4300/authorize",
+      SCRATCHWORK_LOCAL_OAUTH_TOKEN_URL: "http://127.0.0.1:4300/token",
+      SCRATCHWORK_LOCAL_OAUTH_JWKS_URL: "http://127.0.0.1:4300/jwks",
+    };
+
+    // Meaningless without the endpoint overrides — refuse rather than ignore.
+    await expect(Effect.runPromise(readServerConfig({
+      ...base,
+      SCRATCHWORK_LOCAL_OAUTH_ISSUER: "https://localhost.emobix.co.uk:8443/test/a/scratchwork/",
+    }))).rejects.toThrow("only together with the SCRATCHWORK_LOCAL_OAUTH_* endpoint overrides");
+
+    // The issuer is a claim-comparison string, so unlike the endpoints it may
+    // name a non-loopback URL — but it must be an http(s) URL.
+    await expect(Effect.runPromise(readServerConfig({
+      ...base,
+      ...endpoints,
+      SCRATCHWORK_LOCAL_OAUTH_ISSUER: "not a url",
+    }))).rejects.toThrow("an http(s) issuer URL");
+
+    const config = await Effect.runPromise(readServerConfig({
+      ...base,
+      ...endpoints,
+      SCRATCHWORK_LOCAL_OAUTH_ISSUER: "https://localhost.emobix.co.uk:8443/test/a/scratchwork/",
+    }));
+    if (config.auth.mode !== "oauth") throw new Error("unreachable");
+    expect(config.auth.localEndpoints?.issuer).toBe("https://localhost.emobix.co.uk:8443/test/a/scratchwork/");
+
+    // Still gated by the endpoints' loopback app-URL requirement.
+    await expect(Effect.runPromise(readServerConfig({
+      ...base,
+      ...endpoints,
+      SCRATCHWORK_APP_URL: "https://app.example.com",
+      SCRATCHWORK_LOCAL_OAUTH_ISSUER: "https://localhost.emobix.co.uk:8443/test/a/scratchwork/",
+    }))).rejects.toThrow("only when SCRATCHWORK_APP_URL uses a loopback host");
+  });
+
   test("fails without the Cloudflare Access settings, without demanding OAuth credentials", async () => {
     await expect(
       Effect.runPromise(readServerConfig({ SCRATCHWORK_AUTH: "cloudflare-access" })),

@@ -135,7 +135,7 @@ export async function startOauthProvider(options: OauthProviderOptions): Promise
         const body = new URLSearchParams(await request.text());
         tokenRequests.push({ params: Object.fromEntries(body.entries()) });
         if (provider.tokenResponseOverride != null) return provider.tokenResponseOverride();
-        const failure = await validateTokenRequest(body, codes, options);
+        const failure = await validateTokenRequest(request, body, codes, options);
         if (failure != null) {
           return Response.json({ error: "invalid_grant", error_description: failure }, { status: 400 });
         }
@@ -211,12 +211,17 @@ function validateAuthorizeRequest(
 
 /** Validates the back-channel token request: client auth, one-use code, PKCE proof. */
 async function validateTokenRequest(
+  request: Request,
   body: URLSearchParams,
   codes: Map<string, IssuedCode>,
   options: OauthProviderOptions,
 ): Promise<string | null> {
   if (body.get("grant_type") !== "authorization_code") return "grant_type";
-  if (body.get("client_id") !== options.clientId || body.get("client_secret") !== options.clientSecret) {
+  // client_secret_basic only (RFC 6749 §2.3.1), matching what the OIDC conformance
+  // suite's basic RP plan enforces. A secret in the body is a regression — reject it.
+  if (body.has("client_secret")) return "client_secret must not be sent in the request body";
+  const expected = `Basic ${btoa(`${encodeURIComponent(options.clientId)}:${encodeURIComponent(options.clientSecret)}`)}`;
+  if (request.headers.get("authorization") !== expected) {
     return "client authentication failed";
   }
   if (body.get("redirect_uri") !== options.redirectUri) return "redirect_uri mismatch";
