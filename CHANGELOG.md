@@ -5,6 +5,8 @@ top released section into the GitHub Release notes (scripts/release-notes.ts).
 
 ## Unreleased
 
+## v0.2.0
+
 - Distribution: cross-platform CLI binaries on GitHub Releases, `install.sh` /
   `install.md` served from scratchwork.dev, and the server packages
   (`@scratchwork/shared`, `@scratchwork/server-core`,

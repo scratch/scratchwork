@@ -1,7 +1,7 @@
 {
   "name": "scratchwork-renderer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Build-once pipeline that produces the single-file Scratchwork universal renderer (index.html). The output renders any .md/.mdx file at runtime — content is never rebuilt.",
   "scripts": {

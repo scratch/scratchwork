@@ -10,5 +10,5 @@ export const server = {
   authSessionSeconds: 2_592_000,
   allowedUsers: "public",
   allowPublicProjects: true,
-  usersCanSetProjectNames: true,
+  usersCanSetProjectNames: false,
 } satisfies ScratchworkServerConfig;

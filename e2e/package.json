@@ -1,6 +1,6 @@
 {
   "name": "@scratchwork/e2e",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "private": true,
   "description": "Full-loop publish e2e: a real server (local-dev, Cloudflare Worker under miniflare, AWS handler against LocalStack) driven by the real CLI through login → publish → serve → share → revoke, with a hermetic OAuth provider standing in for Google.",
