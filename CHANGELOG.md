@@ -5,6 +5,13 @@ top released section into the GitHub Release notes (scripts/release-notes.ts).
 
 ## Unreleased
 
+- `npm create scratchwork-server` — new `create-scratchwork-server` package
+  that scaffolds a standalone self-hosted server project
+  (`--platform cloudflare | aws | local`). Templates are generated from the
+  repo's `deploy/*` projects at pack time with `@scratchwork/*` dependencies
+  pinned to the lockstep version, and every template is scaffolded and
+  typechecked hermetically in ci.
+
 ## v0.2.0
 
 - Distribution: cross-platform CLI binaries on GitHub Releases, `install.sh` /

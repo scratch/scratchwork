@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /*
- * Publishes the five packages to npm from their staged directories, in
+ * Publishes the six packages to npm from their staged directories, in
  * dependency order (notes/distribution-plan.md Phase 4). Run locally with an
  * authenticated npm CLI after the GitHub Release exists (see RELEASING.md):
  *
  *   bun scripts/publish-packages.ts [--dry-run] [--otp <code>]
  *
  * With npm 2FA enabled, pass a fresh authenticator code via --otp (forwarded
- * to every npm publish; all five run within one code's validity window).
+ * to every npm publish; all six run within one code's validity window).
  *
  * Refuses to run on a dirty tree or when HEAD isn't the tag matching the
  * lockstep version, so what's published is exactly what's tagged. Uses

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /*
- * Builds the five publishable npm packages (notes/distribution-plan.md
+ * Builds the six publishable npm packages (notes/distribution-plan.md
  * Phase 4) and stages publishable directories under release/packages/:
  *
  *   1. tsc emit (ESM JS + .d.ts) into each package's dist/, in dependency
@@ -11,17 +11,23 @@
  *      output, so the same rewrite is applied here — a shipped d.ts referencing
  *      "./x.ts" would fail consumers' typechecking.
  *   3. Stage release/packages/<dir>/ with dist/, README.md, the root LICENSE,
- *      and a publish-shaped package.json: exports/files pointed at dist/,
+ *      and a publish-shaped package.json: exports/bin/files pointed at dist/,
  *      workspace:* pinned to the lockstep version, dev-only fields dropped.
  *      (Neither bun nor npm applies publishConfig.exports, and `bun publish`
  *      only rewrites workspace:* when run from the workspace itself, so the
  *      staging transform owns both.)
+ *   4. For create-scratchwork-server, generate the platform templates from
+ *      the deploy/* projects into the staged templates/ dir
+ *      (create/generate-templates.ts), pinning @scratchwork deps to the
+ *      lockstep version — templates are never committed, so they cannot
+ *      drift from the deploy sources.
  *
  * scripts/check-npm-pack.ts packs and verifies the staged output in ci;
  * scripts/publish-packages.ts publishes it.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { generateTemplates } from "../create/generate-templates";
 import { repoRoot } from "./workspaces";
 
 /** Publishable packages in dependency order (dir is repo-relative). */
@@ -31,6 +37,7 @@ export const PUBLISHABLE = [
   "server/deploy-local",
   "server/deploy-aws",
   "server/deploy-cloudflare",
+  "create",
 ] as const;
 
 const rootVersion = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version as string;
@@ -52,14 +59,24 @@ function publishedExportTarget(target: string): { types: string; default: string
   throw new Error(`exports target ${target} has an unexpected extension — extend the staging transform`);
 }
 
-/** The publish-shaped package.json: dist exports, pinned deps, dev fields dropped. */
+/** The publish-shaped package.json: dist exports/bin, pinned deps, dev fields dropped. */
 function publishManifest(pkg: Record<string, unknown>): Record<string, unknown> {
-  const exports = Object.fromEntries(
-    Object.entries(pkg.exports as Record<string, string>).map(([key, target]) => [
-      key,
-      publishedExportTarget(target),
-    ]),
-  );
+  const exports = pkg.exports
+    ? Object.fromEntries(
+        Object.entries(pkg.exports as Record<string, string>).map(([key, target]) => [
+          key,
+          publishedExportTarget(target),
+        ]),
+      )
+    : undefined;
+  const bin = pkg.bin
+    ? Object.fromEntries(
+        Object.entries(pkg.bin as Record<string, string>).map(([name, target]) => [
+          name,
+          publishedExportTarget(target).default,
+        ]),
+      )
+    : undefined;
   const dependencies = Object.fromEntries(
     Object.entries((pkg.dependencies as Record<string, string>) ?? {}).map(([name, range]) => [
       name,
@@ -76,9 +93,10 @@ function publishManifest(pkg: Record<string, unknown>): Record<string, unknown> 
     repository,
     engines,
     ...(keywords ? { keywords } : {}),
-    exports,
-    files: ["dist"],
-    dependencies,
+    ...(exports ? { exports } : {}),
+    ...(bin ? { bin } : {}),
+    files: (pkg.files as string[] | undefined) ?? ["dist"],
+    ...(Object.keys(dependencies).length > 0 ? { dependencies } : {}),
   };
 }
 
@@ -121,6 +139,9 @@ export function buildAndStage(): string[] {
       process.exit(1);
     }
     cpSync(readme, join(staging, "README.md"));
+    // The scaffolder's templates are generated from the deploy/* sources at
+    // staging time (never committed), so template content cannot drift.
+    if (dir === "create") generateTemplates(join(staging, "templates"), rootVersion);
     staged.push(staging);
     console.log(`staged ${staging.slice(repoRoot.length + 1)} (${pkg.name}@${rootVersion})`);
   }

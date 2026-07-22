@@ -1,0 +1,15 @@
+// Publish build (scripts/build-packages.ts): tsc emit into dist/. The emitted
+// bin must run under plain Node (npm create executes it with the user's npm),
+// so src/ sticks to node: builtins — no Bun APIs.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

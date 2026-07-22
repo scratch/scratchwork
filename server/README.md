@@ -193,18 +193,34 @@ Set `SCRATCHWORK_APP_URL` and `SCRATCHWORK_CONTENT_URL` (or the `appDomain`/`con
 
 ## Deploy your own (from npm)
 
-The server packages are published to npm as built JavaScript with type
-declarations, so you can deploy a Scratchwork server from a fresh directory
-without cloning this repository. Example for Cloudflare:
+Scaffold a standalone server project with `create-scratchwork-server` — no
+clone of this repository needed:
+
+```sh
+npm create scratchwork-server my-server -- --platform cloudflare   # or: aws, local
+cd my-server
+bun install
+bun run local    # run the server locally
+bun run deploy   # deploy it (cloudflare and aws)
+```
+
+The scaffolded project is generated from this repo's `deploy/*` projects
+(cloudflare ← `deploy/cloudflare-vanilla`, aws ← `deploy/generic-aws`,
+local ← `deploy/local-dev`): a `server-config.ts` describing your domains and
+auth, platform configuration (`cloudflare-config.ts` on Cloudflare),
+`deploy.ts` / `local.ts` entrypoints, a `.env.example` for secrets, and a
+README with setup instructions. Its `@scratchwork/server-deploy-*`
+dependencies are pinned to the release the scaffolder shipped with.
+
+The server packages are also plain libraries — published as built JavaScript
+with type declarations — so you can assemble the same project by hand:
 
 ```sh
 mkdir my-scratchwork && cd my-scratchwork
 bun add @scratchwork/server-deploy-cloudflare   # or: npm install @scratchwork/server-deploy-cloudflare
 ```
 
-Copy the config shape from this repo's `deploy/cloudflare-vanilla` project —
-a `server-config.ts` describing your domains and auth, a `cloudflare-config.ts`
-naming the Worker/bucket/database, and a two-line `deploy.ts`:
+with a two-line `deploy.ts`:
 
 ```ts
 // deploy.ts
@@ -222,8 +238,5 @@ bun deploy.ts    # Bun
 node deploy.ts   # Node 24+ runs your own TypeScript files directly
 ```
 
-The AWS equivalent starts from `deploy/generic-aws` and
-`@scratchwork/server-deploy-aws`; a local single-machine server uses
-`@scratchwork/server-deploy-local` under Bun. A `scratchwork server init`
-scaffolder is future work — for now the `deploy/*` projects are the templates
-you copy.
+The AWS equivalent uses `@scratchwork/server-deploy-aws`; a local
+single-machine server uses `@scratchwork/server-deploy-local` under Bun.

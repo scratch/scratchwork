@@ -13,6 +13,7 @@
     "server/deploy-cloudflare",
     "server/deploy-local",
     "deploy/*",
+    "create",
     "scratchwork.dev/server",
     "e2e"
   ],
