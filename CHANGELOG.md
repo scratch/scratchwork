@@ -5,6 +5,8 @@ top released section into the GitHub Release notes (scripts/release-notes.ts).
 
 ## Unreleased
 
+## v0.3.0
+
 - `npm create scratchwork-server` — new `create-scratchwork-server` package
   that scaffolds a standalone self-hosted server project
   (`--platform cloudflare | aws | local`). Templates are generated from the

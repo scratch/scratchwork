@@ -1,6 +1,6 @@
 {
   "name": "@scratchwork/server-deploy-cloudflare",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Cloudflare Worker + R2 deployment package for the Scratchwork server.",
   "license": "MIT",
