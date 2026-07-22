@@ -16,7 +16,8 @@ with confirmation gates at the irreversible steps:
    the GitHub Release with archives + `checksums.txt` and the changelog
    section as notes.
 5. **npm:** from a clean checkout of the tag, with an authenticated npm CLI:
-   `bun scripts/publish-packages.ts` (add `--dry-run` first if in doubt).
+   `bun scripts/publish-packages.ts` (add `--dry-run` first if in doubt;
+   with npm 2FA, add `--otp <fresh code>`).
    Publishes `@scratchwork/shared`, `@scratchwork/server-core`, and the three
    `@scratchwork/server-deploy-*` packages in dependency order.
 6. **Homepage:** republish the install entry points so
