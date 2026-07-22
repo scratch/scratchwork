@@ -7,7 +7,10 @@ D1 (project metadata).
 ## Configure
 
 1. Edit `server-config.ts` — your domains and auth policy. The scaffolded
-   values are `example.com` placeholders.
+   values are `example.com` placeholders, including the access policy:
+   `allowedUsers: "@example.com"` only admits Google accounts on that domain,
+   so replace it with your own domain(s) and emails (comma-separated), or
+   `"public"` to let anyone sign in.
 2. Edit `cloudflare-config.ts` — Worker name, R2 bucket, D1 database, zone,
    and routes.
 3. Copy `.env.example` to `.env` and fill in the Cloudflare API token and the

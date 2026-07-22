@@ -5,8 +5,12 @@ server, deployed as an AWS Lambda Function URL backed by S3 and DynamoDB.
 
 ## Configure
 
-1. Edit `server-config.ts` — auth policy and any fixed settings. Settings not
-   listed there come from `SCRATCHWORK_*` environment variables.
+1. Edit `server-config.ts` — auth policy and any fixed settings. The
+   scaffolded access policy is an `example.com` placeholder:
+   `allowedUsers: "@example.com"` only admits Google accounts on that domain,
+   so replace it with your own domain(s) and emails (comma-separated), or
+   `"public"` to let anyone sign in. Settings not listed there come from
+   `SCRATCHWORK_*` environment variables.
 2. Copy `.env.example` to `.env` and fill in the public URLs, the Google OAuth
    credentials, and the session secret (the comments in `.env.example` explain
    each value).

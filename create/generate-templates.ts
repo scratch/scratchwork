@@ -9,6 +9,10 @@
  * Per platform, the transform is mechanical:
  *   - every committed file of the deploy project is copied with the
  *     sndbx.sh-specific values replaced by example.com placeholders;
+ *   - the access policy fails closed: whatever allowedUsers value the deploy
+ *     source carries (including none) becomes allowedUsers: "@example.com",
+ *     riding the same placeholder edit as the domains — a scaffolded server
+ *     never starts out world-signupable by accident;
  *   - package.json becomes a standalone project manifest: workspace:* deps
  *     pinned to the exact lockstep version passed in, repo-only scripts
  *     (ci/test) dropped, name set to a placeholder the scaffolder overwrites;
@@ -40,9 +44,31 @@ export type TemplatePlatform = keyof typeof TEMPLATE_SOURCES;
 /** Placeholder name in template package.json; scaffold() overwrites it. */
 export const TEMPLATE_PROJECT_NAME = "scratchwork-server";
 
+/** The fail-closed access-policy placeholder every template ships with. */
+export const TEMPLATE_ALLOWED_USERS = '@example.com';
+
+const ALLOWED_USERS_LINE = `allowedUsers: "${TEMPLATE_ALLOWED_USERS}", // emails and @domains (comma-separated), or "public"`;
+
 /** Replaces the sndbx.sh-specific values in deploy sources with placeholders. */
 function substitutePlaceholders(text: string): string {
   return text.replaceAll("sndbx.sh", "example.com").replaceAll("sndbx-sh", "example-com");
+}
+
+/**
+ * Forces the scaffolded access policy to the fail-closed placeholder: an
+ * existing allowedUsers value (e.g. "public" in deploy/cloudflare-vanilla) is
+ * replaced, and a server-settings object without one (the aws and local
+ * sources) gets it inserted after its `auth:` line. Files that do not define
+ * server settings pass through unchanged.
+ */
+function substituteAccessPolicy(text: string): string {
+  if (/allowedUsers:/.test(text)) {
+    return text.replace(/allowedUsers:\s*"[^"]*",?[^\n]*/g, ALLOWED_USERS_LINE);
+  }
+  return text.replace(
+    /^([ \t]*)auth: "[^"]+",?[^\n]*\n/m,
+    (line, indent: string) => line + `${indent}${ALLOWED_USERS_LINE}\n`,
+  );
 }
 
 /** The standalone-project package.json derived from a deploy project's. */
@@ -98,8 +124,29 @@ export function generateTemplates(outDir: string, version: string): void {
         writeFileSync(join(out, name), JSON.stringify(templateTsconfig(JSON.parse(text)), null, 2) + "\n");
       } else {
         const outName = name.startsWith(".") ? "_" + name.slice(1) : name;
-        writeFileSync(join(out, outName), substitutePlaceholders(text));
+        const transformed = name.endsWith(".ts")
+          ? substituteAccessPolicy(substitutePlaceholders(text))
+          : substitutePlaceholders(text);
+        writeFileSync(join(out, outName), transformed);
       }
+    }
+
+    // The fail-closed access-policy placeholder must land exactly once, and
+    // nothing else may set allowedUsers — fail the build if the deploy
+    // sources change shape in a way the transform no longer covers.
+    const codeTexts = readdirSync(out)
+      .filter((name) => name.endsWith(".ts"))
+      .map((name) => readFileSync(join(out, name), "utf8"));
+    const placeholderCount = codeTexts.reduce(
+      (count, text) => count + (text.match(new RegExp(`allowedUsers: "${TEMPLATE_ALLOWED_USERS}"`, "g"))?.length ?? 0),
+      0,
+    );
+    const totalCount = codeTexts.reduce((count, text) => count + (text.match(/allowedUsers:/g)?.length ?? 0), 0);
+    if (placeholderCount !== 1 || totalCount !== 1) {
+      throw new Error(
+        `generate-templates: ${platform} template must set allowedUsers to "${TEMPLATE_ALLOWED_USERS}" exactly once ` +
+          `(found ${placeholderCount} placeholder / ${totalCount} total) — the deploy source's shape no longer matches the transform`,
+      );
     }
 
     // Hand-written standalone extras: README.md and _gitignore per platform.

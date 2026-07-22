@@ -10,7 +10,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateTemplates, TEMPLATE_SOURCES } from "../generate-templates.ts";
+import { generateTemplates, TEMPLATE_ALLOWED_USERS, TEMPLATE_SOURCES } from "../generate-templates.ts";
 import { listPlatforms, projectNameFor, scaffold } from "../src/scaffold.ts";
 
 const workDir = mkdtempSync(join(tmpdir(), "create-scratchwork-test-"));
@@ -56,6 +56,23 @@ describe("generateTemplates", () => {
       const text = readFileSync(join(templatesDir, platform, name), "utf8");
       expect(text).not.toContain("sndbx");
     }
+  });
+
+  test.each(platforms)("%s: access policy fails closed to the @example.com placeholder", (platform) => {
+    const dir = join(templatesDir, platform);
+    const codeTexts = readdirSync(dir)
+      .filter((name) => name.endsWith(".ts"))
+      .map((name) => readFileSync(join(dir, name), "utf8"));
+    const combined = codeTexts.join("\n");
+    // Exactly one allowedUsers, and it is the fail-closed placeholder — never
+    // the deploy source's value (deploy/cloudflare-vanilla ships "public").
+    expect(TEMPLATE_ALLOWED_USERS).toBe("@example.com");
+    expect(combined.match(/allowedUsers:/g)?.length).toBe(1);
+    expect(combined).toContain(`allowedUsers: "${TEMPLATE_ALLOWED_USERS}"`);
+    expect(combined).not.toContain('allowedUsers: "public"');
+    // The README tells the user to replace the placeholder policy.
+    const readme = readFileSync(join(dir, "README.md"), "utf8");
+    expect(readme).toContain(`allowedUsers: "${TEMPLATE_ALLOWED_USERS}"`);
   });
 
   test.each(platforms)("%s: template carries every code file of its deploy project", (platform) => {

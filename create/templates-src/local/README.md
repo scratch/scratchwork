@@ -25,8 +25,10 @@ PORT=43118
 SCRATCHWORK_STORAGE_DIR=.scratchwork-local-data
 ```
 
-Edit `local.ts` to change fixed server settings (allowed users, project
-naming, and so on).
+Edit `local.ts` to change fixed server settings. The scaffolded access policy
+is an `example.com` placeholder: `allowedUsers: "@example.com"` only admits
+Google accounts on that domain, so replace it with your own domain(s) and
+emails (comma-separated), or `"public"` to let anyone sign in.
 
 ## Run
 
