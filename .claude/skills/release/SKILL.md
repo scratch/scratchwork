@@ -53,7 +53,8 @@ Everything else (branches, PRs, dry runs) proceeds without asking.
   untagged HEADs).
 - Dry-run first: `bun scripts/publish-packages.ts --dry-run` — review the five
   package names and the version.
-- **Gate:** confirm, then `bun scripts/publish-packages.ts`. If a mid-sequence
+- **Gate:** confirm, then `bun scripts/publish-packages.ts` — with npm 2FA, ask the
+  user for a fresh authenticator code and pass `--otp <code>`. If a mid-sequence
   publish fails, report which packages went live and which didn't; already-published
   versions cannot be re-pushed, so the fix is forward (patch release), not retry.
 
