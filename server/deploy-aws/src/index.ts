@@ -5,6 +5,6 @@ export {
   type AwsDeployResult,
   type AwsDeployServerConfig,
   type ScratchworkServerConfig,
-} from "./deploy";
-export { DynamoDbPrimitiveDbLive, makeDynamoDbPrimitiveDb, readDynamoDbPrimitiveDbConfig, type DynamoDbPrimitiveDbConfig } from "./dynamodb-db";
-export { S3ObjectStorageLive } from "./s3-storage";
+} from "./deploy.ts";
+export { DynamoDbPrimitiveDbLive, makeDynamoDbPrimitiveDb, readDynamoDbPrimitiveDbConfig, type DynamoDbPrimitiveDbConfig } from "./dynamodb-db.ts";
+export { S3ObjectStorageLive } from "./s3-storage.ts";

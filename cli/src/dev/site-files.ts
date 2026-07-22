@@ -10,9 +10,9 @@ import * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { SiteFileError, SiteFiles } from "../../../shared/src/site/files";
-import type { SitePath } from "../../../shared/src/site/paths";
-import { isWithinRoot } from "../../../shared/src/util/fs";
+import { SiteFileError, SiteFiles } from "@scratchwork/shared/site/files";
+import type { SitePath } from "@scratchwork/shared/site/paths";
+import { isWithinRoot } from "@scratchwork/shared/util/fs";
 
 /** Builds a SiteFiles service that reads from the given site root directory. */
 export function layer(

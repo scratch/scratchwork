@@ -3,8 +3,8 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { isLoopbackHost } from "../../../shared/src/util/url";
-import { isReservedSlug, isSafeProjectIdentifier, normalizeAccessGroup, safeDomain, type AccessGroup } from "./access";
+import { isLoopbackHost } from "@scratchwork/shared/util/url";
+import { isReservedSlug, isSafeProjectIdentifier, normalizeAccessGroup, safeDomain, type AccessGroup } from "./access.ts";
 
 /** An environment-variable map from any platform (process.env, Worker vars, Lambda env). */
 export type EnvVars = Readonly<Record<string, string | undefined>>;

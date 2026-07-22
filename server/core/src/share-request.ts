@@ -6,9 +6,9 @@
  * place.
  */
 import * as Effect from "effect/Effect";
-import type { ShareRequest } from "../../../shared/src/publish/api";
-import { HttpError } from "./http";
-import type { ShareChanges } from "./site-store";
+import type { ShareRequest } from "@scratchwork/shared/publish/api";
+import { HttpError } from "./http.ts";
+import type { ShareChanges } from "./site-store.ts";
 
 /** Maximum accepted share request body size. */
 export const MAX_SHARE_BODY_BYTES = 64 * 1024;

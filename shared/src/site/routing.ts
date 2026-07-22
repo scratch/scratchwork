@@ -7,9 +7,9 @@
  */
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import { extensionOf } from "./content";
-import { SiteFileError, SiteFiles } from "./files";
-import { isMarkedMarkdownRenderer } from "./marker";
+import { extensionOf } from "./content.ts";
+import { SiteFileError, SiteFiles } from "./files.ts";
+import { isMarkedMarkdownRenderer } from "./marker.ts";
 import {
   basenameSitePath,
   dirnameSitePath,
@@ -17,7 +17,7 @@ import {
   joinSitePath,
   stripExtension,
   type SitePath,
-} from "./paths";
+} from "./paths.ts";
 
 /** The favicon a browser requests by default when a page names none. */
 export const FAVICON_ICO_PATH = "favicon.ico";

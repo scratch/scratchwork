@@ -1,0 +1,19 @@
+// Publish build (scripts/build-packages.ts): tsc emit into dist/. The paths
+// mapping resolves @scratchwork/shared against its already-built dist so this
+// package's emit consumes the same declarations consumers will (and tsc never
+// pulls workspace .ts sources from outside rootDir). Build order: shared first.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true,
+    "paths": {
+      "@scratchwork/shared/*": ["../../shared/dist/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

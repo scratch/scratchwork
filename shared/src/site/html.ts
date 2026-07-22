@@ -4,7 +4,7 @@
  * served — for example to inject the live-reload script.
  */
 import * as Effect from "effect/Effect";
-import type { SitePath } from "./paths";
+import type { SitePath } from "./paths.ts";
 
 /** Where the HTML being transformed came from: a static file or a renderer shell. */
 export interface HtmlContext {

@@ -19,7 +19,6 @@
   "include": [
     "src/**/*.ts",
     "../scripts/**/*.ts",
-    "../core/src/assets.d.ts",
     "../../shared/src/**/*.ts",
     "../../shared/**/*.js"
   ]

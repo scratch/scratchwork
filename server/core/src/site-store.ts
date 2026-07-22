@@ -12,8 +12,8 @@ import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
-import type { PublishResponse } from "../../../shared/src/publish/api";
-import { contentType } from "../../../shared/src/site/content";
+import type { PublishResponse } from "@scratchwork/shared/publish/api";
+import { contentType } from "@scratchwork/shared/site/content";
 import {
   accessGroupMatches,
   accessGroupModify,
@@ -21,9 +21,9 @@ import {
   isReservedSlug,
   isSafeProjectIdentifier,
   type AccessGroup,
-} from "./access";
-import type { AuthUser } from "./auth";
-import type { ServerConfigShape } from "./config";
+} from "./access.ts";
+import type { AuthUser } from "./auth.ts";
+import type { ServerConfigShape } from "./config.ts";
 import {
   PrimitiveDb,
   PrimitiveDbConflict,
@@ -31,9 +31,9 @@ import {
   type JsonValue,
   type PrimitiveDbRecord,
   type PrimitiveDbShape,
-} from "./db";
-import { makeObjectSiteFiles } from "./object-site-files";
-import type { PublishRequest } from "./publish-request";
+} from "./db.ts";
+import { makeObjectSiteFiles } from "./object-site-files.ts";
+import type { PublishRequest } from "./publish-request.ts";
 import {
   blobObjectKey,
   OWNER_INDEX_NAMESPACE,
@@ -48,9 +48,9 @@ import {
   type SiteOwner,
   type SiteRecord,
   type SiteRevisionRecord,
-} from "./site-records";
-import { ObjectStorage, sha256Hex, StorageError, type ObjectStorageShape } from "./storage";
-import { randomRevisionId, randomSlug } from "./tokens";
+} from "./site-records.ts";
+import { ObjectStorage, sha256Hex, StorageError, type ObjectStorageShape } from "./storage.ts";
+import { randomRevisionId, randomSlug } from "./tokens.ts";
 
 /** How many random-name candidates a create attempts before giving up. */
 const RANDOM_NAME_ATTEMPTS = 3;

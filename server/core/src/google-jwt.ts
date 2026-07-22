@@ -10,8 +10,8 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { errorMessage } from "../../../shared/src/util/errors";
-import { CLOCK_SKEW_SECONDS, verifyRs256Jwt } from "./jwt-rs256";
+import { errorMessage } from "@scratchwork/shared/util/errors";
+import { CLOCK_SKEW_SECONDS, verifyRs256Jwt } from "./jwt-rs256.ts";
 
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 

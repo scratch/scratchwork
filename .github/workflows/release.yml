@@ -1,0 +1,48 @@
+# Release: triggered by pushing a tag vX.Y.Z (see RELEASING.md). Runs the same
+# one gate as ci.yml — a release never ships what `bun run ci` wouldn't pass —
+# then cross-compiles the CLI target matrix, packages the archives, and
+# publishes a GitHub Release with the matching CHANGELOG.md section as notes.
+# npm publishing stays a manual local step for now (scripts/publish-packages.ts).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Creates the GitHub Release and uploads its assets.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run ci
+      - name: Assert the tag matches the lockstep version
+        run: |
+          version="$(bun -e 'console.log(JSON.parse(await Bun.file("package.json").text()).version)')"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package.json version v${version}" >&2
+            echo "bump with \`bun scripts/set-version.ts\` and re-tag" >&2
+            exit 1
+          fi
+      - name: Cross-compile the CLI target matrix
+        run: cd cli && bun build.js --all-targets
+      - name: Package archives and checksums
+        run: bun scripts/package-release.ts
+      - name: Extract release notes from CHANGELOG.md
+        run: bun scripts/release-notes.ts "${GITHUB_REF_NAME#v}" > release/notes.md
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            release/*.tar.gz release/checksums.txt \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release/notes.md

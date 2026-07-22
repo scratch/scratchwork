@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { serverConfigEnv, serverConfigEnvNames, validateDeploymentConfig, type ScratchworkServerConfig } from "./server-settings";
+import { serverConfigEnv, serverConfigEnvNames, validateDeploymentConfig, type ScratchworkServerConfig } from "../src/deploy/server-settings.ts";
 
 describe("serverConfigEnvNames", () => {
   test("pins the exact non-secret variable set forwarded to cloud deploys", () => {

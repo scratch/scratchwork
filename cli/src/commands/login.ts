@@ -18,7 +18,7 @@ import * as Effect from "effect/Effect";
 import {
   type CliTokenRequest,
   type CliTokenResponse,
-} from "../../../shared/src/publish/api";
+} from "@scratchwork/shared/publish/api";
 import { apiClient, mapApiErrors } from "../api";
 import {
   generateLoginProof,

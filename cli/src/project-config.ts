@@ -15,7 +15,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Either from "effect/Either";
 import * as Predicate from "effect/Predicate";
-import { isSafeProjectIdentifier } from "../../shared/src/site/identifiers";
+import { isSafeProjectIdentifier } from "@scratchwork/shared/site/identifiers";
 import { resolveProjectByPath, type ResolvedProjectRef } from "./api";
 import { normalizeServerUrl } from "./auth";
 import { CliError } from "./errors";

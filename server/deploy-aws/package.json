@@ -2,8 +2,19 @@
   "name": "@scratchwork/server-deploy-aws",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
   "description": "AWS Lambda + S3 deployment package for the Scratchwork server.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/scratch/scratchwork.git",
+    "directory": "server/deploy-aws"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./dynamodb-db": "./src/dynamodb-db.ts",

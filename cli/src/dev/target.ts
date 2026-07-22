@@ -7,8 +7,8 @@ import * as FileSystem from "@effect/platform/FileSystem";
 import type { PlatformError } from "@effect/platform/Error";
 import * as Path from "@effect/platform/Path";
 import * as Effect from "effect/Effect";
-import { isMarkedMarkdownRenderer } from "../../../shared/src/site/marker";
-import { isSafeSitePath } from "../../../shared/src/site/paths";
+import { isMarkedMarkdownRenderer } from "@scratchwork/shared/site/marker";
+import { isSafeSitePath } from "@scratchwork/shared/site/paths";
 import { CliError } from "../errors";
 import type { DevTarget } from "./types";
 

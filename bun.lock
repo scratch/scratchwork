@@ -22,6 +22,7 @@
         "@effect/printer": "0.49.0",
         "@effect/printer-ansi": "0.49.0",
         "@effect/typeclass": "0.40.0",
+        "@scratchwork/shared": "workspace:*",
         "effect": "3.21.4",
       },
       "devDependencies": {
@@ -105,9 +106,12 @@
         "esbuild": "^0.21.5",
       },
     },
-    "server": {
-      "name": "scratchwork-server",
+    "scratchwork.dev/server": {
+      "name": "@scratchwork/deploy-scratchwork-dev",
       "version": "0.1.0",
+      "dependencies": {
+        "@scratchwork/server-deploy-cloudflare": "workspace:*",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "typescript": "^6.0.3",
@@ -118,6 +122,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@effect/platform": "0.96.2",
+        "@scratchwork/shared": "workspace:*",
         "effect": "3.21.4",
       },
       "devDependencies": {
@@ -147,6 +152,7 @@
       "dependencies": {
         "@effect/platform": "0.96.2",
         "@scratchwork/server-core": "workspace:*",
+        "@scratchwork/shared": "workspace:*",
         "cloudflare": "^6.5.0",
         "effect": "3.21.4",
       },
@@ -450,6 +456,8 @@
 
     "@scratchwork/deploy-local-dev": ["@scratchwork/deploy-local-dev@workspace:deploy/local-dev"],
 
+    "@scratchwork/deploy-scratchwork-dev": ["@scratchwork/deploy-scratchwork-dev@workspace:scratchwork.dev/server"],
+
     "@scratchwork/e2e": ["@scratchwork/e2e@workspace:e2e"],
 
     "@scratchwork/server-core": ["@scratchwork/server-core@workspace:server/core"],
@@ -631,8 +639,6 @@
     "scratchwork-cli": ["scratchwork-cli@workspace:cli"],
 
     "scratchwork-renderer": ["scratchwork-renderer@workspace:renderer"],
-
-    "scratchwork-server": ["scratchwork-server@workspace:server"],
 
     "semver": ["semver@7.8.5", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA=="],
 

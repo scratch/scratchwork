@@ -18,12 +18,12 @@ import * as Either from "effect/Either";
 import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { sha256Base64Url } from "../../../shared/src/crypto/digest";
-import { errorMessage } from "../../../shared/src/util/errors";
-import { accessGroupMatches } from "./access";
-import * as AuthCrypto from "./auth-crypto";
-import { verifyCloudflareAccessToken } from "./cloudflare-jwt";
-import { ServerConfig, type AuthConfig, type CloudflareAccessAuthConfig, type OAuthAuthConfig } from "./config";
+import { sha256Base64Url } from "@scratchwork/shared/crypto/digest";
+import { errorMessage } from "@scratchwork/shared/util/errors";
+import { accessGroupMatches } from "./access.ts";
+import * as AuthCrypto from "./auth-crypto.ts";
+import { verifyCloudflareAccessToken } from "./cloudflare-jwt.ts";
+import { ServerConfig, type AuthConfig, type CloudflareAccessAuthConfig, type OAuthAuthConfig } from "./config.ts";
 import {
   clearOauthStateCookie,
   clearSessionCookie,
@@ -32,13 +32,13 @@ import {
   oauthStateToken,
   sessionCookie,
   STATE_TTL_SECONDS,
-} from "./cookies";
+} from "./cookies.ts";
 import {
   postAuthorizationCodeGrant,
   verifyGoogleIdToken,
   type GoogleIdTokenClaims,
-} from "./google-jwt";
-import { timingSafeEqual } from "./tokens";
+} from "./google-jwt.ts";
+import { timingSafeEqual } from "./tokens.ts";
 
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";

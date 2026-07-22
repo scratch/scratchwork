@@ -12,8 +12,8 @@ import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Schema from "effect/Schema";
 import { homedir } from "node:os";
-import { sha256Base64Url } from "../../shared/src/crypto/digest";
-import { isLoopbackHost } from "../../shared/src/util/url";
+import { sha256Base64Url } from "@scratchwork/shared/crypto/digest";
+import { isLoopbackHost } from "@scratchwork/shared/util/url";
 import { CliError, errorMessage } from "./errors";
 
 const AUTH_FILE = "auth.json";

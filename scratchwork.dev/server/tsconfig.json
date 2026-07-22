@@ -4,19 +4,24 @@
     "allowImportingTsExtensions": true,
     "allowJs": true,
     "baseUrl": ".",
-    "checkJs": false,
     "ignoreDeprecations": "6.0",
     "lib": ["ESNext", "DOM"],
     "module": "Preserve",
     "moduleDetection": "force",
     "moduleResolution": "bundler",
     "noEmit": true,
-    "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,
     "target": "ESNext",
     "types": ["bun"],
     "verbatimModuleSyntax": true
   },
-  "include": ["scripts/**/*.ts"]
+  "include": [
+    "deploy.ts",
+    "local.ts",
+    "cloudflare-config.ts",
+    "server-config.ts",
+    "../../shared/src/**/*.ts",
+    "../../shared/**/*.js"
+  ]
 }

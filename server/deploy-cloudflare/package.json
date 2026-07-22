@@ -2,8 +2,19 @@
   "name": "@scratchwork/server-deploy-cloudflare",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
   "description": "Cloudflare Worker + R2 deployment package for the Scratchwork server.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/scratch/scratchwork.git",
+    "directory": "server/deploy-cloudflare"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./d1-db": "./src/d1-db.ts",
@@ -21,6 +32,7 @@
   "dependencies": {
     "@effect/platform": "0.96.2",
     "@scratchwork/server-core": "workspace:*",
+    "@scratchwork/shared": "workspace:*",
     "cloudflare": "^6.5.0",
     "effect": "3.21.4"
   },

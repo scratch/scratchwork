@@ -1,0 +1,16 @@
+// Publish build (scripts/build-packages.ts): per-file tsc emit of ESM JS +
+// declarations into dist/, mirroring src/ so the package.json exports
+// patterns map 1:1. rewriteRelativeImportExtensions turns the in-repo `.ts`
+// specifiers into `.js` in the emitted output so dist runs under plain Node.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.js"],
+  "exclude": ["src/**/*.test.ts"]
+}

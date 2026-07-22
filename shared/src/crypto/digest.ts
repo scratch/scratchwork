@@ -7,7 +7,7 @@
  * and callers wrap these helpers exactly once with Effect.tryPromise.
  */
 import * as Encoding from "effect/Encoding";
-import { toArrayBuffer } from "../encoding/bytes";
+import { toArrayBuffer } from "../encoding/bytes.ts";
 
 /** Computes the base64url SHA-256 digest of a UTF-8 string (PKCE S256). */
 export async function sha256Base64Url(value: string): Promise<string> {

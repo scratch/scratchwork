@@ -7,13 +7,13 @@ import * as Effect from "effect/Effect";
 import {
   collectComponentNames,
   componentFileCandidates,
-} from "../../../shared/src/site/components";
-import { SiteFiles } from "../../../shared/src/site/files";
-import type { SitePath } from "../../../shared/src/site/paths";
+} from "@scratchwork/shared/site/components";
+import { SiteFiles } from "@scratchwork/shared/site/files";
+import type { SitePath } from "@scratchwork/shared/site/paths";
 import type {
   RendererSource,
   SiteServeEvent,
-} from "../../../shared/src/site/serve";
+} from "@scratchwork/shared/site/serve";
 import { errorMessage } from "../errors";
 import { problem, status } from "./output";
 import type { DevState } from "./types";

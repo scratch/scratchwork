@@ -13,7 +13,7 @@ import * as Either from "effect/Either";
 import * as Encoding from "effect/Encoding";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { toArrayBuffer } from "../../../shared/src/encoding/bytes";
+import { toArrayBuffer } from "@scratchwork/shared/encoding/bytes";
 
 /** Tolerated clock difference for exp/nbf/iat claim checks. */
 export const CLOCK_SKEW_SECONDS = 300;

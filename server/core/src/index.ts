@@ -5,7 +5,7 @@
  */
 
 // The HTTP app — one Effect handling every request; provide the services below to run it.
-export { app } from "./app";
+export { app } from "./app.ts";
 
 // Server configuration, parsed from SCRATCHWORK_* environment variables.
 export {
@@ -18,10 +18,10 @@ export {
   type EnvVars,
   type OAuthAuthConfig,
   type ServerConfigShape,
-} from "./config";
+} from "./config.ts";
 
 // The auth service (Google OAuth or Cloudflare Access) and signed session tokens.
-export { Auth, AuthError, AuthLive, createSessionToken, makeAuth, type AuthShape, type AuthUser } from "./auth";
+export { Auth, AuthError, AuthLive, createSessionToken, makeAuth, type AuthShape, type AuthUser } from "./auth.ts";
 
 // Access-group expressions ("public" | "private" | emails/@domains) and identifier helpers.
 export {
@@ -32,7 +32,7 @@ export {
   isSafeProjectIdentifier,
   type AccessGroup,
   type AccessPrincipal,
-} from "./access";
+} from "./access.ts";
 
 // Versioned JSON key-value contract with an in-memory implementation for tests/local runs.
 export {
@@ -44,7 +44,7 @@ export {
   type JsonValue,
   type PrimitiveDbRecord,
   type PrimitiveDbShape,
-} from "./db";
+} from "./db.ts";
 
 // Blob-store contract with a local-filesystem implementation.
 export {
@@ -56,7 +56,7 @@ export {
   type PutObjectOptions,
   type PutObjectResult,
   type StoredObject,
-} from "./storage";
+} from "./storage.ts";
 
 // The site store: publishing, loading, and access policy over storage + db.
 export {
@@ -72,8 +72,8 @@ export {
   type PublishResult,
   type ShareRole,
   type SiteStoreShape,
-} from "./site-store";
+} from "./site-store.ts";
 
 // Persisted record shapes and route matching for published sites.
-export { type SiteFileObject, type SiteRecord, type SiteRevisionRecord } from "./site-records";
-export { projectForRequest, routeRest } from "./routes";
+export { type SiteFileObject, type SiteRecord, type SiteRevisionRecord } from "./site-records.ts";
+export { projectForRequest, routeRest } from "./routes.ts";

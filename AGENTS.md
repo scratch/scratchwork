@@ -15,19 +15,27 @@ Package names are `@scratchwork/<dir>` for everything under `server/` and `deplo
   importable by both cli and server.
 - `cli/` — the `scratchwork` CLI, built with Effect: dev server with hot reload,
   publishing, login.
-- `server/` — deploy tooling scripts only; the server itself lives in its sub-workspaces:
+- `server/` — the server workspaces (the directory itself is not a workspace):
   - `server/core/` — platform-neutral publishing server core: auth, routing, storage
-    contracts.
+    contracts, and the deploy-script tooling (`src/deploy/`).
   - `server/deploy-aws/` — AWS Lambda + S3/DynamoDB adapters.
   - `server/deploy-cloudflare/` — Cloudflare Worker + R2/D1 adapters.
   - `server/deploy-local/` — local Bun deploy target.
 - `deploy/*` — one deployment project per domain (generic-aws, cloudflare-vanilla,
   cloudflare-access, local-dev), each deployable with one command.
+- `scratchwork.dev/` — the scratchwork.dev site: `server/` is its Cloudflare
+  deployment workspace (same shape as `deploy/*`), `www/` the homepage project
+  published to it (content, not a workspace).
 - `e2e/` — full-loop publish e2e: real server (local-dev, miniflare, LocalStack) driven
   by the real CLI, hermetic OAuth provider standing in for Google.
 
-`examples/` and `notes/` are deliberately outside the gate: examples are user-facing
-sample content, notes are working documents. Nothing in them is imported by shipped code.
+`examples/`, `notes/`, and `scratchwork.dev/www/` are deliberately outside the gate:
+examples are user-facing sample content, notes are working documents, and
+`scratchwork.dev/www/` is the published homepage project (landing page plus the
+`install.sh` / `install.md` entry points — the install script alone is exercised by
+`scripts/check-install-sh.ts` in the gate). Nothing in them is imported by shipped code.
+`scratchwork.dev/server/` is different: it is the deployment workspace for the
+scratchwork.dev server, inside the gate like the `deploy/*` projects.
 
 ## Build and test
 

@@ -1,0 +1,20 @@
+// Publish build (scripts/build-packages.ts): tsc emit into dist/, resolving
+// workspace dependencies against their already-built dist (see
+// server/core/tsconfig.build.json for why). Build order: shared, core, then this.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true,
+    "paths": {
+      "@scratchwork/shared/*": ["../../shared/dist/*"],
+      "@scratchwork/server-core": ["../core/dist/index"],
+      "@scratchwork/server-core/*": ["../core/dist/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

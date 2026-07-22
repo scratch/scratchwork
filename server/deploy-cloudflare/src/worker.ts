@@ -1,8 +1,8 @@
 import * as HttpApp from "@effect/platform/HttpApp";
 import { AuthLive, app, makeServerConfigLayer, SiteStoreLive, type EnvVars } from "@scratchwork/server-core";
 import * as Layer from "effect/Layer";
-import { D1PrimitiveDbLive, type D1DatabaseBinding } from "./d1-db";
-import { R2ObjectStorageLive, type R2BucketBinding } from "./r2-storage";
+import { D1PrimitiveDbLive, type D1DatabaseBinding } from "./d1-db.ts";
+import { R2ObjectStorageLive, type R2BucketBinding } from "./r2-storage.ts";
 
 /** The Worker environment: the two service bindings plus string config vars. */
 interface CloudflareEnv extends Record<string, R2BucketBinding | D1DatabaseBinding | string | undefined> {

@@ -5,8 +5,8 @@
  * request schema in api.ts) and the CLI decodes clone downloads through it.
  */
 import * as Schema from "effect/Schema";
-import { decodedBase64ByteLength } from "../encoding/base64";
-import { isSafeSitePath } from "../site/paths";
+import { decodedBase64ByteLength } from "../encoding/base64.ts";
+import { isSafeSitePath } from "../site/paths.ts";
 
 /** Version number both sides must agree on before reading a bundle. */
 export const PUBLISH_BUNDLE_VERSION = 1;

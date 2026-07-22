@@ -5,9 +5,9 @@
  * and normalizes the open path.
  */
 import * as Effect from "effect/Effect";
-import { decodedBase64ByteLength } from "../../../shared/src/encoding/base64";
-import { type PublishRequestBody } from "../../../shared/src/publish/api";
-import { HttpError } from "./http";
+import { decodedBase64ByteLength } from "@scratchwork/shared/encoding/base64";
+import { type PublishRequestBody } from "@scratchwork/shared/publish/api";
+import { HttpError } from "./http.ts";
 
 /** Maximum accepted request body size (base64-encoded JSON, larger than the content caps). */
 export const MAX_PUBLISH_BODY_BYTES = 30 * 1024 * 1024;

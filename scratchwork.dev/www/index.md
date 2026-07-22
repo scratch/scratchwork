@@ -20,7 +20,9 @@ Publish your work publicly to share it with the world, or privately to share it 
 Just ask your agent:
 
 ```
-Create a simple "hello world" website and publish it to scratchwork.dev. Give everyone with an email @example.com permission to read it.
+Create a simple "hello world" website and publish it to
+scratchwork.dev. Give everyone with an email @example.com
+permission to read it.
 ```
 
 ## Slow start

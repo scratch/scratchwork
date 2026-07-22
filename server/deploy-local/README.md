@@ -1,8 +1,14 @@
 # Local Scratchwork deploy
 
-This package runs the shared Scratchwork server app as a local deploy target,
-with local file storage and an in-memory database. It lets any deploy project
-under `deploy/` run its server config locally.
+This package runs the shared
+[Scratchwork](https://github.com/scratch/scratchwork) server app as a local
+deploy target, with local file storage and an in-memory database. It lets any
+deploy project under `deploy/` run its server config locally.
+
+Published to npm as `@scratchwork/server-deploy-local`: built ESM JavaScript
+with type declarations. Requires Bun ≥ 1.2 at runtime (it serves with
+`@effect/platform-bun`); the other deploy packages are runtime-neutral.
+MIT license.
 
 Run the generic local development server from the repo root:
 

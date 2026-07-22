@@ -1,0 +1,20 @@
+{
+  "name": "@scratchwork/deploy-scratchwork-dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ci": "bun run typecheck && bun run test",
+    "deploy": "bun deploy.ts",
+    "local": "bun local.ts",
+    "test": "bun test --pass-with-no-tests",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@scratchwork/server-deploy-cloudflare": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^6.0.3"
+  }
+}

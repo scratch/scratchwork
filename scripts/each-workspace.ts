@@ -10,12 +10,11 @@
  * interleave. Every workspace runs even if another fails, and all failures
  * are reported at the end.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createPool, runPooled } from "./pool";
+import { repoRoot as root, workspaceDirs } from "./workspaces";
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const script = process.argv[2];
 const runnable = ["typecheck", "test", "ci"];
 if (!script || !runnable.includes(script)) {
@@ -28,25 +27,6 @@ if (!script || !runnable.includes(script)) {
 // never run concurrently. Each listed workspace starts only after its blockers finish.
 // e2e bundles the CLI (which embeds renderer artifacts), so it starts after cli.
 const runAfter: Record<string, string[]> = { cli: ["renderer"], e2e: ["cli"] };
-
-/** Expands the root workspaces globs (literal dirs and trailing "/*") into workspace dirs. */
-function workspaceDirs(): string[] {
-  const rootPackage = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  const dirs: string[] = [];
-  for (const pattern of rootPackage.workspaces as string[]) {
-    if (pattern.endsWith("/*")) {
-      const parent = pattern.slice(0, -2);
-      for (const entry of readdirSync(join(root, parent), { withFileTypes: true })) {
-        if (entry.isDirectory() && existsSync(join(root, parent, entry.name, "package.json"))) {
-          dirs.push(join(parent, entry.name));
-        }
-      }
-    } else {
-      dirs.push(pattern);
-    }
-  }
-  return dirs;
-}
 
 const dirs = workspaceDirs();
 const missing = dirs.filter((dir) => {

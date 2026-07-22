@@ -8,7 +8,7 @@ import type * as HttpServerResponse from "@effect/platform/HttpServerResponse";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
-import type { SitePath } from "./paths";
+import type { SitePath } from "./paths.ts";
 
 /** Failure reading a site file, tagged with why (forbidden, missing, or IO error). */
 export class SiteFileError extends Data.TaggedError("SiteFileError")<{

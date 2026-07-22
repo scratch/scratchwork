@@ -8,7 +8,7 @@ import * as FileSystem from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
-import { markMarkdownRenderer } from "../../../shared/src/site/marker";
+import { markMarkdownRenderer } from "@scratchwork/shared/site/marker";
 import { CliError } from "../errors";
 import { loadShell } from "../renderer/default";
 import type { TemplateConfig } from "../types";

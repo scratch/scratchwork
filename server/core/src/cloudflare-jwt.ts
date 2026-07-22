@@ -9,8 +9,8 @@
  */
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import { errorMessage } from "../../../shared/src/util/errors";
-import { CLOCK_SKEW_SECONDS, verifyRs256Jwt, verifyRs256JwtWithJwks } from "./jwt-rs256";
+import { errorMessage } from "@scratchwork/shared/util/errors";
+import { CLOCK_SKEW_SECONDS, verifyRs256Jwt, verifyRs256JwtWithJwks } from "./jwt-rs256.ts";
 
 /** Raised when an Access token fails signature or claim validation. */
 export class CloudflareJwtError extends Data.TaggedError("CloudflareJwtError")<{
