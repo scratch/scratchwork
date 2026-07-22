@@ -1,6 +1,6 @@
 {
   "name": "@scratchwork/shared",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Code shared between the Scratchwork CLI and server: the publish API contract, site serving helpers, and small utilities.",
   "license": "MIT",
