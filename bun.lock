@@ -11,7 +11,7 @@
     },
     "cli": {
       "name": "scratchwork-cli",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "scratchwork": "./src/index.ts",
       },
@@ -30,9 +30,20 @@
         "typescript": "^6.0.3",
       },
     },
+    "create": {
+      "name": "create-scratchwork-server",
+      "version": "0.2.0",
+      "bin": {
+        "create-scratchwork-server": "./src/index.ts",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "deploy/cloudflare-access": {
       "name": "@scratchwork/deploy-cloudflare-access",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@scratchwork/server-deploy-cloudflare": "workspace:*",
       },
@@ -43,7 +54,7 @@
     },
     "deploy/cloudflare-vanilla": {
       "name": "@scratchwork/deploy-cloudflare-vanilla",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@scratchwork/server-deploy-cloudflare": "workspace:*",
       },
@@ -54,7 +65,7 @@
     },
     "deploy/generic-aws": {
       "name": "@scratchwork/deploy-generic-aws",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@scratchwork/server-deploy-aws": "workspace:*",
         "@scratchwork/server-deploy-local": "workspace:*",
@@ -66,7 +77,7 @@
     },
     "deploy/local-dev": {
       "name": "@scratchwork/deploy-local-dev",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@scratchwork/server-deploy-local": "workspace:*",
       },
@@ -77,7 +88,7 @@
     },
     "e2e": {
       "name": "@scratchwork/e2e",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@aws-sdk/client-dynamodb": "3.1075.0",
         "@aws-sdk/client-s3": "3.1075.0",
@@ -95,7 +106,7 @@
     },
     "renderer": {
       "name": "scratchwork-renderer",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "htm": "^3.1.1",
         "prismjs": "^1.29.0",
@@ -108,7 +119,7 @@
     },
     "scratchwork.dev/server": {
       "name": "@scratchwork/deploy-scratchwork-dev",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@scratchwork/server-deploy-cloudflare": "workspace:*",
       },
@@ -119,7 +130,7 @@
     },
     "server/core": {
       "name": "@scratchwork/server-core",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@effect/platform": "0.96.2",
         "@scratchwork/shared": "workspace:*",
@@ -132,7 +143,7 @@
     },
     "server/deploy-aws": {
       "name": "@scratchwork/server-deploy-aws",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@aws-sdk/client-dynamodb": "3.1075.0",
         "@aws-sdk/client-s3": "3.1075.0",
@@ -148,7 +159,7 @@
     },
     "server/deploy-cloudflare": {
       "name": "@scratchwork/server-deploy-cloudflare",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@effect/platform": "0.96.2",
         "@scratchwork/server-core": "workspace:*",
@@ -164,7 +175,7 @@
     },
     "server/deploy-local": {
       "name": "@scratchwork/server-deploy-local",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@effect/platform": "0.96.2",
         "@effect/platform-bun": "0.90.0",
@@ -178,7 +189,7 @@
     },
     "shared": {
       "name": "@scratchwork/shared",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@effect/platform": "0.96.2",
         "effect": "3.21.4",
@@ -521,6 +532,8 @@
     "combined-stream": ["combined-stream@1.0.8", "", { "dependencies": { "delayed-stream": "~1.0.0" } }, "sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg=="],
 
     "cookie": ["cookie@1.1.1", "", {}, "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ=="],
+
+    "create-scratchwork-server": ["create-scratchwork-server@workspace:create"],
 
     "delayed-stream": ["delayed-stream@1.0.0", "", {}, "sha512-ZySD7Nf91aLB0RxL4KGrKHBXl7Eds1DAmEdcoVawXnLD7SDhpNgtuII2aAkg7a7QS41jxPSZ17p4VdGnMHk3MQ=="],
 

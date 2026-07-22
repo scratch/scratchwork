@@ -15,10 +15,16 @@
  *      imported under Bun instead.
  *   4. Typecheck a tiny consumer under NodeNext resolution against the
  *      shipped declarations — the strictest consumer tsc configuration.
+ *   5. Run the packed create-scratchwork-server bin under plain Node (what
+ *      `npm create` uses) to scaffold every platform template into the
+ *      consumer, then typecheck each scaffolded project — its pinned
+ *      @scratchwork/* deps resolve to the packed tarballs, so the templates
+ *      are verified against exactly what ships, without the network.
  */
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TEMPLATE_SOURCES } from "../create/generate-templates";
 import { buildAndStage } from "./build-packages";
 import { repoRoot } from "./workspaces";
 
@@ -65,7 +71,11 @@ function checkTarball(pkg: PackedPackage): void {
     const declaration = js.slice(0, -3) + ".d.ts";
     if (!entries.includes(declaration)) failures.push(`${name}: ${js} has no matching ${declaration}`);
   }
-  const offenders = entries.filter((entry) => /\.test\.|\/test\/|\.ts$/.test(entry) && !entry.endsWith(".d.ts"));
+  // templates/ deliberately ships .ts sources: they are the scaffolded
+  // project's own files, not this package's code.
+  const offenders = entries.filter(
+    (entry) => /\.test\.|\/test\/|\.ts$/.test(entry) && !entry.endsWith(".d.ts") && !entry.startsWith("package/templates/"),
+  );
   if (offenders.length > 0) failures.push(`${name}: tarball ships test or source files: ${offenders.join(", ")}`);
 
   const raw = JSON.stringify(manifest);
@@ -75,7 +85,8 @@ function checkTarball(pkg: PackedPackage): void {
   }
   if (manifest.version !== rootVersion) failures.push(`${name}: version ${manifest.version} != lockstep ${rootVersion}`);
   if (manifest.license !== "MIT" || manifest.repository == null) failures.push(`${name}: missing license/repository metadata`);
-  for (const [subpath, target] of Object.entries(manifest.exports as Record<string, { types: string; default: string }>)) {
+  if (manifest.exports == null && manifest.bin == null) failures.push(`${name}: manifest has neither exports nor bin`);
+  for (const [subpath, target] of Object.entries((manifest.exports ?? {}) as Record<string, { types: string; default: string }>)) {
     for (const kind of ["types", "default"] as const) {
       const file = target[kind];
       // Pattern exports are spot-checked by the import smoke below instead.
@@ -85,16 +96,26 @@ function checkTarball(pkg: PackedPackage): void {
       }
     }
   }
+  for (const [binName, file] of Object.entries((manifest.bin ?? {}) as Record<string, string>)) {
+    if (!entries.includes(`package/${file.slice(2)}`)) {
+      failures.push(`${name}: bin["${binName}"] points at ${file}, which is not in the tarball`);
+    }
+  }
 }
 
-/** Lays out a consumer install: tarballs extracted into node_modules/@scratchwork,
+/** Lays out a consumer install: tarballs extracted into node_modules,
  * every other dependency symlinked from the repo root's node_modules. */
 function assembleConsumer(packages: readonly PackedPackage[]): string {
   const consumer = mkdtempSync(join(tmpdir(), "scratchwork-consumer-"));
   const nodeModules = join(consumer, "node_modules");
   mkdirSync(join(nodeModules, "@scratchwork"), { recursive: true });
+  // Never symlink a package that the tarballs provide: the repo's
+  // node_modules entry for it is a workspace symlink, and copying the
+  // extracted tarball through that symlink would overwrite the workspace
+  // source (this bit create-scratchwork-server once).
+  const packedNames = new Set(packages.map((pkg) => pkg.name));
   for (const entry of readdirSync(join(repoRoot, "node_modules"))) {
-    if (entry === "@scratchwork" || entry.startsWith(".")) continue;
+    if (entry === "@scratchwork" || entry.startsWith(".") || packedNames.has(entry)) continue;
     symlinkSync(join(repoRoot, "node_modules", entry), join(nodeModules, entry));
   }
   for (const pkg of packages) {
@@ -160,6 +181,55 @@ if (failures.length === 0) {
   if (!tsc.success) {
     failures.push(`consumer typecheck under NodeNext failed:\n${tsc.stdout.toString().slice(0, 2000)}`);
   }
+
+  // Scaffold every create-scratchwork-server template with the packed bin
+  // under plain Node (npm create's runtime) and typecheck the result — the
+  // scaffolded @scratchwork/* deps resolve to the packed tarballs already
+  // installed in the consumer's node_modules.
+  const createPackage = join(consumer, "node_modules", "create-scratchwork-server");
+  const packedPlatforms = existsSync(join(createPackage, "templates"))
+    ? readdirSync(join(createPackage, "templates"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+    : [];
+  const expectedPlatforms = Object.keys(TEMPLATE_SOURCES).sort();
+  if (packedPlatforms.join(",") !== expectedPlatforms.join(",")) {
+    failures.push(
+      `create-scratchwork-server: packed templates [${packedPlatforms.join(", ")}] != expected [${expectedPlatforms.join(", ")}]`,
+    );
+  }
+  for (const platform of packedPlatforms) {
+    const label = `create-scratchwork-server (${platform})`;
+    const targetName = `scaffold-${platform}`;
+    const target = join(consumer, targetName);
+    const scaffoldRun = Bun.spawnSync(
+      ["node", join(createPackage, "dist", "index.js"), targetName, "--platform", platform],
+      { cwd: consumer, stdout: "pipe", stderr: "pipe" },
+    );
+    if (!scaffoldRun.success) {
+      failures.push(`${label}: scaffold under node failed:\n${scaffoldRun.stderr.toString().slice(0, 2000)}`);
+      continue;
+    }
+    for (const required of ["package.json", "tsconfig.json", "README.md", ".gitignore"]) {
+      if (!existsSync(join(target, required))) failures.push(`${label}: scaffold is missing ${required}`);
+    }
+    const scaffolded = JSON.parse(readFileSync(join(target, "package.json"), "utf8"));
+    for (const [dep, range] of Object.entries((scaffolded.dependencies ?? {}) as Record<string, string>)) {
+      if (dep.startsWith("@scratchwork/") && range !== rootVersion) {
+        failures.push(`${label}: scaffold pins ${dep}@${range}, expected the lockstep ${rootVersion}`);
+      }
+    }
+    // The scaffolded template pins typescript ^6 (baseUrl etc.), so run the
+    // consumer-resolved typescript rather than whatever `bunx tsc` picks up.
+    const scaffoldTsc = Bun.spawnSync(
+      ["node", join(consumer, "node_modules", "typescript", "bin", "tsc"), "-p", "tsconfig.json"],
+      { cwd: target, stdout: "pipe", stderr: "pipe" },
+    );
+    if (!scaffoldTsc.success) {
+      failures.push(`${label}: scaffolded project typecheck failed:\n${scaffoldTsc.stdout.toString().slice(0, 2000)}`);
+    }
+  }
   rmSync(consumer, { recursive: true, force: true });
 }
 
@@ -169,5 +239,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-npm-pack: ${packages.length} tarballs verified (shape, manifest, Node/Bun import smoke, NodeNext consumer typecheck)`,
+  `check-npm-pack: ${packages.length} tarballs verified (shape, manifest, Node/Bun import smoke, NodeNext consumer typecheck, ` +
+    `scaffolded ${Object.keys(TEMPLATE_SOURCES).length} create-scratchwork-server templates)`,
 );

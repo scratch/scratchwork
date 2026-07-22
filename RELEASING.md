@@ -18,8 +18,10 @@ with confirmation gates at the irreversible steps:
 5. **npm:** from a clean checkout of the tag, with an authenticated npm CLI:
    `bun scripts/publish-packages.ts` (add `--dry-run` first if in doubt;
    with npm 2FA, add `--otp <fresh code>`).
-   Publishes `@scratchwork/shared`, `@scratchwork/server-core`, and the three
-   `@scratchwork/server-deploy-*` packages in dependency order.
+   Publishes `@scratchwork/shared`, `@scratchwork/server-core`, the three
+   `@scratchwork/server-deploy-*` packages, and `create-scratchwork-server`
+   (the `npm create scratchwork-server` scaffolder, with its platform
+   templates generated from `deploy/*` at pack time) in dependency order.
 6. **Homepage:** republish the install entry points so
    `https://scratchwork.dev/install.sh` serves the current content:
    `scratchwork publish scratchwork.dev/www --project www --public` (with the

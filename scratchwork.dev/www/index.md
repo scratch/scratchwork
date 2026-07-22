@@ -77,25 +77,29 @@ If you'd like to be able to pay for a hosted option, upvote [this Github issue](
 
 ## Hosting your own server
 
-Scratchwork is open source and can be hosted anywhere. To configure your own server, use:
+Scratchwork is open source and can be hosted anywhere. To scaffold your own server project, use:
 
 ```sh
 # Configure for Cloudflare (a worker using R2 and D1)
-npm create scratchwork-server-cloudflare
+npm create scratchwork-server my-server -- --platform cloudflare
 ```
 
-swap `cloudflare` for your favorite serverless platform: `aws`, `vercel`, `railway`, or `smolmachines`.
+swap `cloudflare` for `aws` (Lambda + S3 + DynamoDB) or `local` (a single-machine Bun server). The scaffolded README covers the credentials and settings each platform needs.
 
 Run your server locally with
 
 ```sh
-node local.ts
+cd my-server
+bun install
+bun run local
 ```
 
 and deploy it with
 
 ```sh
-node deploy.ts
+bun run deploy
 ```
+
+(the `local` platform runs locally only, so it has no deploy step).
 
 <MadeWithScratchwork />

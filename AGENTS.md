@@ -5,8 +5,8 @@ Scratchwork is tool for publishing static HTML and Markdown artifacts publicly a
 ## Workspace map
 
 Package names are `@scratchwork/<dir>` for everything under `server/` and `deploy/`
-(plus `@scratchwork/shared` and `@scratchwork/e2e`); the two odd ones out are
-`scratchwork-renderer` and `scratchwork-cli`.
+(plus `@scratchwork/shared` and `@scratchwork/e2e`); the odd ones out are
+`scratchwork-renderer`, `scratchwork-cli`, and `create-scratchwork-server`.
 
 - `renderer/` — build-once pipeline producing the single-file universal renderer
   (`index.html`). **Deliberately plain browser JS — the one exception to invariant 1.**
@@ -23,6 +23,12 @@ Package names are `@scratchwork/<dir>` for everything under `server/` and `deplo
   - `server/deploy-local/` — local Bun deploy target.
 - `deploy/*` — one deployment project per domain (generic-aws, cloudflare-vanilla,
   cloudflare-access, local-dev), each deployable with one command.
+- `create/` — the `create-scratchwork-server` package behind
+  `npm create scratchwork-server`: scaffolds a standalone self-hosted server
+  project. Its platform templates are generated from the `deploy/*` sources at
+  pack time (`create/generate-templates.ts`), never committed. Plain
+  Effect-free TypeScript, like `scripts/` — the shipped bin must run under
+  npm's Node.
 - `scratchwork.dev/` — the scratchwork.dev site: `server/` is its Cloudflare
   deployment workspace (same shape as `deploy/*`), `www/` the homepage project
   published to it (content, not a workspace).
