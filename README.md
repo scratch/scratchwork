@@ -112,6 +112,28 @@ scratchwork share --role write bob@example.com
 scratchwork revoke alice@example.com
 ```
 
+### Comments
+
+Private projects can let their viewers leave comments on any page:
+
+```sh
+scratchwork publish --comments        # turn comments on (persisted in .scratchwork.json)
+scratchwork publish --no-comments     # turn them off again
+```
+
+Every page of a comments-enabled project gets a small "Comments" button in the
+lower-right corner. Anyone with read access can add a comment (click "Add
+comment", then click anywhere on the page to pin it), resolve or reopen one,
+and edit or delete their own; the project's writers and admins can edit or
+delete anyone's. Comments are anchored to the element that was clicked and fall
+back to coarser positions if a republish changes the page, and they persist
+across republishes.
+
+Comments require a private project — `--comments` together with `--public`
+fails the publish, because a public page would collect comments from the whole
+internet. Turning the toggle on or off requires admin access, like the
+public/private flip.
+
 Deployments live as projects under `deploy/`, one per domain, each deployable with one command:
 
 ```sh

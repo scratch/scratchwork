@@ -86,11 +86,25 @@ const publishCommand = Command.make(
     isPrivateFlag: Options.boolean("private").pipe(
       Options.withDescription("Make the project readable only by its owner and share grants."),
     ),
+    commentsFlag: Options.boolean("comments").pipe(
+      Options.withDescription("Let authenticated viewers leave comments on the project's pages. Requires a private project. Default: saved config or the project's current setting (off for a new project)."),
+    ),
+    noCommentsFlag: Options.boolean("no-comments").pipe(
+      Options.withDescription("Turn viewer comments off."),
+    ),
   },
-  ({ path, server, project, isPublicFlag, isPrivateFlag }) =>
+  ({ path, server, project, isPublicFlag, isPrivateFlag, commentsFlag, noCommentsFlag }) =>
     isPublicFlag && isPrivateFlag
       ? Effect.fail(new CliError({ code: 1, message: "scratchwork publish: pass at most one of --public and --private" }))
-      : runPublish({ path, server, project, isPublic: isPublicFlag ? true : isPrivateFlag ? false : undefined }),
+      : commentsFlag && noCommentsFlag
+        ? Effect.fail(new CliError({ code: 1, message: "scratchwork publish: pass at most one of --comments and --no-comments" }))
+        : runPublish({
+            path,
+            server,
+            project,
+            isPublic: isPublicFlag ? true : isPrivateFlag ? false : undefined,
+            commentsEnabled: commentsFlag ? true : noCommentsFlag ? false : undefined,
+          }),
 ).pipe(Command.withDescription("Publish a static Scratchwork project to a server"));
 
 const projectRefOptions = {

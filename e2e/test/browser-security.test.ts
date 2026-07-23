@@ -62,6 +62,7 @@ describe("browser security [local-dev]", () => {
   const privateSite = tempDir("scratchwork-browser-private-");
   const attackerSite = tempDir("scratchwork-browser-attacker-");
   const homeSite = tempDir("scratchwork-browser-homepage-");
+  const commentsSite = tempDir("scratchwork-browser-comments-");
 
   beforeAll(async () => {
     const port = nextPort();
@@ -91,15 +92,17 @@ describe("browser security [local-dev]", () => {
     writeFileSync(join(privateSite.path, "data.txt"), "secret-data");
     writeFileSync(join(attackerSite.path, "index.html"), "<h1>attacker-page</h1>");
     writeFileSync(join(homeSite.path, "index.html"), "<h1>home-secret</h1>");
+    writeFileSync(join(commentsSite.path, "index.html"), "<html><body><h1 id=\"headline\">comments-page</h1></body></html>");
 
     await loginCli(context, ownerHome.path, privateSite.path);
-    for (const [dir, name, visibility] of [
+    for (const [dir, name, ...flags] of [
       [privateSite.path, "sec-private", "--private"],
       [attackerSite.path, "sec-attacker", "--public"],
       [homeSite.path, "sec-home", "--private"],
+      [commentsSite.path, "sec-comments", "--private", "--comments"],
     ] as const) {
       const published = await runCli(
-        ["publish", ".", "--server", appUrl, "--project", name, visibility],
+        ["publish", ".", "--server", appUrl, "--project", name, ...flags],
         dir,
         { SCRATCHWORK_HOME: ownerHome.path },
       );
@@ -118,6 +121,7 @@ describe("browser security [local-dev]", () => {
     privateSite.remove();
     attackerSite.remove();
     homeSite.remove();
+    commentsSite.remove();
   });
 
   /** Completes the browser login redirect dance through the hermetic provider. */
@@ -276,6 +280,67 @@ describe("browser security [local-dev]", () => {
       ]);
       expect(response?.status()).toBe(403);
       expect(await page.content()).toContain("Cross-origin");
+    } finally {
+      await ctx.close();
+    }
+  }, 60_000);
+
+  test("the comments widget runs for viewers in-project; foreign pages cannot reach the comments API", async () => {
+    const { ctx, page } = await signedInContext();
+    try {
+      // The injected widget boots inside the real page and renders its UI in
+      // a shadow root once the same-origin list fetch (cookie-authenticated)
+      // succeeds.
+      await page.goto(`${contentUrl}/sec-comments/`, { waitUntil: "domcontentloaded" });
+      expect(await page.textContent("#headline")).toBe("comments-page");
+      await page.waitForFunction(() => {
+        const host = document.querySelector("[data-scratchwork-comments]");
+        return host?.shadowRoot?.querySelector(".fab") != null;
+      });
+
+      // Creating a comment exactly as the widget does works from in-project JS.
+      const created = await page.evaluate(async () => {
+        const response = await fetch("/sec-comments/__scratchwork/comments", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ page: "/", body: "from a real browser", anchors: [{ selector: "#headline", x: 5, y: 5 }, { selector: "body", x: 5, y: 5 }] }),
+        });
+        return response.status;
+      });
+      expect(created).toBe(200);
+
+      // A reload shows the persisted comment as a pin.
+      await page.goto(`${contentUrl}/sec-comments/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => {
+        const host = document.querySelector("[data-scratchwork-comments]");
+        return host?.shadowRoot?.querySelector(".pin") != null;
+      });
+
+      // Another project's page on the same origin: the Referer proves the
+      // requesting page is foreign, so the request dies at the cross-project
+      // guard (and the path-scoped cookie wouldn't attach anyway).
+      await page.goto(`${contentUrl}/sec-attacker/`, { waitUntil: "domcontentloaded" });
+      const attackerRead = await page.evaluate(async () =>
+        (await fetch("/sec-comments/__scratchwork/comments?page=/")).status);
+      expect(attackerRead).toBe(403);
+      // The public attacker page gets no widget injected.
+      expect(await page.evaluate(() => document.querySelector("[data-scratchwork-comments]") == null)).toBe(true);
+
+      // A cross-origin top-level form POST (real Origin header, no preflight)
+      // from the app origin to the content-host comments API is rejected by
+      // the origin gate before auth even runs (403, not a 401 cookie demand).
+      await page.goto(`${appUrl}/`, { waitUntil: "domcontentloaded" });
+      const [response] = await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        page.evaluate((target) => {
+          const form = document.createElement("form");
+          form.method = "POST";
+          form.action = `${target}/sec-comments/__scratchwork/comments`;
+          document.body.append(form);
+          form.submit();
+        }, contentUrl),
+      ]);
+      expect(response?.status()).toBe(403);
     } finally {
       await ctx.close();
     }

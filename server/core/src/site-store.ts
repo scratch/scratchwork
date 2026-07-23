@@ -23,6 +23,7 @@ import {
   type AccessGroup,
 } from "./access.ts";
 import type { AuthUser } from "./auth.ts";
+import { purgeProjectComments } from "./comment-store.ts";
 import type { ServerConfigShape } from "./config.ts";
 import {
   PrimitiveDb,
@@ -66,6 +67,12 @@ export interface LoadedSite {
  * `url`, which the HTTP layer adds. `project` is authoritative: on a random-name server
  * it is how the CLI learns the assigned name. */
 export type PublishResult = Omit<PublishResponse, "url">;
+
+/** The publish-time boolean toggles resolved from the request and the existing record. */
+interface ProjectToggles {
+  readonly isPublic: boolean;
+  readonly commentsEnabled: boolean;
+}
 
 /** A user's effective permission level on one project, from least to greatest. Each
  * level implies the ones below it; `owner` is fixed at creation and cannot be granted. */
@@ -181,13 +188,15 @@ function publishProject(
 
     const loaded = requested == null ? null : yield* loadSiteRecord(db, requested);
     const isPublic = request.isPublic ?? loaded?.value.isPublic ?? false;
+    const commentsEnabled = request.commentsEnabled ?? loaded?.value.commentsEnabled ?? false;
     yield* validateIsPublic(isPublic, config);
+    yield* validateCommentsEnabled(commentsEnabled, isPublic);
 
     if (loaded != null && requested != null) {
       if (!roleAtLeast(projectRole(loaded.value, user, config), "write")) {
         return yield* Effect.fail(projectNameTaken(requested));
       }
-      return yield* updateProject(storage, db, request, user, loaded, isPublic, config);
+      return yield* updateProject(storage, db, request, user, loaded, { isPublic, commentsEnabled }, config);
     }
 
     if (config.usersCanSetProjectNames) {
@@ -197,12 +206,12 @@ function publishProject(
       if (isReservedSlug(requested)) {
         return yield* Effect.fail(new SiteStoreError({ status: 400, message: `Project name is reserved: ${requested}` }));
       }
-      return yield* writeNewProject(storage, db, request, user, requested, isPublic).pipe(
+      return yield* writeNewProject(storage, db, request, user, requested, { isPublic, commentsEnabled }).pipe(
         Effect.catchTag("PrimitiveDbConflict", () => Effect.fail(projectNameTaken(requested))),
       );
     }
 
-    return yield* createRandomProject(storage, db, request, user, isPublic);
+    return yield* createRandomProject(storage, db, request, user, { isPublic, commentsEnabled });
   });
 }
 
@@ -213,7 +222,7 @@ function createRandomProject(
   db: PrimitiveDbShape,
   request: PublishRequest,
   user: AuthUser,
-  isPublic: boolean,
+  toggles: ProjectToggles,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
     for (let attempt = 0; attempt < RANDOM_NAME_ATTEMPTS; attempt += 1) {
@@ -221,7 +230,7 @@ function createRandomProject(
       // Defense in depth: today's slug alphabet cannot produce a reserved name.
       if (isReservedSlug(slug)) continue;
       if ((yield* loadSiteRecord(db, slug)) != null) continue;
-      const result = yield* writeNewProject(storage, db, request, user, slug, isPublic).pipe(
+      const result = yield* writeNewProject(storage, db, request, user, slug, toggles).pipe(
         Effect.catchTag("PrimitiveDbConflict", () => Effect.succeed(null)),
       );
       if (result != null) return result;
@@ -242,14 +251,14 @@ function writeNewProject(
   request: PublishRequest,
   user: AuthUser,
   project: string,
-  isPublic: boolean,
+  toggles: ProjectToggles,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError | PrimitiveDbConflict> {
   return Effect.gen(function* () {
     const now = new Date().toISOString();
     const revision = yield* buildRevision(storage, project, request, now);
     const record = siteRecord({
       project,
-      isPublic,
+      ...toggles,
       readers: "private",
       writers: "private",
       admins: "private",
@@ -266,20 +275,22 @@ function writeNewProject(
     return {
       project: written.value.project,
       isPublic: written.value.isPublic,
+      commentsEnabled: written.value.commentsEnabled,
       openPath: request.openPath,
     };
   });
 }
 
 /** Writes a new immutable revision and flips an existing project pointer. Writers may
- * publish content; flipping the public toggle along the way stays an admin action. */
+ * publish content; flipping the public or comments toggle along the way stays an
+ * admin action. */
 function updateProject(
   storage: ObjectStorageShape,
   db: PrimitiveDbShape,
   request: PublishRequest,
   user: AuthUser,
   loaded: LoadedDbRecord<SiteRecord>,
-  isPublic: boolean,
+  toggles: ProjectToggles,
   config: ServerConfigShape,
 ): Effect.Effect<PublishResult, SiteStoreError | StorageError> {
   return Effect.gen(function* () {
@@ -287,15 +298,18 @@ function updateProject(
     if (!roleAtLeast(role, "write")) {
       return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Publishing updates requires write access to this project" }));
     }
-    if (isPublic !== loaded.value.isPublic && !roleAtLeast(role, "admin")) {
+    if (toggles.isPublic !== loaded.value.isPublic && !roleAtLeast(role, "admin")) {
       return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Changing a project between public and private requires admin access" }));
+    }
+    if (toggles.commentsEnabled !== loaded.value.commentsEnabled && !roleAtLeast(role, "admin")) {
+      return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Turning project comments on or off requires admin access" }));
     }
 
     const now = new Date().toISOString();
     const revision = yield* buildRevision(storage, loaded.value.project, request, now);
     const record = siteRecord({
       project: loaded.value.project,
-      isPublic,
+      ...toggles,
       readers: loaded.value.readers,
       writers: loaded.value.writers,
       admins: loaded.value.admins,
@@ -309,6 +323,7 @@ function updateProject(
     return {
       project: written.value.project,
       isPublic: written.value.isPublic,
+      commentsEnabled: written.value.commentsEnabled,
       openPath: request.openPath,
     };
   });
@@ -457,7 +472,8 @@ function revokeWarnings(
 }
 
 /** Deletes the mutable project record and owner index, releasing the name. Immutable
- * blobs are retained. */
+ * blobs are retained; comments are purged first so a name reclaimed by a different
+ * owner can never inherit them. */
 function deleteProject(
   db: PrimitiveDbShape,
   project: string,
@@ -469,6 +485,9 @@ function deleteProject(
     if (!isProjectOwner(loaded.value, user)) {
       return yield* Effect.fail(new SiteStoreError({ status: 403, message: "Only the project owner can delete this project" }));
     }
+    yield* purgeProjectComments(db, project).pipe(
+      Effect.mapError((error) => new SiteStoreError({ status: 500, message: `Could not delete project comments: ${error.message}`, cause: error })),
+    );
     yield* db.delete(PROJECTS_NAMESPACE, project, { ifMatch: loaded.version }).pipe(Effect.mapError(dbError));
     yield* db.delete(OWNER_INDEX_NAMESPACE, ownerIndexKey(loaded.value.owner, project)).pipe(Effect.ignore);
   });
@@ -594,6 +613,7 @@ function projectNameTaken(project: string): SiteStoreError {
 function siteRecord(input: {
   readonly project: string;
   readonly isPublic: boolean;
+  readonly commentsEnabled: boolean;
   readonly readers: AccessGroup;
   readonly writers: AccessGroup;
   readonly admins: AccessGroup;
@@ -606,6 +626,7 @@ function siteRecord(input: {
     version: 5,
     project: input.project,
     isPublic: input.isPublic,
+    commentsEnabled: input.commentsEnabled,
     readers: input.readers,
     writers: input.writers,
     admins: input.admins,
@@ -623,6 +644,19 @@ function siteRecord(input: {
 function validateIsPublic(isPublic: boolean, config: ServerConfigShape): Effect.Effect<void, SiteStoreError> {
   if (isPublic && !config.allowPublicProjects) {
     return Effect.fail(new SiteStoreError({ status: 403, message: "This server does not allow public projects (allowPublicProjects is off)" }));
+  }
+  return Effect.void;
+}
+
+/** Fails when a publish asks for comments on a public project: comments identify
+ * viewers through the private-content access flow, and an open comment box on a
+ * public page would accumulate unbounded anonymous-adjacent state. */
+function validateCommentsEnabled(commentsEnabled: boolean, isPublic: boolean): Effect.Effect<void, SiteStoreError> {
+  if (commentsEnabled && isPublic) {
+    return Effect.fail(new SiteStoreError({
+      status: 400,
+      message: "Comments require a private project. Publish with --private, or disable comments with --no-comments.",
+    }));
   }
   return Effect.void;
 }

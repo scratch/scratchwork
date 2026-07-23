@@ -16,6 +16,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const artifacts = [
   "shared/src/site/default-renderer.generated.js",
   "shared/src/assets/figure-svg.generated.ts",
+  "server/core/src/comments-widget.generated.ts",
 ];
 
 const status = Bun.spawnSync(
