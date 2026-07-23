@@ -18,6 +18,12 @@ export const MAX_PUBLISH_FILE_BYTES = 10 * 1024 * 1024;
 /** Maximum decoded size of the whole bundle. */
 export const MAX_PUBLISH_TOTAL_BYTES = 25 * 1024 * 1024;
 
+/** Site-path prefix reserved for server-provided routes under each project
+ * (today the comments API and widget at /:project/__scratchwork/comments).
+ * Publishing files under it is rejected so published content can never be
+ * shadowed by — or shadow — a server route. */
+export const RESERVED_SITE_PREFIX = "__scratchwork";
+
 /** A validated publish request: the shared wire body (see the shared api module)
  * plus a normalized `openPath` and the computed decoded bundle size. `project`
  * stays optional at the protocol level — the server mints a name when the naming
@@ -41,6 +47,12 @@ export function normalizePublishRequest(raw: PublishRequestBody): Effect.Effect<
     // bundle schema; the size math still needs each file's decoded byte length.
     let totalBytes = 0;
     for (const file of raw.bundle.files) {
+      if (file.path === RESERVED_SITE_PREFIX || file.path.startsWith(`${RESERVED_SITE_PREFIX}/`)) {
+        return yield* Effect.fail(new HttpError({
+          status: 400,
+          message: `Reserved site path: ${file.path} ("${RESERVED_SITE_PREFIX}/" is server-owned)`,
+        }));
+      }
       const bytes = decodedBase64ByteLength(file.contentBase64);
       if (bytes == null) {
         return yield* Effect.fail(new HttpError({ status: 400, message: `Invalid base64 content: ${file.path}` }));
@@ -63,6 +75,7 @@ export function normalizePublishRequest(raw: PublishRequestBody): Effect.Effect<
       openPath,
       project: raw.project,
       isPublic: raw.isPublic,
+      commentsEnabled: raw.commentsEnabled,
       totalBytes,
     };
   });

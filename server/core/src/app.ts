@@ -21,7 +21,10 @@ import { dispatchApiRoute, requireReadableSite } from "./api-routes.ts";
 import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth.ts";
 import { ServerConfig, type ServerConfigShape } from "./config.ts";
 import { PrimitiveDb } from "./db.ts";
-import { projectAccessCookie, projectAccessCookieValues } from "./cookies.ts";
+import type { CommentStoreError } from "./comment-store.ts";
+import { dispatchCommentsRoute, injectCommentsWidget } from "./comments-routes.ts";
+import { projectAccessCookie } from "./cookies.ts";
+import { blockedCrossProjectSubresource, isSubresourceRequest, projectAccessUser } from "./project-access.ts";
 import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages.ts";
 import {
   appBaseUrl,
@@ -29,6 +32,7 @@ import {
   homepageBaseUrl,
   HttpError,
   requestBaseUrl,
+  requestHomepageOrigin,
   sameOrigin,
   securityHeaders,
 } from "./http.ts";
@@ -48,7 +52,7 @@ const HANDOFF_PARAM = "_scratchwork_handoff";
 /** Return type shared by every request handler in this file. */
 type AppEffect = Effect.Effect<
   HttpServerResponse.HttpServerResponse,
-  HttpError | AuthError | SiteStoreError | StorageError,
+  HttpError | AuthError | SiteStoreError | StorageError | CommentStoreError,
   ServerConfig | SiteStore | Auth | PrimitiveDb
 >;
 
@@ -61,6 +65,7 @@ export const app: HttpApp.Default<never, ServerConfig | SiteStore | Auth | Primi
         HttpError: (error) => Effect.succeed(errorResponse(request, error.status, error.message)),
         AuthError: (error) => Effect.succeed(errorResponse(request, error.status, error.message)),
         SiteStoreError: (error) => Effect.succeed(errorResponse(request, error.status, error.message)),
+        CommentStoreError: (error) => Effect.succeed(errorResponse(request, error.status, error.message)),
         StorageError: (error) => Effect.succeed(errorResponse(request, 500, error.message)),
       }),
     );
@@ -99,6 +104,10 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
 
     const apiResponse = yield* dispatchApiRoute(request, url);
     if (apiResponse != null) return apiResponse;
+
+    // Comments routes accept mutations, so they dispatch before the GET/HEAD gate.
+    const commentsResponse = yield* dispatchCommentsRoute(request, url);
+    if (commentsResponse != null) return commentsResponse;
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       return yield* Effect.fail(new HttpError({ status: 405, message: "Method not allowed" }));
@@ -268,26 +277,6 @@ function redeemHandoffToken(
   });
 }
 
-/** Verifies the request's project-access cookies and current read access, if any. */
-function projectAccessUser(
-  request: HttpServerRequest.HttpServerRequest,
-  auth: AuthShape,
-  site: LoadedSite,
-  config: ServerConfigShape,
-): Effect.Effect<AuthUser | null> {
-  return Effect.gen(function* () {
-    for (const value of projectAccessCookieValues(request, site.record.project)) {
-      const user = yield* auth
-        .verifyProjectAccessToken(value, site.record.project, "cookie")
-        .pipe(Effect.orElseSucceed(() => null));
-      // Re-check read access on every request so revocation applies immediately even
-      // though the cookie itself is long-lived.
-      if (user != null && canReadProject(site.record, user, config)) return user;
-    }
-    return null;
-  });
-}
-
 /** Serves the resolved project's file for the request path, or 308-redirects to the
  * trailing-slash canonical root when the path has no remainder under the route. */
 function serveProjectContent(
@@ -302,7 +291,10 @@ function serveProjectContent(
   return serveSiteFiles(site, rest, url.search, `/${site.record.project}`, isPublic);
 }
 
-/** Serves one file from a loaded site under the given canonical path prefix. */
+/** Serves one file from a loaded site under the given canonical path prefix.
+ * Private comments-enabled projects get the comments widget injected into
+ * every HTML response (homepage serving passes an empty prefix and never
+ * injects — comments are a content-origin feature). */
 function serveSiteFiles(
   site: LoadedSite,
   rest: string,
@@ -310,10 +302,12 @@ function serveSiteFiles(
   pathPrefix: string,
   isPublic: boolean,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpError, ServerConfig> {
+  const withComments = !isPublic && site.record.commentsEnabled && pathPrefix !== "";
   return servePath(rest, search, {
     cacheControl: () => NO_STORE,
     defaultFaviconSvg: FIGURE_SVG,
     headers: () => publishedSiteHeaders(isPublic),
+    htmlTransforms: withComments ? [injectCommentsWidget(pathPrefix)] : [],
     pathPrefix,
     rendererFallback: Effect.succeed(defaultRendererHtml),
   }).pipe(
@@ -346,32 +340,6 @@ function canonicalContentPath(url: URL, project: string): string {
   params.delete(HANDOFF_PARAM);
   const search = params.toString();
   return `/${project}${rest}${search === "" ? "" : `?${search}`}`;
-}
-
-/** Detects browser subresource loads (fetch/img/script/frame/...) via Sec-Fetch-Dest.
- * Requests without the header (non-browsers, old browsers) count as navigations. */
-function isSubresourceRequest(request: HttpServerRequest.HttpServerRequest): boolean {
-  const dest = request.headers["sec-fetch-dest"]?.toLowerCase();
-  return dest != null && dest !== "document";
-}
-
-/** Returns true for a private-content subresource request whose initiating page is outside
- * this project. The Referer is script-unforgeable, and content responses set
- * `Referrer-Policy: same-origin`, so in-project pages always send a usable full path while
- * another project's page sends its own path (or nothing, if it strips the referrer) and is
- * refused. Top-level navigations are never blocked. */
-function blockedCrossProjectSubresource(
-  request: HttpServerRequest.HttpServerRequest,
-  project: string,
-): boolean {
-  if (!isSubresourceRequest(request)) return false;
-  const referer = request.headers.referer;
-  if (referer == null) return true;
-  try {
-    return routeRest(new URL(referer).pathname, project) == null;
-  } catch {
-    return true;
-  }
 }
 
 /** Redirects an unauthenticated private-content viewer to the app host's handoff route. */
@@ -440,18 +408,6 @@ function publishedSiteHeaders(isPublic: boolean): Record<string, string> {
 // are handled before dispatch reaches here, so they keep their server-level behavior
 // on every host and the matching homepage files are unreachable.
 // ---------------------------------------------------------------------------
-
-/** Matches the request's origin against the configured homepage origins; null when the
- * server has no homepage or the request is for another host. */
-function requestHomepageOrigin(
-  request: HttpServerRequest.HttpServerRequest,
-  config: ServerConfigShape,
-): string | null {
-  if (config.homepageProject == null || config.homepageUrls.length === 0) return null;
-  const requestBase = requestBaseUrl(request);
-  if (requestBase == null) return null;
-  return config.homepageUrls.find((url) => sameOrigin(url, requestBase)) ?? null;
-}
 
 /** Serves the homepage project on a home origin. Non-canonical home origins 308 to the
  * canonical one; an unpublished homepage answers with setup instructions instead. */
