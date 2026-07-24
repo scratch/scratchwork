@@ -21,6 +21,8 @@ scratchwork --version
 scratchwork dev [path]
 ```
 
+Later, update to the latest release with `scratchwork update`.
+
 To publish to a running Scratchwork server:
 
 ```sh

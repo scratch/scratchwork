@@ -1,21 +1,25 @@
 #!/bin/sh
-# Installs the scratchwork CLI from GitHub Releases.
+# Bootstraps the scratchwork CLI from GitHub Releases: downloads the release
+# archive for this platform, verifies its checksum, and hands off to the
+# binary's own `scratchwork install` for everything after that (choosing the
+# install directory, installing, and PATH advice).
 #
 #   curl -fsSL https://scratchwork.dev/install.sh | bash
 #
 # Environment:
 #   SCRATCHWORK_VERSION        pin a version (e.g. 0.2.0); default: latest release
-#   SCRATCHWORK_INSTALL_DIR    install destination; default: ~/.local/bin
+#   SCRATCHWORK_INSTALL_DIR    install destination, read by `scratchwork install`;
+#                              default: ~/.local/bin
 #   SCRATCHWORK_DOWNLOAD_BASE  override the release download base URL (used by
 #                              the hermetic ci test; default: GitHub Releases)
 #
-# The script never escalates privileges. Re-running upgrades in place.
+# The script never escalates privileges. Re-running upgrades in place, and an
+# installed CLI can upgrade itself with `scratchwork update`.
 # Agent-readable manual steps: https://scratchwork.dev/install.md
 
 set -euf
 
 base="${SCRATCHWORK_DOWNLOAD_BASE:-https://github.com/scratch/scratchwork/releases}"
-install_dir="${SCRATCHWORK_INSTALL_DIR:-$HOME/.local/bin}"
 version="${SCRATCHWORK_VERSION:-}"
 
 fail() {
@@ -70,7 +74,7 @@ asset="scratchwork-v$version-$os-$arch.tar.gz"
 expected="$(grep -F "  $asset" "$tmp/checksums.txt" | cut -d' ' -f1 || true)"
 [ -n "$expected" ] || fail "release v$version has no prebuilt binary for $os-$arch"
 
-# ── Download, verify, extract, install ──────────────────────────────────────
+# ── Download, verify, extract ───────────────────────────────────────────────
 printf 'Downloading scratchwork v%s (%s-%s)...\n' "$version" "$os" "$arch"
 curl -fsSL "$base/download/v$version/$asset" -o "$tmp/$asset" || fail "could not download $base/download/v$version/$asset"
 actual="$(sha256 "$tmp/$asset")"
@@ -78,18 +82,7 @@ actual="$(sha256 "$tmp/$asset")"
 
 tar -xzf "$tmp/$asset" -C "$tmp"
 [ -f "$tmp/scratchwork" ] || fail "archive $asset did not contain a scratchwork binary"
-mkdir -p "$install_dir"
 chmod 755 "$tmp/scratchwork"
-mv -f "$tmp/scratchwork" "$install_dir/scratchwork"
 
-printf 'Installed %s\n' "$install_dir/scratchwork"
-"$install_dir/scratchwork" --version >/dev/null || fail "the installed binary failed to run"
-printf 'scratchwork %s is ready.\n' "$("$install_dir/scratchwork" --version)"
-
-case ":$PATH:" in
-  *":$install_dir:"*) ;;
-  *)
-    printf '\n%s is not on your PATH. Add it, e.g.:\n' "$install_dir"
-    printf '  export PATH="%s:$PATH"\n' "$install_dir"
-    ;;
-esac
+# ── Hand off to the verified binary for the actual install ──────────────────
+"$tmp/scratchwork" install || fail "scratchwork install failed"

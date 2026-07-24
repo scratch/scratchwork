@@ -83,6 +83,27 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
       "scratchwork publish --private",
     ],
   },
+  install: {
+    notes: [
+      "Installs the binary you are running, so it is normally invoked by the install script (curl -fsSL https://scratchwork.dev/install.sh | bash) or from a freshly extracted release archive.",
+      "Prints how to add the install directory to PATH when it is not already on it.",
+    ],
+    examples: [
+      "./scratchwork install",
+      "./scratchwork install --dir ~/bin",
+      "SCRATCHWORK_INSTALL_DIR=~/bin ./scratchwork install",
+    ],
+  },
+  update: {
+    notes: [
+      "Downloads the latest GitHub release for this platform, verifies its checksum, and replaces the running binary in place.",
+      "Pin or downgrade with SCRATCHWORK_VERSION.",
+    ],
+    examples: [
+      "scratchwork update",
+      "SCRATCHWORK_VERSION=0.2.0 scratchwork update",
+    ],
+  },
   login: {
     notes: [
       "Starts a loopback callback server and opens the browser for Google OAuth.",
