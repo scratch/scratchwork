@@ -112,6 +112,18 @@ scratchwork share --role write bob@example.com
 scratchwork revoke alice@example.com
 ```
 
+## Connect from Claude Code (MCP)
+
+Every Scratchwork server is also a remote [MCP](https://modelcontextprotocol.io) server, so agents can publish and manage projects with no CLI installed. In Claude Code:
+
+```sh
+claude mcp add --transport http scratchwork https://app.your-domain.example/mcp
+```
+
+Then run `/mcp` inside Claude Code to authenticate — a browser opens, you sign in with the server's regular login, approve the connection, and the agent gets `publish`, `list_projects`, `project_info`, `share_project`, `unpublish_project`, `delete_project`, and `whoami` tools. The publish tool takes file contents directly (the agent reads your local files), and responses carry the live URL.
+
+The endpoint speaks stateless streamable HTTP with MCP-spec OAuth 2.1 (discovery, dynamic client registration, PKCE), so any conforming MCP client works the same way. If you are already logged in with the CLI, the stored bearer token from `~/.scratchwork/auth.json` also works: `claude mcp add --transport http scratchwork <server>/mcp --header "Authorization: Bearer <token>"`.
+
 Deployments live as projects under `deploy/`, one per domain, each deployable with one command:
 
 ```sh
