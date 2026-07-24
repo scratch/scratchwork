@@ -77,10 +77,10 @@ import {
 import { StorageError } from "./storage.ts";
 
 /** Failures any API handler may raise. */
-type RouteError = HttpError | AuthError | SiteStoreError | StorageError;
+export type RouteError = HttpError | AuthError | SiteStoreError | StorageError;
 
 /** Services available to every API handler. */
-type RouteServices = ServerConfig | SiteStore | Auth | PrimitiveDb;
+export type RouteServices = ServerConfig | SiteStore | Auth | PrimitiveDb;
 
 /** What the policy middleware hands a handler: the request, its parsed URL,
  * the principal the declared auth mode resolved, for project routes the
@@ -102,7 +102,7 @@ export interface ApiContext<Name extends ScratchworkEndpointName = ScratchworkEn
 }
 
 /** The size cap applied while reading a payload endpoint's request body. */
-interface PayloadLimit {
+export interface PayloadLimit {
   readonly maxBytes: number;
   /** The message of the 413 an oversized body receives. */
   readonly message: string;
@@ -447,9 +447,9 @@ export function dispatchApiRoute(
   });
 }
 
-/** Applies the declared policy in order — origin, principal, project gate,
- * payload decode — then runs the handler and encodes its result through the
- * endpoint's success schema. */
+/** Applies the declared policy in order — origin, principal, then the shared
+ * endpoint pipeline — and encodes the handler's result through the endpoint's
+ * success schema. */
 function runRoute(
   route: RegisteredRoute,
   project: string | null,
@@ -467,17 +467,15 @@ function runRoute(
         ? yield* auth.currentUser(request)
         : null;
 
-    let site: LoadedSite | null = null;
-    if (project != null) {
-      const siteStore = yield* SiteStore;
-      site = yield* requireReadableSite(yield* siteStore.loadProject(project), user, config);
-    }
-
-    const payload = Option.isSome(route.endpoint.payloadSchema) && route.payloadLimit != null
-      ? yield* readEndpointPayload(request, route.endpoint.payloadSchema.value, route.payloadLimit)
-      : undefined;
-
-    const result = yield* route.handler({ request, url, user, site, payload: payload as never });
+    const result = yield* invokeRegisteredRoute(route, {
+      request,
+      url,
+      user,
+      project,
+      args: route.payloadLimit == null
+        ? Effect.succeed(undefined)
+        : readJsonBody(request, route.payloadLimit),
+    });
     const body = yield* Schema.encodeUnknown(route.endpoint.successSchema as Schema.Schema<unknown, unknown>)(result).pipe(
       Effect.mapError((cause) => new HttpError({ status: 500, message: "Could not encode the response", cause })),
     );
@@ -485,13 +483,76 @@ function runRoute(
   });
 }
 
-/** Reads, size-limits, parses, and strictly decodes one request body through
- * the contract payload schema. Decoding is deliberately strict — every
- * problem is reported and unknown fields are errors — so protocol drift
- * surfaces as a clear 400 instead of being silently dropped. */
-function readEndpointPayload(
+/** The transport-independent input to one endpoint invocation. `args`
+ * produces the endpoint's raw (parsed-JSON) arguments and is run only for
+ * endpoints that declare a payload — the HTTP dispatcher passes the
+ * size-capped body read, alternate transports pass their already-parsed
+ * arguments. */
+export interface EndpointInvocation {
+  readonly request: HttpServerRequest.HttpServerRequest;
+  readonly url: URL;
+  readonly user: AuthUser | null;
+  readonly project: string | null;
+  readonly args: Effect.Effect<unknown, RouteError>;
+}
+
+/**
+ * Invokes one contract endpoint through its registered policy pipeline from
+ * an alternate transport (the MCP tools). This is the same code path the HTTP
+ * dispatcher runs after principal resolution — bearer requirement, project
+ * read gate with its existence mask, strict argument decode, registered
+ * handler — so no transport can reach a handler with weaker checks than the
+ * route declares. Transport-level body size caps stay with each transport;
+ * content-level caps (publish and share validation) run inside the handlers
+ * either way.
+ */
+export function invokeEndpoint<Name extends ScratchworkEndpointName>(
+  name: Name,
+  input: EndpointInvocation,
+): Effect.Effect<EndpointSuccess<Name>, RouteError, RouteServices> {
+  const route = ROUTES.find((candidate) => candidate.name === name);
+  if (route == null) {
+    // Unreachable: ROUTES is derived from the same contract Name is keyed by.
+    return Effect.fail(new HttpError({ status: 500, message: `Unregistered endpoint: ${name}` }));
+  }
+  return invokeRegisteredRoute(route, input) as Effect.Effect<EndpointSuccess<Name>, RouteError, RouteServices>;
+}
+
+/** The shared endpoint pipeline: declared bearer requirement, project read
+ * gate (missing and forbidden both masked), strict payload decode, handler. */
+function invokeRegisteredRoute(
+  route: RegisteredRoute,
+  input: EndpointInvocation,
+): Effect.Effect<unknown, RouteError, RouteServices> {
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    if (route.auth === "bearer" && input.user == null) {
+      return yield* Effect.fail(new AuthError({ status: 401, message: "Authentication required" }));
+    }
+
+    let site: LoadedSite | null = null;
+    if (input.project != null) {
+      const siteStore = yield* SiteStore;
+      site = yield* requireReadableSite(yield* siteStore.loadProject(input.project), input.user, config);
+    }
+
+    const payload = Option.isSome(route.endpoint.payloadSchema) && route.payloadLimit != null
+      ? yield* decodeEndpointArgs(route.endpoint.payloadSchema.value, yield* input.args)
+      : undefined;
+
+    return yield* route.handler({
+      request: input.request,
+      url: input.url,
+      user: input.user,
+      site,
+      payload: payload as never,
+    });
+  });
+}
+
+/** Reads, size-limits, and parses one JSON request body. */
+export function readJsonBody(
   request: HttpServerRequest.HttpServerRequest,
-  schema: Schema.Schema.Any,
   limit: PayloadLimit,
 ): Effect.Effect<unknown, HttpError> {
   return Effect.gen(function* () {
@@ -502,18 +563,28 @@ function readEndpointPayload(
     if (new TextEncoder().encode(text).byteLength > limit.maxBytes) {
       return yield* Effect.fail(new HttpError({ status: 413, message: limit.message }));
     }
-    const parsed = yield* Schema.decodeUnknown(Schema.parseJson())(text).pipe(
+    return yield* Schema.decodeUnknown(Schema.parseJson())(text).pipe(
       Effect.mapError(() => new HttpError({ status: 400, message: "Invalid JSON body" })),
     );
-    return yield* Schema.decodeUnknown(schema as Schema.Schema<unknown, unknown>)(parsed, {
-      errors: "all",
-      onExcessProperty: "error",
-    }).pipe(
-      Effect.mapError((error) =>
-        new HttpError({ status: 400, message: ParseResult.TreeFormatter.formatErrorSync(error) }),
-      ),
-    );
   });
+}
+
+/** Strictly decodes already-parsed endpoint arguments through the contract
+ * payload schema. Decoding is deliberately strict — every problem is reported
+ * and unknown fields are errors — so protocol drift surfaces as a clear 400
+ * instead of being silently dropped. */
+function decodeEndpointArgs(
+  schema: Schema.Schema.Any,
+  parsed: unknown,
+): Effect.Effect<unknown, HttpError> {
+  return Schema.decodeUnknown(schema as Schema.Schema<unknown, unknown>)(parsed, {
+    errors: "all",
+    onExcessProperty: "error",
+  }).pipe(
+    Effect.mapError((error) =>
+      new HttpError({ status: 400, message: ParseResult.TreeFormatter.formatErrorSync(error) }),
+    ),
+  );
 }
 
 /** Matches a registry path pattern against a request pathname. The decoded

@@ -234,5 +234,181 @@ export function publishLoopSuite(
         publicSite.remove();
       }
     }, 60_000);
+
+    // -----------------------------------------------------------------------
+    // MCP: the remote endpoint, driven exactly as a spec MCP client would —
+    // discovery from the 401 challenge, dynamic registration, the browser
+    // authorize + consent leg, the token exchange, then stateless JSON-RPC
+    // tool calls. Runs on every lane because statelessness across serverless
+    // instances is precisely the claim under test.
+    // -----------------------------------------------------------------------
+
+    let ownerMcpToken = "";
+
+    test("mcp: discovery, registration, and the OAuth loop mint a working access token", async () => {
+      // 1. An unauthenticated /mcp call carries the resource-metadata pointer.
+      const challenge = await rawFetch(`${context.appUrl}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize" }),
+      });
+      expect(challenge.status).toBe(401);
+      const metadataUrl = /resource_metadata="([^"]+)"/.exec(challenge.headers.get("www-authenticate") ?? "")?.[1];
+      expect(metadataUrl).toBeDefined();
+
+      // 2. Protected-resource metadata → authorization-server metadata.
+      const resourceMeta = await (await rawFetch(metadataUrl!)).json() as {
+        resource: string; authorization_servers: string[];
+      };
+      expect(resourceMeta.resource).toBe(`${context.appUrl}/mcp`);
+      const asMeta = await (await rawFetch(
+        `${resourceMeta.authorization_servers[0]}/.well-known/oauth-authorization-server`,
+      )).json() as { authorization_endpoint: string; token_endpoint: string; registration_endpoint: string };
+
+      // 3. Dynamic client registration.
+      const redirectUri = "http://127.0.0.1:39877/callback";
+      const registerResponse = await rawFetch(asMeta.registration_endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          redirect_uris: [redirectUri],
+          client_name: "e2e MCP client",
+          token_endpoint_auth_method: "none",
+        }),
+      });
+      expect(registerResponse.status).toBe(201);
+      const registration = await registerResponse.json() as { client_id: string };
+
+      // 4. Authorize: a browser session (auto-approving hermetic provider)
+      // lands on the consent page; approval redirects to the loopback with a
+      // one-time code.
+      const verifier = "e2e-mcp-verifier-e2e-mcp-verifier-e2e-mcp-v1";
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+      const challengeS256 = Buffer.from(digest).toString("base64url");
+      provider.user = OWNER;
+      const mcpBrowser = new Browser();
+      const authorizeUrl = new URL(asMeta.authorization_endpoint);
+      authorizeUrl.searchParams.set("client_id", registration.client_id);
+      authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+      authorizeUrl.searchParams.set("response_type", "code");
+      authorizeUrl.searchParams.set("code_challenge", challengeS256);
+      authorizeUrl.searchParams.set("code_challenge_method", "S256");
+      authorizeUrl.searchParams.set("state", "e2e-mcp-state");
+      authorizeUrl.searchParams.set("resource", `${context.appUrl}/mcp`);
+      const consentPage = await mcpBrowser.get(authorizeUrl.toString());
+      expect(consentPage.status).toBe(200);
+      const txn = /name="txn" value="([^"]+)"/.exec(await consentPage.response.text())?.[1];
+      expect(txn).toBeDefined();
+
+      const approved = await mcpBrowser.request(`${context.appUrl}/oauth/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ txn: txn!, decision: "approve" }).toString(),
+      });
+      expect(approved.status).toBe(302);
+      const callback = new URL(approved.headers.get("location") ?? "");
+      expect(`${callback.origin}${callback.pathname}`).toBe(redirectUri);
+      expect(callback.searchParams.get("state")).toBe("e2e-mcp-state");
+      const code = callback.searchParams.get("code");
+      expect(code).toBeDefined();
+
+      // 5. Token exchange, then a refresh-grant round trip.
+      const tokenResponse = await rawFetch(asMeta.token_endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: code!,
+          code_verifier: verifier,
+          redirect_uri: redirectUri,
+          client_id: registration.client_id,
+          resource: `${context.appUrl}/mcp`,
+        }).toString(),
+      });
+      expect(tokenResponse.status).toBe(200);
+      const tokens = await tokenResponse.json() as { access_token: string; refresh_token: string; token_type: string };
+      expect(tokens.token_type).toBe("Bearer");
+
+      const refreshed = await rawFetch(asMeta.token_endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: tokens.refresh_token,
+          client_id: registration.client_id,
+        }).toString(),
+      });
+      expect(refreshed.status).toBe(200);
+      ownerMcpToken = ((await refreshed.json()) as { access_token: string }).access_token;
+    }, 120_000);
+
+    /** One stateless JSON-RPC call to /mcp. */
+    const mcpCall = async (token: string, body: unknown): Promise<{ response: Response; body: any }> => {
+      const response = await rawFetch(`${context.appUrl}/mcp`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { response, body: response.status === 202 ? null : await response.json() };
+    };
+
+    test("mcp: stateless tool calls publish and serve content on this lane", async () => {
+      expect(ownerMcpToken).not.toBe("");
+
+      // initialize never issues a session id — every later POST stands alone.
+      const initialized = await mcpCall(ownerMcpToken, {
+        jsonrpc: "2.0", id: 1, method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "0" } },
+      });
+      expect(initialized.response.headers.get("mcp-session-id")).toBeNull();
+      expect(initialized.body.result.protocolVersion).toBe("2025-06-18");
+      const note = await mcpCall(ownerMcpToken, { jsonrpc: "2.0", method: "notifications/initialized" });
+      expect(note.response.status).toBe(202);
+
+      const listing = await mcpCall(ownerMcpToken, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+      const toolNames = (listing.body.result.tools as Array<{ name: string }>).map((tool) => tool.name);
+      expect(toolNames).toContain("publish");
+      expect(toolNames).toContain("share_project");
+
+      // Publish text + binary through the tool; verify the served bytes.
+      const binary = Buffer.from([0x00, 0x01, 0xfe, 0xff, 0x89, 0x50]);
+      const published = await mcpCall(ownerMcpToken, {
+        jsonrpc: "2.0", id: 3, method: "tools/call",
+        params: {
+          name: "publish",
+          arguments: {
+            project: `${project}-mcp`,
+            isPublic: true,
+            files: [
+              { path: "index.html", content: "<h1>mcp-marker</h1>" },
+              { path: "assets/blob.bin", contentBase64: binary.toString("base64") },
+            ],
+          },
+        },
+      });
+      expect(published.body.result.isError).toBeUndefined();
+      expect(published.body.result.structuredContent.project).toBe(`${project}-mcp`);
+
+      const page = await rawFetch(`${context.contentUrl}/${project}-mcp/`);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("mcp-marker");
+      const blob = await rawFetch(`${context.contentUrl}/${project}-mcp/assets/blob.bin`);
+      expect(new Uint8Array(await blob.arrayBuffer())).toEqual(new Uint8Array(binary));
+
+      // Share + unpublish smoke through the tools.
+      const shared = await mcpCall(ownerMcpToken, {
+        jsonrpc: "2.0", id: 4, method: "tools/call",
+        params: { name: "share_project", arguments: { project: `${project}-mcp`, role: "read", add: [VIEWER.email] } },
+      });
+      expect(shared.body.result.isError).toBeUndefined();
+      const unpublished = await mcpCall(ownerMcpToken, {
+        jsonrpc: "2.0", id: 5, method: "tools/call",
+        params: { name: "unpublish_project", arguments: { project: `${project}-mcp` } },
+      });
+      expect(unpublished.body.result.structuredContent.project.isPublic).toBe(false);
+
+      const who = await mcpCall(ownerMcpToken, { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "whoami", arguments: {} } });
+      expect(who.body.result.structuredContent.user.email).toBe(OWNER.email);
+    }, 120_000);
   });
 }

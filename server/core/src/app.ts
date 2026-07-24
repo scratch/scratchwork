@@ -23,6 +23,7 @@ import { ServerConfig, type ServerConfigShape } from "./config.ts";
 import { PrimitiveDb } from "./db.ts";
 import { projectAccessCookie, projectAccessCookieValues } from "./cookies.ts";
 import { dispatchMcpOauthRoute } from "./mcp-oauth-routes.ts";
+import { dispatchMcpRoute } from "./mcp/transport.ts";
 import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages.ts";
 import {
   appBaseUrl,
@@ -102,6 +103,10 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
 
     if (url.pathname === "/auth/project") {
       return yield* issueProjectAccess(request, url);
+    }
+
+    if (url.pathname === "/mcp") {
+      return yield* dispatchMcpRoute(request, url);
     }
 
     const mcpOauthResponse = yield* dispatchMcpOauthRoute(request, url);
