@@ -28,6 +28,7 @@ with confirmation gates at the irreversible steps:
    production server credentials). Automating this in release.yml is a follow-up.
 7. **Smoke:** on a machine (or clean container) without Scratchwork:
    `curl -fsSL https://scratchwork.dev/install.sh | bash` and check
-   `scratchwork --version` prints X.Y.Z.
+   `scratchwork --version` prints X.Y.Z. On a machine with the previous
+   release installed, `scratchwork update` should also land X.Y.Z.
 
 Fix this document in the same PR whenever reality disagrees with it.
