@@ -22,6 +22,7 @@ import { Auth, AuthError, type AuthShape, type AuthUser } from "./auth.ts";
 import { ServerConfig, type ServerConfigShape } from "./config.ts";
 import { PrimitiveDb } from "./db.ts";
 import { projectAccessCookie, projectAccessCookieValues } from "./cookies.ts";
+import { dispatchMcpOauthRoute } from "./mcp-oauth-routes.ts";
 import { acceptsHtmlPage, errorPageResponse, errorResponse } from "./error-pages.ts";
 import {
   appBaseUrl,
@@ -73,7 +74,13 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
     const url = new URL(request.url, "http://scratchwork.local");
     const config = yield* ServerConfig;
 
-    if (url.pathname.startsWith("/auth/")) {
+    // MCP OAuth routes join /auth/* in canonicalizing to the app origin before
+    // any cookie is read or issuer/audience value is derived from the request.
+    if (
+      url.pathname.startsWith("/auth/") ||
+      url.pathname.startsWith("/oauth/") ||
+      url.pathname.startsWith("/.well-known/")
+    ) {
       const redirect = canonicalAppRedirect(request, url, config);
       if (redirect != null) return redirect;
     }
@@ -96,6 +103,9 @@ function handleRequest(request: HttpServerRequest.HttpServerRequest): AppEffect 
     if (url.pathname === "/auth/project") {
       return yield* issueProjectAccess(request, url);
     }
+
+    const mcpOauthResponse = yield* dispatchMcpOauthRoute(request, url);
+    if (mcpOauthResponse != null) return mcpOauthResponse;
 
     const apiResponse = yield* dispatchApiRoute(request, url);
     if (apiResponse != null) return apiResponse;
