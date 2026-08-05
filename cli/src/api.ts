@@ -12,7 +12,10 @@
  * the shared {error}-envelope on the way back, each normalized into an
  * ApiError that commands turn into CliError via mapApiErrors (prefixed with
  * the calling command's context string, for example "scratchwork publish").
- * Requests are interruption-safe: Ctrl-C aborts the in-flight request.
+ * Requests that fail at the transport layer before a response arrives are
+ * retried on a fresh connection (see isTransportFailure) before being
+ * surfaced. Requests are interruption-safe: Ctrl-C aborts the in-flight
+ * request.
  */
 import type { PlatformError } from "@effect/platform/Error";
 import type * as FileSystem from "@effect/platform/FileSystem";
@@ -86,6 +89,7 @@ export function apiClient(
     const cfToken = yield* readCfToken(new URL(server).origin);
     const client = http.pipe(
       HttpClient.mapRequest(attachCredentials(options.token, cfToken)),
+      HttpClient.retry({ while: isTransportFailure, times: 2 }),
       HttpClient.transform(normalizeFailures),
     );
     return yield* HttpApiClient.makeWith(ScratchworkApi, { httpClient: client, baseUrl: server });
@@ -157,6 +161,20 @@ export function resolveProjectByPath(
     );
     return { project: response.project.project };
   });
+}
+
+/**
+ * True for a request that failed at the transport layer, before any API
+ * response arrived. The common shape is a stale keep-alive socket: proxies
+ * close idle pooled connections (Cloudflare's edge after ~400s), and a
+ * long-lived command — `scratchwork stream` republishing after an idle gap —
+ * then fails its next request with a connection-closed error instead of
+ * reaching the server. Every API endpoint tolerates a replay (publish
+ * re-uploads the same bundle; share/revoke/unpublish/delete are idempotent),
+ * so these are retried on a fresh connection rather than surfaced.
+ */
+function isTransportFailure(error: HttpClientError.HttpClientError): boolean {
+  return error._tag === "RequestError" && error.reason === "Transport";
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as BunContext from "@effect/platform-bun/BunContext";
@@ -172,6 +173,76 @@ describe("apiClient Cloudflare edge-block detection", () => {
         expect(error._tag).toBe("ApiError");
         expect(error.status).toBe(502);
         expect(error.message).toBe("server returned 502: 502 Bad Gateway");
+      },
+    );
+  });
+});
+
+describe("apiClient transport retry", () => {
+  /**
+   * Serves the /api/me body over raw TCP, killing the first `failures`
+   * connections as soon as request bytes arrive — the shape a stale
+   * keep-alive socket takes after a proxy (Cloudflare's edge) idle-closes it
+   * under a long-running `scratchwork stream`. Returns the origin, a
+   * connection counter, and a close function.
+   */
+  function rawServer(failures) {
+    const body = JSON.stringify(ME_BODY);
+    const response = `HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`;
+    const seen = { connections: 0 };
+    const server = createServer((socket) => {
+      seen.connections += 1;
+      const kill = seen.connections <= failures;
+      socket.on("data", () => (kill ? socket.destroy() : socket.end(response)));
+      socket.on("error", () => {});
+    });
+    return new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        resolve({
+          origin: `http://127.0.0.1:${server.address().port}`,
+          seen,
+          close: () => new Promise((done) => server.close(done)),
+        });
+      });
+    });
+  }
+
+  test("retries a connection closed before any response on a fresh connection", async () => {
+    const { origin, seen, close } = await rawServer(1);
+    try {
+      const body = await run(callMe(origin));
+      expect(body).toEqual(ME_BODY);
+      expect(seen.connections).toBe(2);
+    } finally {
+      await close();
+    }
+  });
+
+  test("a persistent transport failure surfaces after the retries are spent", async () => {
+    const { origin, seen, close } = await rawServer(Infinity);
+    try {
+      const error = await run(callMe(origin).pipe(Effect.flip));
+      expect(error._tag).toBe("ApiError");
+      expect(error.status).toBeNull();
+      expect(seen.connections).toBe(3);
+    } finally {
+      await close();
+    }
+  });
+
+  test("does not retry a response the server actually sent", async () => {
+    let requests = 0;
+    await withServer(
+      () => {
+        requests += 1;
+        return Response.json({ error: "boom" }, { status: 500 });
+      },
+      async (origin) => {
+        const error = await run(callMe(origin).pipe(Effect.flip));
+        expect(error._tag).toBe("ApiError");
+        expect(error.status).toBe(500);
+        expect(error.message).toBe("boom");
+        expect(requests).toBe(1);
       },
     );
   });
