@@ -22,7 +22,8 @@ fresh shell; print the value, then substitute the literal into later commands. A
 start every Bash call after step 1 by `cd`-ing into the scratch worktree by literal
 path — cwd doesn't reliably persist either, and a command that lands in the user's
 checkout instead would build, commit, or push the wrong tree. (One exception: the
-final cleanup in step 4 must run from outside the worktree.)
+final cleanup in step 4, and everything after it, runs from the primary checkout —
+the worktree is gone by then.)
 
 ## 1. Rebase in a scratch worktree
 
@@ -39,8 +40,11 @@ Two preflights, now that the tracking ref is fresh:
   **ahead** of origin: `git rev-list --count origin/<branch>..<branch>` must be 0.
   If it isn't, stop — the PR is missing unpushed work, and only the user can decide
   to push it.
-- If `<scratchpad>/merge-<n>` is left over from an earlier run, clear it with
-  `git worktree remove --force` before adding it again.
+- If `<scratchpad>/merge-<n>` is left over from an earlier run, confirm it holds
+  nothing unpushed — `git -C <path> status --porcelain` empty and its HEAD reachable
+  from `origin/<branch>` — then `git worktree remove --force` it (or, if only the
+  registration survives, `git worktree prune`). If it does hold unpushed work, stop
+  and report rather than discard it.
 
 ```bash
 git rev-parse origin/<branch>        # print this SHA — the push lease below pins it
