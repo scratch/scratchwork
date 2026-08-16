@@ -5,174 +5,77 @@ description: Land a PR — rebase onto latest main, review it adversarially with
 
 # Merge
 
-Land one PR on `main`: rebase, review, fix, merge. Takes a PR number
-(`/merge 28`); with no argument, use the PR for the current branch
-(`gh pr view --json number`).
+Land one PR on `main`: rebase, review, fix, merge. Takes a PR number (`/merge 28`);
+with no argument, use the current branch's PR (`gh pr view --json number`). The PR
+must be open, not a draft, and based on `main` — otherwise stop and say why.
 
-## Ground rules
+Invoking the skill is approval for the whole run — don't re-confirm along the way.
+Check back only if a conflict resolution would mean choosing behavior, or the diff
+touches release/deploy machinery you didn't flag up front.
 
-- **Rebase, never merge-from-main.** The premise is that reviewed code is the code
-  that lands. A merge commit from `main` means fable reviewed a tree that never
-  existed.
-- **`bun run ci` green is necessary and never sufficient.** Fable's verdict is the
-  other half of the gate.
-- **Never weaken the gate to get a merge.** No skipped tests, loosened assertions,
-  new ignore rules, or edits to `.github/workflows/ci.yml`. If landing the PR
-  requires any of that, stop and say so.
+**Never weaken the gate to get a merge.** No skipped tests, loosened assertions, new
+ignore rules, or edits to `.github/workflows/ci.yml`. If landing requires any of
+that, stop and say so.
 
-## Procedure
+Each Bash call is a fresh shell — never set a shell variable for later use. Print
+the value, then substitute the literal into later commands.
 
-### 1. Preflight and confirm
+## 1. Rebase in a scratch worktree
 
-```bash
-gh auth status
-gh pr view <n> --json title,isDraft,state,baseRefName,headRefName,isCrossRepository
-```
-
-The PR must be open and not a draft. **`isCrossRepository` must be false** — a fork's
-branch can't be fetched from `origin` or force-pushed back, so step 2 would die
-mid-procedure; reject it here instead. **`baseRefName` must be `main`** — this skill
-rebases onto `main` and assumes the merge lands there. On a stacked PR based on
-another branch, stop: rebasing it onto `main` would rewrite it to include or drop the
-base branch's commits, and the review target, the rebase, and the merge destination
-would all disagree.
-
-Show the user the title, the diff stat, and what you're about to do, then get
-approval for the **whole run** — after that, rebase, review, fix, and merge without
-asking again. Re-confirm only if something changes the deal: a conflict resolution
-you aren't confident in, or the diff touching release/deploy machinery you didn't
-flag up front.
-
-### 2. Get a checkout, then rebase
-
-**Never write shell variables you intend to use later.** Each Bash call is a fresh
-shell — `$WT` and `$REVIEWED` set in one block are empty in the next. Print the value,
-then substitute the literal into later commands.
-
-Find where the branch lives. Do **not** create a worktree: `git worktree add` fails
-when the branch is checked out anywhere, `--show-toplevel` returns the wrong root when
-you are already inside a linked worktree, and removing a worktree you are standing in
-breaks every command after it.
+Work on `origin/<branch>` in a detached throwaway worktree — never in a checkout the
+user lives in, and never on a possibly-stale local branch:
 
 ```bash
 git fetch origin main <branch>
-git worktree list                       # is <branch> already checked out?
-```
-
-- **Already checked out** (any worktree, including the primary one): use that
-  directory.
-- **Not checked out:** check it out in the primary checkout — the first line of
-  `git worktree list` — and note that you must restore it to `main` in step 5.
-
-Either way the directory must be clean (`git status --porcelain` empty). If it's
-dirty, stop and hand it back; never stash the user's work.
-
-Now reconcile with the remote **before** rebasing:
-
-```bash
-git rev-list --count <branch>..origin/<branch>    # non-zero → local is stale
-```
-
-This check is not optional. Step 2 just fetched `origin/<branch>`, which means
-`--force-with-lease` will compare against the ref it *just updated* and pass happily
-— so a stale local branch would force-push away commits that exist only on the
-remote, and nothing downstream would notice. If the count is non-zero,
-`git reset --hard origin/<branch>` before continuing.
-
-```bash
+git worktree add <scratchpad>/merge-<n> origin/<branch> --detach
+cd <scratchpad>/merge-<n>
 git rebase origin/main
-git push --force-with-lease
-bun install --frozen-lockfile          # node_modules may be absent or stale
+git push --force-with-lease=<branch> origin HEAD:<branch>
+bun install --frozen-lockfile
 ```
 
-Resolve only conflicts whose resolution is mechanical and whose intent on both sides
-is unambiguous. Anything where you'd be choosing behavior rather than reconciling
-text: `git rebase --abort` and hand it back to the user.
+Resolve only conflicts that are mechanical, with unambiguous intent on both sides.
+Anything where you'd be choosing behavior rather than reconciling text:
+`git rebase --abort` and hand it back. This is the one failure the rest of the
+pipeline cannot catch — the reviewer will find a misresolution perfectly coherent.
 
-This is the one failure the rest of the pipeline cannot catch — fable will review
-whatever tree you produce and find a misresolution perfectly coherent.
+## 2. Adversarial review with fable
 
-### 3. Adversarial review with fable
+Spawn one subagent with the Agent tool, `model: "fable"`. Tell it the worktree
+directory from step 1 (subagents start in the session cwd, not yours — an untold
+reviewer diffs the wrong tree and reports nothing), the PR number and title, and the
+target: `git diff origin/main...HEAD`. You are the author of the fixes; it is the
+reviewer — a model reviewing its own fixes is not an adversarial review.
 
-Spawn **two** subagents with the Agent tool, in parallel, both with `model: "fable"`
-(the alias — the model parameter takes `sonnet|opus|haiku|fable`, not a full model
-ID). **One lens each**, not both lenses to both agents.
+Instruct it to hunt for reasons this should **not** land ("looks good to me" is a
+failed review), covering both defects — correctness, security, regressions, error
+handling, concurrency, data loss — and the `check-invariants` skill's agent-pass
+procedure, and to report findings as
+`{file, line, severity: blocking|nit, claim, failure_scenario}`.
 
-Give each one **the checkout directory from step 2** — a subagent starts in the
-session's cwd, not your working directory, so a reviewer that isn't told where to
-look will diff the wrong tree and cheerfully report nothing. Also give it the PR
-number and title, and `git diff origin/main...HEAD` as the target.
-
-You are the author of the fixes; they are the reviewers. Keep that split — a model
-reviewing its own fixes is not an adversarial review.
-
-Instruct each to hunt for reasons this should **not** land — a reviewer that returns
-"looks good to me" has not done its job — and to report findings as
-`{file, line, severity: blocking|nit, claim, failure_scenario}`, empty only if it
-genuinely finds nothing after a real search.
-
-- **Lens 1 — defects.** Correctness, security, regressions, error handling,
-  concurrency, data loss. Where does this break in production? What input makes it
-  wrong?
-- **Lens 2 — invariant conformance.** Run the `check-invariants` skill's procedure
-  against the diff. That skill owns *what to check* — follow its per-invariant
-  agent-pass bullets rather than a restatement here, so this file can't drift from it.
-  Two deliberate overrides, which you must state in the reviewer's prompt: diff against
-  `origin/main...HEAD`, not that skill's `main...HEAD` (local `main` may be stale, and
-  both lenses must review the same tree); and return the findings JSON above, not that
-  skill's per-invariant pass/fail report, so triage can consume both lenses the same way.
-
-### 4. Triage, then fix
+## 3. Triage, fix, repeat
 
 Adversarial reviewers over-report — that's the cost of telling them to attack.
-Confirm each finding against the actual code before acting: trace the failure
-scenario through the real control flow, and check the premise still holds after the
-rebase. Discard what doesn't survive and say what you discarded and why. Don't fix a
-phantom to make a reviewer happy.
+Confirm each finding against the actual code before acting, and say what you
+discarded and why. Fix every surviving finding, `blocking` and `nit` alike, then
+`bun run ci` (needs Docker for the LocalStack e2e lane), commit, push, and re-run
+step 2 on the new diff. **At most 3 rounds** — if findings still survive, stop and
+report.
 
-Fix every surviving finding, `blocking` and `nit` alike. Then `bun run ci` (needs
-Docker for the LocalStack e2e lane), commit, push, and re-run step 3 on the new diff.
-
-**At most 3 rounds.** If findings still survive, stop and report — a PR that can't
-converge in three rounds has a problem this skill is the wrong tool for.
-
-### 5. Merge the tree you reviewed
-
-Print the reviewed commit and confirm `main` hasn't moved out from under it:
+## 4. Merge the reviewed tree
 
 ```bash
-git rev-parse HEAD                        # copy this SHA; do not store it in a variable
-git fetch origin main
-git rev-list --count HEAD..origin/main    # non-zero → main moved; restart at step 2
-```
-
-Wait for the real check on that head — a local `bun run ci` is a prediction, the
-workflow run is the fact. `gh pr checks` errors rather than waits if GitHub hasn't
-registered the run yet, so retry a few times before believing it.
-
-```bash
-gh pr checks <n> --watch
-gh pr merge <n> --merge --match-head-commit <the SHA you printed above>
-```
-
-`--match-head-commit` is what makes this honest: if anything landed on the branch
-after the review, the merge is refused instead of silently shipping an unreviewed
-tree. Merge commits match this repo's history.
-
-Then clean up the remote only:
-
-```bash
+git rev-parse HEAD                     # the reviewed SHA — print it, don't store it
+gh pr checks <n> --watch               # errors if GitHub hasn't registered the run yet; retry a few times
+gh pr merge <n> --merge --match-head-commit <the SHA printed above>
 git push origin --delete <branch>
+git worktree remove <scratchpad>/merge-<n>
 ```
 
-**Leave local state alone.** Deleting the local branch fails while it is checked out,
-and the checkout may be one the user lives in — so `--delete-branch` is not used above.
-If you checked the branch out in the primary checkout in step 2, restore it
-(`git checkout main && git pull`). Then tell the user which local branch and which
-directory are still there, so they can clean up if they want to.
+`--match-head-commit` refuses the merge if anything — say, another agent session —
+touched the branch after the review, instead of silently shipping an unreviewed
+tree. Afterward, tell the user if a local checkout of `<branch>` exists anywhere
+(`git worktree list`, `git branch`): it is now behind the rebased remote.
 
-## Report
-
-The PR number and title, rebase result, review rounds, findings fixed and findings
-discarded (with why), and the final `main` SHA. If you stopped short of merging, say
-exactly why and what the user needs to decide.
+Report the PR, rebase result, review rounds, findings fixed and discarded (with
+why), and the final `main` SHA — or exactly where and why you stopped.
