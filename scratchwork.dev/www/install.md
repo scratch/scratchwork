@@ -13,10 +13,25 @@ curl -fsSL https://scratchwork.dev/install.sh | bash
 ```
 
 Installs the latest release to `~/.local/bin/scratchwork`. No sudo, ever.
-Re-running upgrades in place.
+The script only downloads, verifies, and extracts the release; the binary's
+own `scratchwork install` command does the rest (choosing the destination,
+installing, verifying, and PATH advice).
 
 - Pin a version: `SCRATCHWORK_VERSION=0.2.0 curl -fsSL https://scratchwork.dev/install.sh | bash`
 - Change the destination: set `SCRATCHWORK_INSTALL_DIR` (default `~/.local/bin`)
+
+## Updating
+
+An installed CLI updates itself — no need to re-run the install script:
+
+```sh
+scratchwork update
+```
+
+Downloads the latest release for your platform, verifies its checksum, and
+replaces the binary in place. Pin or downgrade with
+`SCRATCHWORK_VERSION=0.2.0 scratchwork update`. Re-running the install
+one-liner also upgrades in place.
 
 ## Supported platforms
 
@@ -55,16 +70,19 @@ curl -fsSLO https://github.com/scratch/scratchwork/releases/download/v0.2.0/chec
 shasum -a 256 -c <(grep darwin-arm64 checksums.txt)   # Linux: sha256sum -c ...
 
 tar -xzf scratchwork-v0.2.0-darwin-arm64.tar.gz       # extracts one file: scratchwork
-mkdir -p ~/.local/bin
-mv scratchwork ~/.local/bin/scratchwork
-chmod +x ~/.local/bin/scratchwork
+./scratchwork install                                 # installs to ~/.local/bin
 ```
 
-Make sure `~/.local/bin` is on your `PATH`:
+`scratchwork install` copies the binary into `SCRATCHWORK_INSTALL_DIR`
+(default `~/.local/bin`, or pass `--dir <path>`), verifies it runs, and tells
+you if the directory is missing from your `PATH`, e.g.:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Prefer fully manual placement? The extracted `scratchwork` file is the whole
+install — move it anywhere on your `PATH` and make it executable.
 
 ## Verify the install
 
