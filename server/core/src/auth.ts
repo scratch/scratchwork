@@ -1,12 +1,15 @@
 /**
  * The auth service — one implementation per auth mode (built-in Google OAuth, or
  * Cloudflare Access asserting identity via the Cf-Access-Jwt-Assertion header) — and
- * the four signed HMAC token kinds it mints: session tokens (browser cookie or CLI
+ * the signed HMAC token kinds it mints: session tokens (browser cookie or CLI
  * bearer, session TTL), OAuth state tokens (10-minute, browser-bound, cookie-only —
  * they carry the PKCE verifier, which must never transit the provider), CLI
  * authorization codes (~60s one-time codes delivered to the CLI's loopback callback
- * and exchanged for a session token at /auth/cli/token), and project-access tokens
- * ("handoff": ~60s, query-string form; "cookie": session-length redeemed form).
+ * and exchanged for a session token at /auth/cli/token), project-access tokens
+ * ("handoff": ~60s, query-string form; "cookie": session-length redeemed form), and
+ * the four MCP OAuth kinds behind the /mcp endpoint (consent transactions,
+ * authorization codes, and audience-bound access/refresh tokens — see
+ * mcp-oauth-routes.ts for the endpoints that mint and redeem them).
  */
 import * as Cookies from "@effect/platform/Cookies";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
@@ -54,6 +57,23 @@ const HANDOFF_TTL_SECONDS = 60;
  * and are additionally one-time: redemption is recorded in PrimitiveDb by the exchange
  * route, so a replayed code fails even inside this window. */
 const CLI_CODE_TTL_SECONDS = 60;
+/** Versioned separately from sessions: bumping this deliberately invalidates every
+ * outstanding MCP credential (consent, code, access, refresh) without logging anyone
+ * out or breaking CLI bearer tokens. */
+const MCP_TOKEN_VERSION = 1;
+/** MCP consent transactions share the OAuth state TTL: long enough to read the
+ * consent page, short enough that a stale form cannot be replayed much later. */
+const MCP_CONSENT_TTL_SECONDS = STATE_TTL_SECONDS;
+/** MCP authorization codes ride the client's redirect query string, so like CLI codes
+ * they live seconds and are one-time (the token endpoint burns them in PrimitiveDb). */
+const MCP_CODE_TTL_SECONDS = 60;
+/** MCP access tokens are replayed on every /mcp request and traverse more logging
+ * surface than a session cookie, so they live an hour; clients mint replacements
+ * through the refresh grant. */
+export const MCP_ACCESS_TTL_SECONDS = 3600;
+/** The one OAuth scope the MCP surface issues. Carried as a literal claim so a
+ * future narrower scope fails closed against verifiers expecting this one. */
+export const MCP_SCOPE = "mcp";
 /** PKCE S256 challenges and verifiers are 43-128 base64url characters (RFC 7636 §4). */
 const PKCE_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
 const CLI_STATE_MAX_LENGTH = 256;
@@ -160,6 +180,78 @@ const ProjectAccessPayloadSchema = Schema.Struct({
   expiresAt: EpochSecondsSchema,
 });
 type ProjectAccessPayload = typeof ProjectAccessPayloadSchema.Type;
+
+/** Payload of an MCP consent token: the signed hidden form field on the
+ * /oauth/authorize consent page. It binds every parameter of the authorize
+ * request — and the user who saw the page — so the approval POST cannot be
+ * replayed for a different client, redirect, challenge, or account. */
+const McpConsentPayloadSchema = Schema.Struct({
+  version: Schema.Literal(MCP_TOKEN_VERSION),
+  kind: Schema.Literal("mcp-consent"),
+  clientId: Schema.String,
+  redirectUri: Schema.String,
+  codeChallenge: Schema.String,
+  state: Schema.optional(Schema.String),
+  userId: Schema.String,
+  expiresAt: EpochSecondsSchema,
+});
+
+/** The decoded MCP consent payload. */
+export type McpConsentPayload = typeof McpConsentPayloadSchema.Type;
+
+/** Payload of an MCP authorization code: like a CLI code, a short-lived one-time
+ * token that grants nothing by itself — the token endpoint burns `id` and then
+ * requires the PKCE verifier from the exact client and redirect the code was
+ * issued to. */
+const McpCodePayloadSchema = Schema.Struct({
+  version: Schema.Literal(MCP_TOKEN_VERSION),
+  kind: Schema.Literal("mcp-code"),
+  id: Schema.String,
+  user: AuthUserSchema,
+  clientId: Schema.String,
+  redirectUri: Schema.String,
+  codeChallenge: Schema.String,
+  expiresAt: EpochSecondsSchema,
+});
+
+/** The decoded MCP authorization-code payload. */
+export type McpCodePayload = typeof McpCodePayloadSchema.Type;
+
+/** Payload of an MCP access token: the bearer credential MCP clients replay on
+ * every /mcp call. `aud` pins it to this server's MCP resource URL so it can
+ * never be accepted by another resource (or another scratchwork origin), and
+ * the kind literal keeps it inert at every /api and cookie verifier. */
+const McpAccessPayloadSchema = Schema.Struct({
+  version: Schema.Literal(MCP_TOKEN_VERSION),
+  kind: Schema.Literal("mcp-access"),
+  user: AuthUserSchema,
+  clientId: Schema.String,
+  aud: Schema.String,
+  scope: Schema.Literal(MCP_SCOPE),
+  issuedAt: EpochSecondsSchema,
+  expiresAt: EpochSecondsSchema,
+});
+
+/** Payload of an MCP refresh token: long-lived, presented only to the token
+ * endpoint's back channel to mint fresh access tokens. Stateless like sessions
+ * (accepted trade-off — the revocation levers are the allow-list and
+ * MCP_TOKEN_VERSION), so the refresh grant does not rotate it. */
+const McpRefreshPayloadSchema = Schema.Struct({
+  version: Schema.Literal(MCP_TOKEN_VERSION),
+  kind: Schema.Literal("mcp-refresh"),
+  user: AuthUserSchema,
+  clientId: Schema.String,
+  aud: Schema.String,
+  scope: Schema.Literal(MCP_SCOPE),
+  issuedAt: EpochSecondsSchema,
+  expiresAt: EpochSecondsSchema,
+});
+
+/** The verified identity carried by an MCP access or refresh token. */
+export interface McpPrincipal {
+  readonly user: AuthUser;
+  readonly clientId: string;
+}
 
 /** Auth failure; `status` becomes the HTTP response status. */
 export class AuthError extends Data.TaggedError("AuthError")<{
@@ -668,14 +760,260 @@ export function verifyCliCodeExchange(
     if (!PKCE_PATTERN.test(codeVerifier)) {
       return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid code verifier" }));
     }
-    const challenge = yield* sha256Challenge(codeVerifier);
-    if (!timingSafeEqual(challenge, payload.codeChallenge) || redirectUri !== payload.redirectUri) {
+    if (!(yield* pkceVerifierMatches(codeVerifier, payload.codeChallenge)) || redirectUri !== payload.redirectUri) {
       return yield* Effect.fail(new AuthError({ status: 400, message: "Authorization code does not match this login" }));
     }
     if (!allowedUser(payload.user, config)) {
       return yield* Effect.fail(new AuthError({ status: 403, message: "Account is not allowed on this server" }));
     }
     return payload.user;
+  });
+}
+
+/** True when the presented PKCE verifier's S256 digest equals the bound challenge.
+ * Callers pre-validate the verifier against PKCE_PATTERN so their error messages
+ * can distinguish a malformed verifier from a failed possession proof. */
+function pkceVerifierMatches(codeVerifier: string, codeChallenge: string): Effect.Effect<boolean, AuthError> {
+  return Effect.map(sha256Challenge(codeVerifier), (challenge) => timingSafeEqual(challenge, codeChallenge));
+}
+
+/** True when a value is a syntactically valid PKCE S256 challenge or verifier
+ * (RFC 7636 §4). The /oauth/authorize validator uses this so a malformed
+ * challenge is rejected before a consent transaction ever binds it. */
+export function isPkceValue(value: string): boolean {
+  return PKCE_PATTERN.test(value);
+}
+
+// ---------------------------------------------------------------------------
+// MCP OAuth tokens (consent, authorization code, access, refresh)
+// ---------------------------------------------------------------------------
+
+/** Signs the consent transaction token embedded in the /oauth/authorize form. */
+export function createMcpConsentToken(
+  input: {
+    readonly clientId: string;
+    readonly redirectUri: string;
+    readonly codeChallenge: string;
+    readonly state?: string;
+    readonly userId: string;
+  },
+  config: AuthConfig,
+): Effect.Effect<string, AuthError> {
+  return signValue(
+    {
+      version: MCP_TOKEN_VERSION,
+      kind: "mcp-consent",
+      clientId: input.clientId,
+      redirectUri: input.redirectUri,
+      codeChallenge: input.codeChallenge,
+      ...(input.state == null ? {} : { state: input.state }),
+      userId: input.userId,
+      expiresAt: epochSeconds() + MCP_CONSENT_TTL_SECONDS,
+    } satisfies McpConsentPayload,
+    config.sessionSecret,
+  );
+}
+
+/** Verifies a consent transaction token's signature, shape, and expiry. The
+ * caller must additionally check `userId` against the current session user and
+ * re-load the client registration before acting on the approval. */
+export function verifyMcpConsentToken(
+  token: string,
+  config: AuthConfig,
+): Effect.Effect<McpConsentPayload, AuthError> {
+  return Effect.gen(function* () {
+    const payload = yield* verifySignedValue(token, config.sessionSecret, McpConsentPayloadSchema).pipe(
+      Effect.mapError((cause) => new AuthError({ status: 400, message: "Invalid consent request", cause })),
+    );
+    if (payload.expiresAt <= epochSeconds()) {
+      return yield* Effect.fail(new AuthError({ status: 400, message: "Consent request expired — retry the authorization" }));
+    }
+    return payload;
+  });
+}
+
+/** Signs a short-lived one-time MCP authorization code bound to a PKCE challenge
+ * and the exact registered client and redirect URI it is delivered to. */
+export function issueMcpAuthorizationCode(
+  user: AuthUser,
+  binding: {
+    readonly clientId: string;
+    readonly redirectUri: string;
+    readonly codeChallenge: string;
+  },
+  config: AuthConfig,
+): Effect.Effect<string, AuthError> {
+  return signValue(
+    {
+      version: MCP_TOKEN_VERSION,
+      kind: "mcp-code",
+      id: randomNonce(),
+      user,
+      clientId: binding.clientId,
+      redirectUri: binding.redirectUri,
+      codeChallenge: binding.codeChallenge,
+      expiresAt: epochSeconds() + MCP_CODE_TTL_SECONDS,
+    } satisfies McpCodePayload,
+    config.sessionSecret,
+  );
+}
+
+/** Verifies an MCP authorization code's signature, shape, and expiry. Like the
+ * CLI form, the one-time burn and the possession checks are separate steps: the
+ * token endpoint burns `id` between the two, so the first redemption attempt
+ * consumes the code whether or not it proves possession. */
+export function decodeMcpAuthorizationCode(
+  code: string,
+  config: AuthConfig,
+): Effect.Effect<McpCodePayload, AuthError> {
+  return Effect.gen(function* () {
+    const payload = yield* verifySignedValue(code, config.sessionSecret, McpCodePayloadSchema).pipe(
+      Effect.mapError((cause) => new AuthError({ status: 400, message: "Invalid authorization code", cause })),
+    );
+    if (payload.expiresAt <= epochSeconds()) {
+      return yield* Effect.fail(new AuthError({ status: 400, message: "Authorization code expired" }));
+    }
+    return payload;
+  });
+}
+
+/** Proves the token request comes from the client the code was issued to: PKCE
+ * verifier possession, byte-exact redirect URI, and the same registered client.
+ * The allow-list is re-applied so removal revokes a code issued moments earlier. */
+export function verifyMcpCodeExchange(
+  payload: McpCodePayload,
+  presented: {
+    readonly codeVerifier: string;
+    readonly redirectUri: string;
+    readonly clientId: string;
+  },
+  config: AuthConfig,
+): Effect.Effect<AuthUser, AuthError> {
+  return Effect.gen(function* () {
+    if (!PKCE_PATTERN.test(presented.codeVerifier)) {
+      return yield* Effect.fail(new AuthError({ status: 400, message: "Invalid code verifier" }));
+    }
+    if (
+      !(yield* pkceVerifierMatches(presented.codeVerifier, payload.codeChallenge)) ||
+      presented.redirectUri !== payload.redirectUri ||
+      presented.clientId !== payload.clientId
+    ) {
+      return yield* Effect.fail(new AuthError({ status: 400, message: "Authorization code does not match this request" }));
+    }
+    if (!allowedUser(payload.user, config)) {
+      return yield* Effect.fail(new AuthError({ status: 403, message: "Account is not allowed on this server" }));
+    }
+    return payload.user;
+  });
+}
+
+/** Signs an MCP access token bound to one resource URL (`aud`). */
+export function createMcpAccessToken(
+  principal: McpPrincipal,
+  aud: string,
+  config: AuthConfig,
+): Effect.Effect<string, AuthError> {
+  const issuedAt = epochSeconds();
+  return signValue(
+    {
+      version: MCP_TOKEN_VERSION,
+      kind: "mcp-access",
+      user: principal.user,
+      clientId: principal.clientId,
+      aud,
+      scope: MCP_SCOPE,
+      issuedAt,
+      expiresAt: issuedAt + MCP_ACCESS_TTL_SECONDS,
+    } satisfies typeof McpAccessPayloadSchema.Type,
+    config.sessionSecret,
+  );
+}
+
+/** Signs an MCP refresh token bound to the same resource URL as its access tokens. */
+export function createMcpRefreshToken(
+  principal: McpPrincipal,
+  aud: string,
+  config: AuthConfig,
+): Effect.Effect<string, AuthError> {
+  const issuedAt = epochSeconds();
+  return signValue(
+    {
+      version: MCP_TOKEN_VERSION,
+      kind: "mcp-refresh",
+      user: principal.user,
+      clientId: principal.clientId,
+      aud,
+      scope: MCP_SCOPE,
+      issuedAt,
+      expiresAt: issuedAt + config.sessionTtlSeconds,
+    } satisfies typeof McpRefreshPayloadSchema.Type,
+    config.sessionSecret,
+  );
+}
+
+/** Verifies one MCP access token against the expected resource URL and applies
+ * current allow-list rules; null on expiry, future issuance, audience mismatch,
+ * or a disallowed account. */
+export function verifyMcpAccessToken(
+  token: string,
+  expectedAud: string,
+  config: AuthConfig,
+): Effect.Effect<McpPrincipal | null, AuthError> {
+  return verifyMcpBearerPayload(token, expectedAud, config, McpAccessPayloadSchema);
+}
+
+/** Verifies one MCP refresh token against the expected resource URL (see
+ * verifyMcpAccessToken). */
+export function verifyMcpRefreshToken(
+  token: string,
+  expectedAud: string,
+  config: AuthConfig,
+): Effect.Effect<McpPrincipal | null, AuthError> {
+  return verifyMcpBearerPayload(token, expectedAud, config, McpRefreshPayloadSchema);
+}
+
+/** The shared verification path of the two MCP bearer kinds: signature and
+ * strict shape via verifySignedValue, then expiry, issuance-skew, exact
+ * audience, and allow-list checks identical in both. */
+function verifyMcpBearerPayload<A extends McpPrincipal & { readonly aud: string; readonly issuedAt: number; readonly expiresAt: number }, I>(
+  token: string,
+  expectedAud: string,
+  config: AuthConfig,
+  schema: Schema.Schema<A, I, never>,
+): Effect.Effect<McpPrincipal | null, AuthError> {
+  return Effect.gen(function* () {
+    const payload = yield* verifySignedValue(token, config.sessionSecret, schema);
+    if (payload.expiresAt <= epochSeconds()) return null;
+    if (payload.issuedAt > epochSeconds() + ISSUED_AT_SKEW_SECONDS) return null;
+    // The audience is not a secret — this is an identity comparison, not a MAC check.
+    if (payload.aud !== expectedAud) return null;
+    if (!allowedUser(payload.user, config)) return null;
+    return { user: payload.user, clientId: payload.clientId };
+  });
+}
+
+/** Resolves the /mcp bearer principal: an audience-bound MCP access token, or —
+ * so CLI-logged-in users and scripts can reach /mcp with the credential they
+ * already hold — a session bearer token. Session tokens already authorize the
+ * full /api surface, a superset of what MCP tools can do, so the fallback adds
+ * no capability; the reverse direction stays closed (an mcp-access token fails
+ * every session verifier on its kind literal). Cookies are never read here. */
+export function requireMcpUser(
+  request: HttpServerRequest.HttpServerRequest,
+  expectedAud: string,
+  config: AuthConfig,
+): Effect.Effect<AuthUser, AuthError> {
+  return Effect.gen(function* () {
+    const token = bearerToken(request);
+    if (token != null) {
+      const principal = yield* verifyMcpAccessToken(token, expectedAud, config).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (principal != null) return principal.user;
+      const sessionUser = yield* verifySessionToken(token, config).pipe(Effect.orElseSucceed(() => null));
+      if (sessionUser != null) return sessionUser;
+    }
+    return yield* Effect.fail(new AuthError({ status: 401, message: "Authentication required" }));
   });
 }
 
