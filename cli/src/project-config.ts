@@ -30,6 +30,7 @@ const ProjectConfigFileSchema = Schema.Struct({
   server: Schema.optional(Schema.String),
   project: Schema.optional(Schema.String),
   isPublic: Schema.optional(Schema.Boolean),
+  commentsEnabled: Schema.optional(Schema.Boolean),
   url: Schema.optional(Schema.String),
   updatedAt: Schema.optional(Schema.String),
 });

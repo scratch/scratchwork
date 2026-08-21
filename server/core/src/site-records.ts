@@ -49,10 +49,14 @@ const siteRecordCommonFields = {
   totalBytes: Schema.Number.pipe(Schema.filter((bytes) => Number.isInteger(bytes) && bytes >= 0 || "Invalid total bytes")),
 } as const;
 
-/** Validates a stored project pointer. `isPublic` is the public/private toggle. */
+/** Validates a stored project pointer. `isPublic` is the public/private toggle;
+ * `commentsEnabled` turns on viewer comments (never together with `isPublic` —
+ * the store rejects the combination at publish time). The optionalWith default
+ * keeps pre-comments records readable without a version bump. */
 const SiteRecordSchema = Schema.Struct({
   version: Schema.Literal(5),
   isPublic: Schema.Boolean,
+  commentsEnabled: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   ...siteRecordCommonFields,
 });
 

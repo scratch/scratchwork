@@ -93,6 +93,73 @@ describe("scratchwork publish", () => {
     }
   });
 
+  test("sends commentsEnabled, saves it, and enforces the comments flag rules", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scratchwork-publish-"));
+    const configDir = mkdtempSync(join(tmpdir(), "scratchwork-config-"));
+    const port = nextPort();
+    const serverUrl = `http://localhost:${port}`;
+    let publishBody;
+
+    const server = Bun.serve({
+      port,
+      async fetch(request) {
+        publishBody = await request.json();
+        return Response.json({
+          project: publishBody.project,
+          isPublic: publishBody.isPublic ?? false,
+          commentsEnabled: publishBody.commentsEnabled ?? false,
+          openPath: publishBody.openPath,
+          url: `${serverUrl}/${publishBody.project}/`,
+        });
+      },
+    });
+
+    try {
+      writeFileSync(join(dir, "index.html"), staticPage("comments"));
+
+      const conflictingFlags = await runCli(
+        ["publish", ".", "--server", serverUrl, "--comments", "--no-comments"],
+        dir,
+        { env: { SCRATCHWORK_HOME: configDir } },
+      );
+      expect(conflictingFlags.code).toBe(1);
+      expect(conflictingFlags.stderr).toContain("at most one of --comments and --no-comments");
+
+      // The comments+public contradiction fails before anything is uploaded.
+      const publicComments = await runCli(
+        ["publish", ".", "--server", serverUrl, "--public", "--comments"],
+        dir,
+        { env: { SCRATCHWORK_HOME: configDir } },
+      );
+      expect(publicComments.code).toBe(1);
+      expect(publicComments.stderr).toContain("comments require a private project");
+      expect(publishBody).toBeUndefined();
+
+      const { code, stdout, stderr } = await runCli(
+        ["publish", ".", "--server", serverUrl, "--private", "--comments", "--project", "site"],
+        dir,
+        { env: { SCRATCHWORK_HOME: configDir } },
+      );
+      expect(code).toBe(0);
+      expect(stderr).toBe("");
+      expect(publishBody.commentsEnabled).toBe(true);
+      expect(publishBody.isPublic).toBe(false);
+      expect(stdout).toContain("comments enabled");
+      const saved = JSON.parse(readFileSync(join(dir, ".scratchwork.json"), "utf8"));
+      expect(saved.commentsEnabled).toBe(true);
+
+      // A later publish without the flags reuses the saved setting.
+      publishBody = undefined;
+      const again = await runCli(["publish", "."], dir, { env: { SCRATCHWORK_HOME: configDir } });
+      expect(again.code).toBe(0);
+      expect(publishBody.commentsEnabled).toBe(true);
+    } finally {
+      server.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   test("publishing a directory without an index sends the first page file's route as openPath", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scratchwork-publish-"));
     const configDir = mkdtempSync(join(tmpdir(), "scratchwork-config-"));
