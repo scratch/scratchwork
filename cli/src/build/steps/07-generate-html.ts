@@ -4,7 +4,7 @@ import type { BuildContext } from '../context';
 import type { BuildPipelineState, BuildStep } from '../types';
 import { normalizeBase } from '../util';
 import { buildGlobals, generateGlobalsScript } from '../globals';
-import log from '../../logger';
+import log, { isVerbose } from '../../logger';
 
 export const generateHtmlStep: BuildStep = {
   name: '07-generate-html',
@@ -16,6 +16,7 @@ export const generateHtmlStep: BuildStep = {
     const jsOutputMap = state.outputs.jsOutputMap!;
     const ssg = state.options.ssg ?? false;
     const renderedContent = state.outputs.renderedContent ?? new Map();
+    const verbose = isVerbose();
 
     // Normalize base path for URL prefixing
     const base = normalizeBase(ctx.options.base);
@@ -67,7 +68,9 @@ export const generateHtmlStep: BuildStep = {
 
       await fs.mkdir(path.dirname(htmlPath), { recursive: true });
       await fs.writeFile(htmlPath, html);
-      log.debug(`  ${path.relative(ctx.rootDir, htmlPath)}`);
+      if (verbose) {
+        log.debug(`  ${path.relative(ctx.rootDir, htmlPath)}`);
+      }
     }
   },
 };

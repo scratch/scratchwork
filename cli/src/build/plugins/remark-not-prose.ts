@@ -10,7 +10,7 @@
 import type { Plugin } from 'unified';
 import { visit } from 'unist-util-visit';
 import type { Node, Root } from 'mdast';
-import log from '../../logger';
+import log, { isVerbose } from '../../logger';
 import type { JsxElementNode } from './types';
 
 const PAGE_WRAPPER = 'PageWrapper';
@@ -22,6 +22,7 @@ export const createNotProsePlugin = (): Plugin => {
   return () => {
     return (tree: Node) => {
       const root = tree as Root;
+      const verbose = isVerbose();
 
       // We need to collect nodes to wrap first, then wrap them
       // (can't modify tree while visiting)
@@ -91,7 +92,9 @@ export const createNotProsePlugin = (): Plugin => {
 
         // Replace the node with the wrapper
         parent.children[index] = wrapper;
-        log.debug(`  - Wrapped <${node.name} /> in not-prose div`);
+        if (verbose) {
+          log.debug(`  - Wrapped <${node.name} /> in not-prose div`);
+        }
       }
     };
   };

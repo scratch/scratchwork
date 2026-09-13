@@ -14,7 +14,7 @@ import { visit } from 'unist-util-visit';
 import { is } from 'unist-util-is';
 import { parse } from 'acorn';
 import type { Node, Root } from 'mdast';
-import log from '../../logger';
+import log, { isVerbose } from '../../logger';
 import type { JsxElementNode } from './types';
 
 // MDAST node type representing an import/export block in MDX
@@ -167,21 +167,28 @@ export const createAutoImportPlugin = (
   const plugin: Plugin = () => {
     return (tree: Node, file: any) => {
       let root = tree as Root;
+      const verbose = isVerbose();
       const { invoked, imported } = findComponents(tree);
 
       if (!PREPROCESSING_STARTED) {
-        log.debug('=== MDX PREPROCESSING ===');
+        if (verbose) {
+          log.debug('=== MDX PREPROCESSING ===');
+        }
         PREPROCESSING_STARTED = true;
       }
 
-      log.debug(
-        `Processing: ${file?.path ? path.relative(process.cwd(), file.path) : 'unknown'}`
-      );
+      if (verbose) {
+        log.debug(
+          `Processing: ${file?.path ? path.relative(process.cwd(), file.path) : 'unknown'}`
+        );
+      }
 
       // wrap mdx content in PageWrapper component if it is found in the
       // src directory and not already invoked in the MDX file
       if (PAGE_WRAPPER in componentMap && !invoked.has(PAGE_WRAPPER)) {
-        log.debug(`  - Wrapping content in PageWrapper`);
+        if (verbose) {
+          log.debug(`  - Wrapping content in PageWrapper`);
+        }
         const wrapperNode = {
           type: 'mdxJsxFlowElement',
           name: PAGE_WRAPPER,
@@ -235,9 +242,11 @@ export const createAutoImportPlugin = (
         const stmt = isDefault
           ? `import ${name} from '${relPath}';`
           : `import { ${name} } from '${relPath}';`;
-        log.debug(
-          `  - injecting ${isDefault ? 'default' : 'named'} import from ${relPath}`
-        );
+        if (verbose) {
+          log.debug(
+            `  - injecting ${isDefault ? 'default' : 'named'} import from ${relPath}`
+          );
+        }
 
         try {
           const estree = parse(stmt, {

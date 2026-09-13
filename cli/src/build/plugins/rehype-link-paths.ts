@@ -10,24 +10,28 @@ import type { Plugin } from 'unified';
 import { visit } from 'unist-util-visit';
 import type { BuildContext } from '../context';
 import { normalizeBase, isInternalAbsolutePath, isRelativePath } from '../util';
-import log from '../../logger';
+import log, { isVerbose } from '../../logger';
 
 /**
  * Transform a link href - returns new value or null if no change needed.
  */
-function transformLinkHref(href: string, base: string): string | null {
+function transformLinkHref(href: string, base: string, verbose: boolean): string | null {
   if (!href || typeof href !== 'string') return null;
 
   // Strip .md/.mdx extension from relative paths
   if (isRelativePath(href)) {
     if (href.endsWith('.md')) {
       const newHref = href.slice(0, -3);
-      log.debug(`  - link: ${href} -> ${newHref} (stripped extension)`);
+      if (verbose) {
+        log.debug(`  - link: ${href} -> ${newHref} (stripped extension)`);
+      }
       return newHref;
     }
     if (href.endsWith('.mdx')) {
       const newHref = href.slice(0, -4);
-      log.debug(`  - link: ${href} -> ${newHref} (stripped extension)`);
+      if (verbose) {
+        log.debug(`  - link: ${href} -> ${newHref} (stripped extension)`);
+      }
       return newHref;
     }
   }
@@ -35,7 +39,9 @@ function transformLinkHref(href: string, base: string): string | null {
   // Prepend base path to absolute internal paths (only when base is set)
   if (base && isInternalAbsolutePath(href)) {
     const newHref = base + href;
-    log.debug(`  - link: ${href} -> ${newHref}`);
+    if (verbose) {
+      log.debug(`  - link: ${href} -> ${newHref}`);
+    }
     return newHref;
   }
 
@@ -50,13 +56,14 @@ export function createLinkPathsPlugin(ctx: BuildContext): Plugin {
 
   return () => {
     return (tree: any) => {
+      const verbose = isVerbose();
       // Handle HAST element nodes (from markdown links after remark-rehype)
       visit(tree, 'element', (node: any) => {
         if (node.tagName !== 'a') return;
 
         const props = node.properties || {};
         const href = props.href;
-        const newHref = transformLinkHref(href, base);
+        const newHref = transformLinkHref(href, base, verbose);
         if (newHref !== null) {
           node.properties.href = newHref;
         }
@@ -71,7 +78,7 @@ export function createLinkPathsPlugin(ctx: BuildContext): Plugin {
           if (attr.type === 'mdxJsxAttribute' && attr.name === 'href') {
             const href = typeof attr.value === 'string' ? attr.value : null;
             if (href) {
-              const newHref = transformLinkHref(href, base);
+              const newHref = transformLinkHref(href, base, verbose);
               if (newHref !== null) {
                 attr.value = newHref;
               }

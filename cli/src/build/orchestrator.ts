@@ -39,8 +39,7 @@ const BUILD_STEPS: (BuildStep | BuildStep[])[] = [
   checkConflictsStep, // Must run early to catch conflicts before build fails for other reasons
   createTsxEntriesStep,
   [tailwindCssStep, serverBuildStep],
-  renderServerStep,
-  clientBuildStep,
+  [renderServerStep, clientBuildStep],
   generateHtmlStep,
   injectFrontmatterStep,
   copyStaticStep,

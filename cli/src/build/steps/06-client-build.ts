@@ -3,7 +3,7 @@ import type { BuildContext } from '../context';
 import type { BuildPipelineState, BuildStep } from '../types';
 import { getBunBuildConfig } from '../buncfg';
 import { runBunBuild, type BunBuildResult } from '../bundler';
-import log from '../../logger';
+import log, { isVerbose } from '../../logger';
 
 export const clientBuildStep: BuildStep = {
   name: '06-client-build',
@@ -19,12 +19,13 @@ export const clientBuildStep: BuildStep = {
     });
 
     const buildResult = await runBunBuild(buildConfig, 'Client');
+    const verbose = isVerbose();
 
     log.debug(`  Built ${buildResult.outputs.length} client bundles`);
 
     // Build JS output map and store outputs
     state.outputs.clientBuildResult = buildResult;
-    state.outputs.jsOutputMap = buildJsOutputMap(ctx, clientEntryPts, buildResult);
+    state.outputs.jsOutputMap = buildJsOutputMap(ctx, clientEntryPts, buildResult, verbose);
   },
 };
 
@@ -34,7 +35,8 @@ export const clientBuildStep: BuildStep = {
 function buildJsOutputMap(
   ctx: BuildContext,
   clientEntryPts: Record<string, string>,
-  result: BunBuildResult
+  result: BunBuildResult,
+  verbose: boolean
 ): Record<string, string> {
   const jsOutputMap: Record<string, string> = {};
 
@@ -47,7 +49,9 @@ function buildJsOutputMap(
   }
 
   for (const output of result.outputs) {
-    log.debug(`  ${path.relative(ctx.rootDir, output.path)}`);
+    if (verbose) {
+      log.debug(`  ${path.relative(ctx.rootDir, output.path)}`);
+    }
 
     // Only process JS entry files (not chunks)
     if (output.kind === 'entry-point' && output.path.endsWith('.js')) {

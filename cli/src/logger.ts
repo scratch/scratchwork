@@ -26,6 +26,10 @@ export function shouldShowBunErrors(): boolean {
   return showBunErrors;
 }
 
+export function isVerbose(): boolean {
+  return currentLevel >= 2;
+}
+
 const log = {
   debug(...args: unknown[]) {
     if (currentLevel >= 2) {

@@ -3,7 +3,7 @@ import type { BuildContext, Entry } from '../context';
 import type { BuildPipelineState } from '../types';
 import type { BuildStep } from '../types';
 import { render } from '../../util';
-import log from '../../logger';
+import log, { isVerbose } from '../../logger';
 import { buildGlobals, generateGlobalsAssignment } from '../globals';
 import { normalizeBase } from '../util';
 
@@ -28,6 +28,7 @@ async function createEntries(
   const { ctx, entries, markdownComponentsPath } = context;
   const { extension, outDir, templatePath, variables = {} } = options;
   const entryPts: Record<string, string> = {};
+  const verbose = isVerbose();
 
   for (const [name, entry] of Object.entries(entries)) {
     const artifactPath = entry.getArtifactPath(extension, outDir);
@@ -40,7 +41,9 @@ async function createEntries(
     });
 
     entryPts[name] = artifactPath;
-    log.debug(`  ${path.relative(ctx.rootDir, artifactPath)}`);
+    if (verbose) {
+      log.debug(`  ${path.relative(ctx.rootDir, artifactPath)}`);
+    }
   }
 
   return entryPts;

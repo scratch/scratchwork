@@ -10,7 +10,7 @@ import { visit } from 'unist-util-visit';
 import path from 'path';
 import type { BuildContext } from '../context';
 import { normalizeBase, isInternalAbsolutePath, isRelativePath } from '../util';
-import log from '../../logger';
+import log, { isVerbose } from '../../logger';
 
 export interface ImagePathsPluginOptions {
   /** Base path for deployment (e.g., '/mysite') */
@@ -53,6 +53,7 @@ export function createImagePathsPlugin(ctx: BuildContext): Plugin {
 
   return () => {
     return (tree: any, file: any) => {
+      const verbose = isVerbose();
       // Get the directory of the current MDX file relative to pages/
       let fileDir = '';
       if (file && file.path) {
@@ -87,14 +88,18 @@ export function createImagePathsPlugin(ctx: BuildContext): Plugin {
 
           // Build the final absolute path with base
           const absolutePath = base + '/' + resolvedPath;
-          log.debug(`  - image: ${src} -> ${absolutePath}`);
+          if (verbose) {
+            log.debug(`  - image: ${src} -> ${absolutePath}`);
+          }
           return absolutePath;
         }
 
         // Handle absolute internal paths: prepend base
         if (base && isInternalAbsolutePath(src)) {
           const newSrc = base + src;
-          log.debug(`  - image: ${src} -> ${newSrc}`);
+          if (verbose) {
+            log.debug(`  - image: ${src} -> ${newSrc}`);
+          }
           return newSrc;
         }
 
