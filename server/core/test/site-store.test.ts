@@ -29,6 +29,7 @@ function record(isPublic: boolean, groups: { readers?: string; writers?: string;
   return {
     version: 5,
     isPublic,
+    commentsEnabled: false,
     readers: groups.readers ?? "private",
     writers: groups.writers ?? "private",
     admins: groups.admins ?? "private",

@@ -61,6 +61,15 @@ export function runPublish(
     // An omitted isPublic preserves an existing project's setting (new projects are
     // created private); an omitted project lets a random-naming server mint one.
     const isPublic = config.isPublic ?? projectConfig?.isPublic;
+    const commentsEnabled = config.commentsEnabled ?? projectConfig?.commentsEnabled;
+    // The server enforces this too (it knows the project's current settings);
+    // failing here just catches the contradiction before the upload.
+    if (commentsEnabled === true && isPublic === true) {
+      return yield* Effect.fail(new CliError({
+        code: 1,
+        message: "scratchwork publish: comments require a private project (drop --public, or pass --no-comments)",
+      }));
+    }
 
     const bundle = yield* createBundle(target.root);
     const body: PublishRequestBody = {
@@ -68,6 +77,7 @@ export function runPublish(
       openPath: target.openPath,
       project,
       isPublic,
+      commentsEnabled,
     };
     const response = yield* postPublish(server, body, authToken).pipe(
       Effect.catchIf((error) => error instanceof PublishAuthRequired, () =>
@@ -205,6 +215,7 @@ function writeMetadata(
     server,
     project: response.project,
     isPublic: response.isPublic,
+    ...(response.commentsEnabled != null ? { commentsEnabled: response.commentsEnabled } : {}),
     url: response.url,
     updatedAt: new Date().toISOString(),
   }).pipe(
@@ -235,6 +246,7 @@ function printResult(
         ? [`  note    server assigned project name "${response.project}"`]
         : []),
       `  is publicly visible?  ${response.isPublic ? "yes" : "no"}`,
+      ...(response.commentsEnabled === true ? ["  comments enabled"] : []),
       `  files   ${bundle.files.length} (${formatBytes(bytes)})`,
       ...(saved ? [`  saved   ${PROJECT_CONFIG_FILE}\n`] : [""]),
     ].join("\n"),
