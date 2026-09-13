@@ -177,6 +177,14 @@ function expect(name: string, condition: boolean, detail: RunResult) {
 }
 
 // ── End-to-end: install.sh → real binary's `scratchwork install` ────────────
+// install.sh decides between handing off and its own fallback by whether
+// `<binary> install --help` exits 0. Both paths print the same lines, so the
+// end-to-end case below cannot tell them apart; pin the probe contract
+// directly so a binary that stops answering it fails the gate instead of
+// silently turning `scratchwork install` into dead code.
+const probe = await run([realBinary, "install", "--help"], { PATH: process.env.PATH });
+expect("the real binary must answer install.sh's capability probe (`install --help` exits 0)", probe.code === 0, probe);
+
 const latestRun = await runInstall({});
 expect(
   "latest install should run the real binary's install command end-to-end",
