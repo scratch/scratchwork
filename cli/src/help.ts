@@ -101,7 +101,7 @@ const EXTRAS: Readonly<Record<string, CommandExtras>> = {
     ],
     examples: [
       "scratchwork update",
-      "SCRATCHWORK_VERSION=0.2.0 scratchwork update",
+      "SCRATCHWORK_VERSION=0.3.0 scratchwork update",
     ],
   },
   login: {

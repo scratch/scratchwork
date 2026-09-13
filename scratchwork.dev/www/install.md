@@ -14,11 +14,16 @@ curl -fsSL https://scratchwork.dev/install.sh | bash
 
 Installs the latest release to `~/.local/bin/scratchwork`. No sudo, ever.
 The script only downloads, verifies, and extracts the release; the binary's
-own `scratchwork install` command does the rest (choosing the destination,
-installing, verifying, and PATH advice).
+own `scratchwork install` command does the rest (installing, verifying, and
+PATH advice). Releases up to v0.3.0 predate that command; the script installs
+them itself.
 
-- Pin a version: `SCRATCHWORK_VERSION=0.2.0 curl -fsSL https://scratchwork.dev/install.sh | bash`
-- Change the destination: set `SCRATCHWORK_INSTALL_DIR` (default `~/.local/bin`)
+When piping, set environment variables on `bash`, not `curl` — a prefix
+assignment applies only to the command it precedes:
+
+- Pin a version: `curl -fsSL https://scratchwork.dev/install.sh | SCRATCHWORK_VERSION=0.3.0 bash`
+- Change the destination: `curl -fsSL https://scratchwork.dev/install.sh | SCRATCHWORK_INSTALL_DIR=$HOME/bin bash`
+  (default `~/.local/bin`)
 
 ## Updating
 
@@ -28,10 +33,10 @@ An installed CLI updates itself — no need to re-run the install script:
 scratchwork update
 ```
 
-Downloads the latest release for your platform, verifies its checksum, and
-replaces the binary in place. Pin or downgrade with
-`SCRATCHWORK_VERSION=0.2.0 scratchwork update`. Re-running the install
-one-liner also upgrades in place.
+Downloads the latest release for your platform, verifies its checksum,
+confirms the new binary runs, and only then replaces the current one in
+place. Pin or downgrade with `SCRATCHWORK_VERSION=0.3.0 scratchwork update`.
+Re-running the install one-liner also upgrades in place.
 
 ## Supported platforms
 
@@ -60,18 +65,22 @@ The latest release is always reachable without knowing its version at
 `https://github.com/scratch/scratchwork/releases/latest/download/checksums.txt`
 — the asset names inside carry the version number.
 
-Steps (example: macOS arm64, version 0.2.0):
+Steps (example: macOS arm64, latest release):
 
 ```sh
-curl -fsSLO https://github.com/scratch/scratchwork/releases/download/v0.2.0/scratchwork-v0.2.0-darwin-arm64.tar.gz
-curl -fsSLO https://github.com/scratch/scratchwork/releases/download/v0.2.0/checksums.txt
+curl -fsSLO https://github.com/scratch/scratchwork/releases/latest/download/checksums.txt
+version="$(sed -n 's/^.*scratchwork-v\(.*\)-[a-z]*-[a-z0-9]*\.tar\.gz$/\1/p' checksums.txt | head -n 1)"
+curl -fsSLO "https://github.com/scratch/scratchwork/releases/download/v$version/scratchwork-v$version-darwin-arm64.tar.gz"
 
 # Verify: the computed digest must match the asset's line in checksums.txt.
 shasum -a 256 -c <(grep darwin-arm64 checksums.txt)   # Linux: sha256sum -c ...
 
-tar -xzf scratchwork-v0.2.0-darwin-arm64.tar.gz       # extracts one file: scratchwork
+tar -xzf "scratchwork-v$version-darwin-arm64.tar.gz"  # extracts one file: scratchwork
 ./scratchwork install                                 # installs to ~/.local/bin
 ```
+
+To pin a version instead, replace `latest/download` with `download/vX.Y.Z`
+and set `version=X.Y.Z`.
 
 `scratchwork install` copies the binary into `SCRATCHWORK_INSTALL_DIR`
 (default `~/.local/bin`, or pass `--dir <path>`), verifies it runs, and tells
@@ -81,8 +90,9 @@ you if the directory is missing from your `PATH`, e.g.:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Prefer fully manual placement? The extracted `scratchwork` file is the whole
-install — move it anywhere on your `PATH` and make it executable.
+Prefer fully manual placement — or installing v0.2.0 or v0.3.0, which predate
+`scratchwork install`? The extracted `scratchwork` file is the whole install:
+move it anywhere on your `PATH` and make it executable.
 
 ## Verify the install
 

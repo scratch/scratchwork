@@ -8,21 +8,23 @@
  * release, then delegates everything after that to `scratchwork install`.
  *
  * update downloads the latest release (or SCRATCHWORK_VERSION) for this
- * platform from GitHub Releases, verifies its checksum, and atomically
- * replaces the running binary in place.
+ * platform from GitHub Releases, verifies its checksum, unpacks it beside the
+ * running binary, confirms the new binary runs, and only then atomically
+ * replaces the running binary in place - so a bad download never displaces a
+ * working install.
  *
  * Both refuse to run from source (`bun src/index.ts`): they operate on the
  * running executable, which for a source run would be Bun itself.
  */
 import * as Command from "@effect/platform/Command";
 import type * as CommandExecutor from "@effect/platform/CommandExecutor";
-import type { PlatformError } from "@effect/platform/Error";
 import * as FileSystem from "@effect/platform/FileSystem";
 import * as HttpClient from "@effect/platform/HttpClient";
 import * as Path from "@effect/platform/Path";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import { sha256Hex } from "@scratchwork/shared/crypto/digest";
 import pkg from "../../package.json";
 import { CliError, errorMessage } from "../errors";
@@ -30,12 +32,19 @@ import { CliError, errorMessage } from "../errors";
 /** Release download base; SCRATCHWORK_DOWNLOAD_BASE overrides it (hermetic ci fixture). */
 const DOWNLOAD_BASE = "https://github.com/scratch/scratchwork/releases";
 
-const downloadBase = () => process.env.SCRATCHWORK_DOWNLOAD_BASE ?? DOWNLOAD_BASE;
+/** An environment variable, with unset and empty treated alike - the same as sh's `${VAR:-default}` in install.sh. */
+const env = (name: string): string | undefined => process.env[name] || undefined;
+
+const downloadBase = () => env("SCRATCHWORK_DOWNLOAD_BASE") ?? DOWNLOAD_BASE;
 
 type SelfCommand = "install" | "update";
 
 const fail = (command: SelfCommand, message: string) =>
   new CliError({ code: 1, message: `scratchwork ${command}: ${message}` });
+
+/** Rewraps non-CliError failures (platform errors) as a CliError with the given context. */
+const failWith = (command: SelfCommand, context: string) => (cause: unknown) =>
+  cause instanceof CliError ? cause : fail(command, `${context}: ${errorMessage(cause)}`);
 
 /** The running compiled binary's path. Fails for source runs, where the executable is Bun. */
 function selfBinary(command: SelfCommand): Effect.Effect<string, CliError> {
@@ -64,17 +73,25 @@ function releaseTarget(command: SelfCommand): Effect.Effect<string, CliError> {
 }
 
 /** One parsed release: its version plus the expected digest of every asset. */
-interface ReleaseChecksums {
+export interface ReleaseChecksums {
   readonly version: string;
   readonly digests: ReadonlyMap<string, string>;
 }
 
-/** Parses checksums.txt (`<sha256>  <asset>` lines); the asset names carry the version. */
-function parseChecksums(text: string): ReleaseChecksums | null {
+/**
+ * A checksums.txt line in `sha256sum` format: `<sha256>  <asset>`, where the
+ * asset is `scratchwork-v<version>-<os>-<arch>.tar.gz` (scripts/package-release.ts).
+ * The version is everything between `v` and the target, so prerelease
+ * versions with their own hyphens (`0.5.0-rc.1`) parse whole.
+ */
+const CHECKSUM_LINE = /^([0-9a-f]{64})  (scratchwork-v(.+)-(?:darwin|linux)-(?:arm64|x64)\.tar\.gz)$/;
+
+/** Parses checksums.txt; the asset names carry the version. Null when no asset line is present. */
+export function parseChecksums(text: string): ReleaseChecksums | null {
   const digests = new Map<string, string>();
   let version: string | null = null;
-  for (const line of text.split("\n")) {
-    const match = line.match(/^([0-9a-f]{64})  (scratchwork-v([^-]+)-.+\.tar\.gz)$/);
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(CHECKSUM_LINE);
     if (match == null) continue;
     digests.set(match[2]!, match[1]!);
     version ??= match[3]!;
@@ -88,7 +105,7 @@ function fetchText(url: string): Effect.Effect<string, CliError, HttpClient.Http
       .get(url)
       .pipe(
         Effect.flatMap((response) => response.text),
-        Effect.mapError((cause) => fail("update", `could not download ${url}: ${errorMessage(cause)}`)),
+        Effect.mapError(failWith("update", `could not download ${url}`)),
       ),
   );
 }
@@ -100,14 +117,14 @@ function fetchBytes(url: string): Effect.Effect<Uint8Array, CliError, HttpClient
       .pipe(
         Effect.flatMap((response) => response.arrayBuffer),
         Effect.map((buffer) => new Uint8Array(buffer)),
-        Effect.mapError((cause) => fail("update", `could not download ${url}: ${errorMessage(cause)}`)),
+        Effect.mapError(failWith("update", `could not download ${url}`)),
       ),
   );
 }
 
 /** Downloads and parses checksums.txt for SCRATCHWORK_VERSION or the latest release. */
 const fetchRelease: Effect.Effect<ReleaseChecksums, CliError, HttpClient.HttpClient> = Effect.gen(function* () {
-  const pinned = process.env.SCRATCHWORK_VERSION;
+  const pinned = env("SCRATCHWORK_VERSION");
   const url = pinned
     ? `${downloadBase()}/download/v${pinned}/checksums.txt`
     : `${downloadBase()}/latest/download/checksums.txt`;
@@ -118,24 +135,30 @@ const fetchRelease: Effect.Effect<ReleaseChecksums, CliError, HttpClient.HttpCli
   return release;
 });
 
-/** Unpacks the release tarball in a scoped temp dir and returns the extracted binary's path. */
+/**
+ * Unpacks the release tarball in a scoped temp dir created inside `directory`
+ * and returns the extracted binary's path. The directory is the install
+ * directory rather than the system temp dir: the binary is executed from
+ * here to verify it, and temp filesystems are commonly mounted noexec.
+ */
 function extractBinary(
   command: SelfCommand,
   asset: string,
   bytes: Uint8Array,
+  directory: string,
 ): Effect.Effect<
   string,
-  CliError | PlatformError,
+  CliError,
   FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor | Scope.Scope
 > {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;
-    const tmp = yield* fs.makeTempDirectoryScoped({ prefix: "scratchwork-release-" });
+    const tmp = yield* fs.makeTempDirectoryScoped({ directory, prefix: ".scratchwork-update-" });
     const archive = paths.join(tmp, asset);
     yield* fs.writeFile(archive, bytes);
     const code = yield* Command.exitCode(Command.make("tar", "-xzf", archive, "-C", tmp)).pipe(
-      Effect.mapError((cause) => fail(command, `could not run tar: ${errorMessage(cause)}`)),
+      Effect.mapError(failWith(command, "could not run tar")),
     );
     if (code !== 0) {
       return yield* Effect.fail(fail(command, `tar failed extracting ${asset}`));
@@ -144,8 +167,9 @@ function extractBinary(
     if (!(yield* fs.exists(binary))) {
       return yield* Effect.fail(fail(command, `archive ${asset} did not contain a scratchwork binary`));
     }
+    yield* fs.chmod(binary, 0o755);
     return binary;
-  });
+  }).pipe(Effect.mapError(failWith(command, `could not unpack ${asset} in ${directory}`)));
 }
 
 /**
@@ -169,22 +193,32 @@ function placeBinary(
       yield* fs.chmod(staged, 0o755);
       yield* fs.rename(staged, destination);
     }).pipe(Effect.onError(() => fs.remove(staged).pipe(Effect.ignore)));
-  }).pipe(Effect.mapError((cause) => (cause instanceof CliError ? cause : fail(command, `could not write ${destination}: ${errorMessage(cause)}`))));
+  }).pipe(Effect.mapError(failWith(command, `could not write ${destination}`)));
 }
 
-/** Runs `<binary> version` to confirm the installed binary executes, returning its version. */
+/**
+ * Runs `<binary> version` to confirm a binary executes, returning its version.
+ * Both the exit status and the output are checked: a binary that prints
+ * something and then crashes has not been verified.
+ */
 function verifyRuns(
   command: SelfCommand,
   binary: string,
 ): Effect.Effect<string, CliError, CommandExecutor.CommandExecutor> {
-  return Command.string(Command.make(binary, "version")).pipe(
-    Effect.mapError((cause) => fail(command, `the installed binary failed to run: ${errorMessage(cause)}`)),
-    Effect.map((output) => output.trim()),
-    Effect.filterOrFail(
-      (output) => output !== "",
-      () => fail(command, "the installed binary failed to run"),
-    ),
-  );
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const child = yield* Command.start(Command.make(binary, "version"));
+      const [output, code] = yield* Effect.all(
+        [Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode],
+        { concurrency: "unbounded" },
+      );
+      const version = output.trim();
+      if (code !== 0 || version === "") {
+        return yield* Effect.fail(fail(command, `${binary} failed to run (exit ${code}, printed ${JSON.stringify(version)})`));
+      }
+      return version;
+    }),
+  ).pipe(Effect.mapError(failWith(command, `${binary} failed to run`)));
 }
 
 /** Advice printed when the install directory is missing from PATH, or null when it is on it. */
@@ -204,9 +238,8 @@ export function runInstall(config: {
   return Effect.gen(function* () {
     const paths = yield* Path.Path;
     const self = yield* selfBinary("install");
-    const home = process.env.HOME;
-    const requested =
-      config.dir ?? process.env.SCRATCHWORK_INSTALL_DIR ?? (home ? paths.join(home, ".local", "bin") : null);
+    const home = env("HOME");
+    const requested = config.dir ?? env("SCRATCHWORK_INSTALL_DIR") ?? (home ? paths.join(home, ".local", "bin") : null);
     if (requested == null) {
       return yield* Effect.fail(fail("install", "HOME is not set; pass --dir or set SCRATCHWORK_INSTALL_DIR"));
     }
@@ -224,21 +257,23 @@ export function runInstall(config: {
 /**
  * Runs `scratchwork update`: replaces the running binary with the latest
  * release (or SCRATCHWORK_VERSION) for this platform, after verifying the
- * download against the release's checksums.txt.
+ * download against the release's checksums.txt and confirming the unpacked
+ * binary runs. The running binary is untouched until both checks pass.
  */
 export function runUpdate(): Effect.Effect<
   void,
-  CliError | PlatformError,
+  CliError,
   FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor | HttpClient.HttpClient
 > {
   return Effect.scoped(
     Effect.gen(function* () {
+      const paths = yield* Path.Path;
       const self = yield* selfBinary("update");
       const target = yield* releaseTarget("update");
       const release = yield* fetchRelease;
       if (release.version === pkg.version) {
         return yield* Console.log(
-          process.env.SCRATCHWORK_VERSION
+          env("SCRATCHWORK_VERSION")
             ? `scratchwork is already version ${pkg.version}.`
             : `scratchwork ${pkg.version} is already the latest version.`,
         );
@@ -252,14 +287,14 @@ export function runUpdate(): Effect.Effect<
       const bytes = yield* fetchBytes(`${downloadBase()}/download/v${release.version}/${asset}`);
       const actual = yield* Effect.tryPromise({
         try: () => sha256Hex(bytes),
-        catch: (cause) => fail("update", `could not hash ${asset}: ${errorMessage(cause)}`),
+        catch: failWith("update", `could not hash ${asset}`),
       });
       if (actual !== expected) {
         return yield* Effect.fail(fail("update", `checksum mismatch for ${asset}: expected ${expected}, got ${actual}`));
       }
-      const extracted = yield* extractBinary("update", asset, bytes);
+      const extracted = yield* extractBinary("update", asset, bytes, paths.dirname(self));
+      yield* verifyRuns("update", extracted);
       yield* placeBinary("update", extracted, self);
-      yield* verifyRuns("update", self);
       yield* Console.log(`Updated ${self}: ${pkg.version} -> ${release.version}`);
     }),
   );

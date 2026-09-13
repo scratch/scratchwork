@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { repoRoot } from "./workspaces";
 // RELEASE_TARGETS is exported by cli/build.js, but importing it would run the
 // build; keep the list in scripts/release-targets.ts, shared by both.
-import { RELEASE_TARGETS } from "./release-targets";
+import { RELEASE_TARGETS, releaseAssetName } from "./release-targets";
 
 const version = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version as string;
 const releaseDir = join(repoRoot, "release");
@@ -33,7 +33,7 @@ for (const target of RELEASE_TARGETS) {
     console.error(`package-release: missing ${binary} — run \`cd cli && bun build.js --all-targets\` first`);
     process.exit(1);
   }
-  const archiveName = `scratchwork-v${version}-${target}.tar.gz`;
+  const archiveName = releaseAssetName(version, target);
   const staging = mkdtempSync(join(tmpdir(), "scratchwork-release-"));
   try {
     cpSync(binary, join(staging, "scratchwork"));

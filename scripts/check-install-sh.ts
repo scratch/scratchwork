@@ -14,11 +14,15 @@
  *      already-up-to-date, and checksum-rejection.
  *   3. sh-only behavior — pinned versions, checksum rejection, and
  *      uname→target platform mapping via a fake `uname` on PATH — uses tiny
- *      fake sh "binaries" that answer any invocation, keeping those cases fast.
+ *      fake sh "binaries" shaped like the pre-`install` releases (v0.2.0 and
+ *      v0.3.0: `--version` works, `install` is an unknown command), so those
+ *      cases also prove install.sh still installs releases that predate the
+ *      hand-off, and they stay fast.
  */
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RELEASE_TARGETS, releaseAssetName } from "./release-targets";
 import { repoRoot } from "./workspaces";
 
 const script = join(repoRoot, "scratchwork.dev", "www", "install.sh");
@@ -32,7 +36,6 @@ if (!syntax.success) {
 
 // ── 2. Hermetic fixture ─────────────────────────────────────────────────────
 const work = mkdtempSync(join(tmpdir(), "install-sh-check-"));
-const TARGETS = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
 const HOST_TARGET = `${process.platform}-${process.arch}`;
 
 // The real compiled binary: the end-to-end cases exercise its `install` and
@@ -63,29 +66,34 @@ const realTarball = join(work, "scratchwork-host.tar.gz");
 }
 
 /**
- * Builds a fake release: per-target tarballs plus checksums.txt. Non-host
- * targets (and everything, without `realHost`) are tiny sh "binaries" that
- * answer any invocation — enough for the sh-only cases. With `realHost`, the
- * host target's asset is the real compiled binary.
+ * Builds a fake release: per-target tarballs plus checksums.txt, named by the
+ * same `releaseAssetName` scripts/package-release.ts ships. Non-host targets
+ * (and everything, without `realHost`) are tiny sh "binaries" that behave
+ * like the releases before `scratchwork install` existed: `--version` /
+ * `version` print the version, anything else is an unknown command. With
+ * `realHost`, the host target's asset is the real compiled binary.
  */
 function makeRelease(version: string, options: { realHost?: boolean } = {}): { dir: string } {
   const dir = join(work, `release-v${version}`);
   mkdirSync(dir, { recursive: true });
   const lines: string[] = [];
-  for (const target of TARGETS) {
-    const archive = join(dir, `scratchwork-v${version}-${target}.tar.gz`);
+  for (const target of RELEASE_TARGETS) {
+    const archive = join(dir, releaseAssetName(version, target));
     if (options.realHost && target === HOST_TARGET) {
       cpSync(realTarball, archive);
     } else {
       const staging = join(dir, `staging-${target}`);
       mkdirSync(staging);
-      writeFileSync(join(staging, "scratchwork"), `#!/bin/sh\necho "${version} (${target})"\n`);
+      writeFileSync(
+        join(staging, "scratchwork"),
+        `#!/bin/sh\ncase "\${1:-}" in\n  --version|version) echo "${version} (${target})" ;;\n  *) echo "scratchwork: unknown command '\${1:-}'" >&2; exit 1 ;;\nesac\n`,
+      );
       chmodSync(join(staging, "scratchwork"), 0o755);
       const tar = Bun.spawnSync(["tar", "-czf", archive, "-C", staging, "scratchwork"]);
       if (!tar.success) throw new Error(`fixture tar failed for ${archive}`);
     }
     const digest = new Bun.CryptoHasher("sha256").update(readFileSync(archive)).digest("hex");
-    lines.push(`${digest}  scratchwork-v${version}-${target}.tar.gz`);
+    lines.push(`${digest}  ${releaseAssetName(version, target)}`);
   }
   writeFileSync(join(dir, "checksums.txt"), lines.join("\n") + "\n");
   return { dir };
@@ -177,7 +185,8 @@ expect(
     latestRun.stdout.includes(`Installed ${join(latestRun.installDir, "scratchwork")}`) &&
     latestRun.stdout.includes(`scratchwork ${realVersion} is ready.`) &&
     latestRun.stdout.includes("is not on your PATH") &&
-    existsSync(join(latestRun.installDir, "scratchwork")),
+    existsSync(join(latestRun.installDir, "scratchwork")) &&
+    readdirSync(latestRun.installDir).every((name) => !name.startsWith(".scratchwork-")),
   latestRun,
 );
 
@@ -196,7 +205,8 @@ expect(
   result.code === 0 &&
     result.stdout.includes("Downloading scratchwork v9.9.9") &&
     result.stdout.includes(`-> 9.9.9`) &&
-    statSync(updateBinary).ino !== inodeBefore,
+    statSync(updateBinary).ino !== inodeBefore &&
+    readdirSync(updateHome).every((name) => !name.startsWith(".scratchwork-")),
   result,
 );
 
@@ -220,10 +230,21 @@ expect(
 );
 tamperChecksums = false;
 
-// ── sh-only behavior (fake binaries; nothing real gets executed) ────────────
-// Pinned version install.
+// ── sh-only behavior (fake pre-`install` binaries; nothing real gets executed) ──
+// Pinned version install of a release without `scratchwork install`: the
+// script must fall back to finishing the install itself.
 result = await runInstall({ SCRATCHWORK_VERSION: "8.8.8" });
-expect("pinned install should fetch v8.8.8", result.code === 0 && result.stdout.includes("8.8.8"), result);
+expect(
+  "pinned install of a pre-`install` release should fall back to the script's own install",
+  result.code === 0 &&
+    result.stdout.includes("Downloading scratchwork v8.8.8") &&
+    result.stdout.includes(`Installed ${join(result.installDir, "scratchwork")}`) &&
+    result.stdout.includes(`scratchwork 8.8.8 (${HOST_TARGET}) is ready.`) &&
+    result.stdout.includes("is not on your PATH") &&
+    existsSync(join(result.installDir, "scratchwork")) &&
+    readdirSync(result.installDir).every((name) => !name.startsWith(".scratchwork-")),
+  result,
+);
 
 // Checksum tampering must be rejected before anything runs.
 tamperChecksums = true;
@@ -253,5 +274,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  "check-install-sh: syntax ok; end-to-end install + update (real binary) and pinned, checksum-rejection, platform-mapping cases pass against the local fixture",
+  "check-install-sh: syntax ok; end-to-end install + update (real binary), pre-`install` release fallback, checksum-rejection, and platform-mapping cases pass against the local fixture",
 );
