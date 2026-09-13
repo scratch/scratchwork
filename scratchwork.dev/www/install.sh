@@ -1,15 +1,20 @@
 #!/bin/sh
-# Installs the scratchwork CLI from GitHub Releases.
+# Bootstraps the scratchwork CLI from GitHub Releases: downloads the release
+# archive for this platform, verifies its checksum, extracts it beside the
+# install destination, and hands off to the binary's own `scratchwork install`
+# for everything after that (installing, verifying, and PATH advice).
 #
 #   curl -fsSL https://scratchwork.dev/install.sh | bash
 #
-# Environment:
-#   SCRATCHWORK_VERSION        pin a version (e.g. 0.2.0); default: latest release
+# Environment (set them on `bash`, not `curl`, when piping — the assignment
+# applies only to the command it prefixes):
+#   SCRATCHWORK_VERSION        pin a version (e.g. 0.3.0); default: latest release
 #   SCRATCHWORK_INSTALL_DIR    install destination; default: ~/.local/bin
 #   SCRATCHWORK_DOWNLOAD_BASE  override the release download base URL (used by
 #                              the hermetic ci test; default: GitHub Releases)
 #
-# The script never escalates privileges. Re-running upgrades in place.
+# The script never escalates privileges. Re-running upgrades in place, and an
+# installed CLI can upgrade itself with `scratchwork update`.
 # Agent-readable manual steps: https://scratchwork.dev/install.md
 
 set -euf
@@ -51,7 +56,8 @@ else
 fi
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+stage=""
+trap 'rm -rf "$tmp" ${stage:+"$stage"}' EXIT INT TERM
 
 # ── Fetch checksums.txt; its asset names carry the release version, so the
 #    "latest" case needs no GitHub API call ─────────────────────────────────
@@ -62,7 +68,9 @@ else
 fi
 curl -fsSL "$checksums_url" -o "$tmp/checksums.txt" || fail "could not download $checksums_url"
 if [ -z "$version" ]; then
-  version="$(sed -n 's/^.*scratchwork-v\([^-][^-]*\)-.*\.tar\.gz$/\1/p' "$tmp/checksums.txt" | head -n 1)"
+  # Asset names are scratchwork-v<version>-<os>-<arch>.tar.gz; the version is
+  # everything between `v` and the target, so prereleases (0.5.0-rc.1) parse whole.
+  version="$(sed -n 's/^.*scratchwork-v\(.*\)-[a-z]*-[a-z0-9]*\.tar\.gz$/\1/p' "$tmp/checksums.txt" | head -n 1)"
   [ -n "$version" ] || fail "could not read the latest version from checksums.txt"
 fi
 
@@ -70,26 +78,34 @@ asset="scratchwork-v$version-$os-$arch.tar.gz"
 expected="$(grep -F "  $asset" "$tmp/checksums.txt" | cut -d' ' -f1 || true)"
 [ -n "$expected" ] || fail "release v$version has no prebuilt binary for $os-$arch"
 
-# ── Download, verify, extract, install ──────────────────────────────────────
+# ── Download and verify ─────────────────────────────────────────────────────
 printf 'Downloading scratchwork v%s (%s-%s)...\n' "$version" "$os" "$arch"
 curl -fsSL "$base/download/v$version/$asset" -o "$tmp/$asset" || fail "could not download $base/download/v$version/$asset"
 actual="$(sha256 "$tmp/$asset")"
 [ "$actual" = "$expected" ] || fail "checksum mismatch for $asset: expected $expected, got $actual"
 
-tar -xzf "$tmp/$asset" -C "$tmp"
-[ -f "$tmp/scratchwork" ] || fail "archive $asset did not contain a scratchwork binary"
+# ── Extract beside the destination, not under $tmp: the binary is executed
+#    from here to finish the install, and temp filesystems are often noexec ──
 mkdir -p "$install_dir"
-chmod 755 "$tmp/scratchwork"
-mv -f "$tmp/scratchwork" "$install_dir/scratchwork"
+stage="$(mktemp -d "$install_dir/.scratchwork-install.XXXXXX")"
+tar -xzf "$tmp/$asset" -C "$stage"
+[ -f "$stage/scratchwork" ] || fail "archive $asset did not contain a scratchwork binary"
+chmod 755 "$stage/scratchwork"
 
-printf 'Installed %s\n' "$install_dir/scratchwork"
-"$install_dir/scratchwork" --version >/dev/null || fail "the installed binary failed to run"
-printf 'scratchwork %s is ready.\n' "$("$install_dir/scratchwork" --version)"
-
-case ":$PATH:" in
-  *":$install_dir:"*) ;;
-  *)
-    printf '\n%s is not on your PATH. Add it, e.g.:\n' "$install_dir"
-    printf '  export PATH="%s:$PATH"\n' "$install_dir"
-    ;;
-esac
+# ── Hand off to the verified binary. Releases up to v0.3.0 predate
+#    `scratchwork install`; for those, finish the way the binary would. ───────
+if "$stage/scratchwork" install --help >/dev/null 2>&1; then
+  SCRATCHWORK_INSTALL_DIR="$install_dir" "$stage/scratchwork" install || fail "scratchwork install failed"
+else
+  mv -f "$stage/scratchwork" "$install_dir/scratchwork"
+  printf 'Installed %s\n' "$install_dir/scratchwork"
+  "$install_dir/scratchwork" --version >/dev/null || fail "the installed binary failed to run"
+  printf 'scratchwork %s is ready.\n' "$("$install_dir/scratchwork" --version)"
+  case ":$PATH:" in
+    *":$install_dir:"*) ;;
+    *)
+      printf '\n%s is not on your PATH. Add it, e.g.:\n' "$install_dir"
+      printf '  export PATH="%s:$PATH"\n' "$install_dir"
+      ;;
+  esac
+fi

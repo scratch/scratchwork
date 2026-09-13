@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import pkg from "../package.json";
 import { runExample } from "./commands/example";
+import { runInstall, runUpdate } from "./commands/install";
 import { runLogin } from "./commands/login";
 import { DEFAULT_PORT, runDev } from "./commands/dev";
 import { runPublish } from "./commands/publish";
@@ -183,6 +184,18 @@ const streamCommand = Command.make(
   runStream,
 ).pipe(Command.withDescription("Publish once, then republish on local file changes"));
 
+const installCommand = Command.make(
+  "install",
+  {
+    dir: textOption("dir", "path", "Install destination directory. Default: SCRATCHWORK_INSTALL_DIR or ~/.local/bin."),
+  },
+  ({ dir }) => runInstall({ dir }),
+).pipe(Command.withDescription("Install this scratchwork binary into a directory on your PATH"));
+
+const updateCommand = Command.make("update", {}, () => runUpdate()).pipe(
+  Command.withDescription("Update the scratchwork CLI to the latest release"),
+);
+
 const versionCommand = Command.make("version", {}, () =>
   Console.log(pkg.version),
 ).pipe(Command.withDescription("Print the Scratchwork CLI version"));
@@ -195,6 +208,7 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
     devCommand,
     exampleCommand,
     infoCommand,
+    installCommand,
     loginCommand,
     meCommand,
     projectsCommand,
@@ -204,6 +218,7 @@ const scratchworkCommand = Command.make("scratchwork").pipe(
     streamCommand,
     templateCommand,
     unpublishCommand,
+    updateCommand,
     versionCommand,
   ]),
 );

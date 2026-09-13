@@ -7,6 +7,7 @@ const COMMANDS = [
   "dev",
   "example",
   "info",
+  "install",
   "login",
   "me",
   "projects",
@@ -14,6 +15,7 @@ const COMMANDS = [
   "stream",
   "template",
   "unpublish",
+  "update",
   "version",
 ];
 

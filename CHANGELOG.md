@@ -5,6 +5,12 @@ top released section into the GitHub Release notes (scripts/release-notes.ts).
 
 ## Unreleased
 
+- `scratchwork update` — the CLI updates itself in place from GitHub Releases
+  (checksum-verified; pin with `SCRATCHWORK_VERSION`), and the new
+  `scratchwork install` command owns everything after download + verification
+  in the install flow. `install.sh` is now a thin bootstrap that downloads,
+  verifies, extracts, and delegates to `scratchwork install`.
+
 ## v0.3.0
 
 - `npm create scratchwork-server` — new `create-scratchwork-server` package
