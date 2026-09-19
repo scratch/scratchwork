@@ -284,23 +284,41 @@ describe("not found & safety", () => {
 // itself instead of trusting the bind to fail.
 // ===========================================================================
 
+// Some hosts (ipv6.disable=1 kernels, locked-down containers) have no ::1; the
+// CLI treats that as "not evidence" and so does this suite — skip, don't fail.
+const canBindLoopback = (hostname) => {
+  try {
+    Bun.listen({ hostname, port: 0, socket: { data() {} } }).stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 describe("port selection", () => {
   for (const hostname of ["127.0.0.1", "::1"]) {
-    test(`skips the requested port when another process holds ${hostname}:PORT`, async () => {
-      const wanted = nextPort();
-      const squatter = Bun.listen({ hostname, port: wanted, socket: { data() {} } });
-      const dir = makeFixture({ "index.html": staticPage("mine") });
-      const proc = spawnServer(dir, { port: wanted });
-      try {
-        const { port } = await waitForReady(proc);
-        expect(port).toBeGreaterThan(wanted);
-        expect((await httpGet(port, "/")).body).toContain("static@mine");
-      } finally {
-        proc.kill();
-        await proc.exited;
-        squatter.stop(true);
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
+    test.skipIf(!canBindLoopback(hostname))(
+      `skips the requested port when another process holds ${hostname}:PORT`,
+      async () => {
+        const wanted = nextPort();
+        const squatter = Bun.listen({ hostname, port: wanted, socket: { data() {} } });
+        let dir;
+        let proc;
+        try {
+          dir = makeFixture({ "index.html": staticPage("mine") });
+          proc = spawnServer(dir, { port: wanted });
+          const { port } = await waitForReady(proc);
+          expect(port).toBeGreaterThan(wanted);
+          expect((await httpGet(port, "/")).body).toContain("static@mine");
+        } finally {
+          squatter.stop(true);
+          if (proc) {
+            proc.kill();
+            await proc.exited;
+          }
+          if (dir) rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
   }
 });

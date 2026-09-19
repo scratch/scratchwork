@@ -10,7 +10,9 @@
  * happily coexists with another process's 127.0.0.1:PORT listener, so the dev
  * server would start without error while http://localhost:PORT kept serving
  * the other process. Each candidate port is therefore probed on the loopback
- * addresses before the real server binds it.
+ * addresses before the real server binds it. The probe is best-effort: it is
+ * released before the real bind, so a process grabbing the specific address in
+ * that gap still wins, but that window is microseconds wide.
  */
 import type * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
@@ -119,23 +121,24 @@ function handleRequest(
  * True when a throwaway TCP listener can be opened on every loopback address at
  * `port`. Only an address-in-use failure marks the port as taken; anything else
  * (for example ::1 on a host without IPv6) is not evidence of a competing
- * server, so the real bind decides.
+ * server, so the real bind decides. Short-circuits on the first taken address.
  */
 function loopbackFree(port: number): Effect.Effect<boolean> {
-  return Effect.forEach(LOOPBACK_ADDRESSES, (hostname) =>
+  return Effect.every(LOOPBACK_ADDRESSES, (hostname) =>
     probeBind(hostname, port),
-  ).pipe(Effect.map((results) => results.every((free) => free)));
+  );
 }
 
 /** Binds and immediately releases `hostname:port`; false only on address-in-use. */
 function probeBind(hostname: string, port: number): Effect.Effect<boolean> {
-  return Effect.try({
-    try: () => {
-      Bun.listen({ hostname, port, socket: { data() {} } }).stop(true);
-      return true;
-    },
-    catch: (error) => error,
-  }).pipe(Effect.catchAll((error) => Effect.succeed(!addressInUse(error))));
+  return Effect.acquireUseRelease(
+    Effect.try({
+      try: () => Bun.listen({ hostname, port, socket: { data() {} } }),
+      catch: (error) => error,
+    }),
+    () => Effect.succeed(true),
+    (listener) => Effect.sync(() => listener.stop(true)),
+  ).pipe(Effect.catchAll((error) => Effect.succeed(!addressInUse(error))));
 }
 
 /** Detects Bun's address-in-use failures, which arrive as defects here. */
