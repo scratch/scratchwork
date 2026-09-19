@@ -11,6 +11,7 @@ import {
   fakeShell,
   staticPage,
   makeFixture,
+  nextPort,
   spawnServer,
   waitForReady,
   httpGet,
@@ -274,4 +275,54 @@ describe("not found & safety", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+// ===========================================================================
+// Port selection — a port is only "free" if the browser's `localhost` would
+// actually reach us. On macOS a wildcard bind succeeds even while another
+// process holds 127.0.0.1:PORT, so the CLI must probe the loopback addresses
+// itself instead of trusting the bind to fail.
+// ===========================================================================
+
+// Some hosts (ipv6.disable=1 kernels, locked-down containers) have no ::1; the
+// CLI treats that as "not evidence" and so does this suite — skip, don't fail.
+const canBindLoopback = (hostname) => {
+  try {
+    Bun.listen({ hostname, port: 0, socket: { data() {} } }).stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+describe("port selection", () => {
+  for (const hostname of ["127.0.0.1", "::1"]) {
+    test.skipIf(!canBindLoopback(hostname))(
+      `skips the requested port when another process holds ${hostname}:PORT`,
+      async () => {
+        const wanted = nextPort();
+        const squatter = Bun.listen({ hostname, port: wanted, socket: { data() {} } });
+        let dir;
+        let proc;
+        try {
+          dir = makeFixture({ "index.html": staticPage("mine") });
+          // --verbose so the probe's own log line can be asserted: on Linux the
+          // wildcard bind fails by itself, so the port check alone would pass
+          // there even with the probe deleted.
+          proc = spawnServer(dir, { port: wanted, args: ["--verbose"] });
+          const { port, output } = await waitForReady(proc);
+          expect(port).toBeGreaterThan(wanted);
+          expect(output).toContain("dev port in use on loopback");
+          expect((await httpGet(port, "/")).body).toContain("static@mine");
+        } finally {
+          squatter.stop(true);
+          if (proc) {
+            proc.kill();
+            await proc.exited;
+          }
+          if (dir) rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
+  }
 });
