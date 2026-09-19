@@ -1,6 +1,6 @@
 {
   "name": "@scratchwork/server-deploy-local",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Local Bun deploy target for the Scratchwork server.",
   "license": "MIT",

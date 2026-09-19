@@ -5,6 +5,12 @@ top released section into the GitHub Release notes (scripts/release-notes.ts).
 
 ## Unreleased
 
+## v0.3.1
+
+- `scratchwork dev` no longer starts on a port that `http://localhost:PORT`
+  does not reach. On macOS a wildcard bind succeeds while another process holds
+  `127.0.0.1:PORT`; each candidate port is now probed on `127.0.0.1` and `::1`
+  and skipped when either is in use.
 - `scratchwork update` — the CLI updates itself in place from GitHub Releases
   (checksum-verified; pin with `SCRATCHWORK_VERSION`), and the new
   `scratchwork install` command owns everything after download + verification
