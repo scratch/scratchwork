@@ -2,6 +2,15 @@
  * The `scratchwork dev` HTTP server: binds the first free port at or above the
  * requested one, then serves site routes through the shared serving pipeline
  * with live reload injected into HTML responses.
+ *
+ * "Free" is judged from the browser's point of view. The banner URL says
+ * `localhost`, which resolves to 127.0.0.1 and ::1, so a port only counts as
+ * free when both of those addresses can be bound. Bun's own wildcard bind is
+ * not enough evidence: on macOS (BSD socket semantics) a wildcard listener
+ * happily coexists with another process's 127.0.0.1:PORT listener, so the dev
+ * server would start without error while http://localhost:PORT kept serving
+ * the other process. Each candidate port is therefore probed on the loopback
+ * addresses before the real server binds it.
  */
 import type * as HttpApp from "@effect/platform/HttpApp";
 import * as HttpServerRequest from "@effect/platform/HttpServerRequest";
@@ -20,6 +29,9 @@ import type { DevServices, DevState, ScopedDevServices } from "./types";
 
 const NO_STORE = "no-store, must-revalidate";
 
+/** Every address `localhost` may resolve to; all must be bindable for a port to be free. */
+const LOOPBACK_ADDRESSES: ReadonlyArray<string> = ["127.0.0.1", "::1"];
+
 /** Starts the dev HTTP server, probing upward when the requested port is busy. */
 export function serve(
   state: DevState,
@@ -28,6 +40,11 @@ export function serve(
   return Effect.gen(function* () {
     let port = startPort;
     for (let attempt = 0; attempt < 100; attempt++) {
+      if (!(yield* loopbackFree(port))) {
+        yield* logDebug("dev port in use on loopback", { port });
+        port++;
+        continue;
+      }
       const result = yield* BunHttpServer.make({ port, idleTimeout: 0 }).pipe(
         Effect.flatMap((server) =>
           server.serve(devApp(state)).pipe(Effect.as({ port })),
@@ -96,6 +113,29 @@ function handleRequest(
       rendererFallback: loadShell(),
     });
   });
+}
+
+/**
+ * True when a throwaway TCP listener can be opened on every loopback address at
+ * `port`. Only an address-in-use failure marks the port as taken; anything else
+ * (for example ::1 on a host without IPv6) is not evidence of a competing
+ * server, so the real bind decides.
+ */
+function loopbackFree(port: number): Effect.Effect<boolean> {
+  return Effect.forEach(LOOPBACK_ADDRESSES, (hostname) =>
+    probeBind(hostname, port),
+  ).pipe(Effect.map((results) => results.every((free) => free)));
+}
+
+/** Binds and immediately releases `hostname:port`; false only on address-in-use. */
+function probeBind(hostname: string, port: number): Effect.Effect<boolean> {
+  return Effect.try({
+    try: () => {
+      Bun.listen({ hostname, port, socket: { data() {} } }).stop(true);
+      return true;
+    },
+    catch: (error) => error,
+  }).pipe(Effect.catchAll((error) => Effect.succeed(!addressInUse(error))));
 }
 
 /** Detects Bun's address-in-use failures, which arrive as defects here. */

@@ -11,6 +11,7 @@ import {
   fakeShell,
   staticPage,
   makeFixture,
+  nextPort,
   spawnServer,
   waitForReady,
   httpGet,
@@ -274,4 +275,32 @@ describe("not found & safety", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+// ===========================================================================
+// Port selection — a port is only "free" if the browser's `localhost` would
+// actually reach us. On macOS a wildcard bind succeeds even while another
+// process holds 127.0.0.1:PORT, so the CLI must probe the loopback addresses
+// itself instead of trusting the bind to fail.
+// ===========================================================================
+
+describe("port selection", () => {
+  for (const hostname of ["127.0.0.1", "::1"]) {
+    test(`skips the requested port when another process holds ${hostname}:PORT`, async () => {
+      const wanted = nextPort();
+      const squatter = Bun.listen({ hostname, port: wanted, socket: { data() {} } });
+      const dir = makeFixture({ "index.html": staticPage("mine") });
+      const proc = spawnServer(dir, { port: wanted });
+      try {
+        const { port } = await waitForReady(proc);
+        expect(port).toBeGreaterThan(wanted);
+        expect((await httpGet(port, "/")).body).toContain("static@mine");
+      } finally {
+        proc.kill();
+        await proc.exited;
+        squatter.stop(true);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
 });

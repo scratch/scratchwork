@@ -60,6 +60,13 @@ scratchwork.dev server, inside the gate like the `deploy/*` projects.
 - `shared/src/site/default-renderer.generated.js` is a build artifact written by
   `renderer/build.js` — never edit it by hand; it is exempt from source-code invariants.
 
+## Git hygiene
+
+Commit messages and PR descriptions are terse: a subject line plus, when the
+subject is not enough, a few sentences of simplified technical English saying what
+changed and why. No headers, no bullet lists, no test plan, no summary sections.
+The diff and the gate are the evidence; the description just orients the reader.
+
 ## Standing rule
 
 **Verify every diff against the six invariants below before committing.** Each invariant
