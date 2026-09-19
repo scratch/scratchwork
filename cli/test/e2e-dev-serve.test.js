@@ -306,9 +306,13 @@ describe("port selection", () => {
         let proc;
         try {
           dir = makeFixture({ "index.html": staticPage("mine") });
-          proc = spawnServer(dir, { port: wanted });
-          const { port } = await waitForReady(proc);
+          // --verbose so the probe's own log line can be asserted: on Linux the
+          // wildcard bind fails by itself, so the port check alone would pass
+          // there even with the probe deleted.
+          proc = spawnServer(dir, { port: wanted, args: ["--verbose"] });
+          const { port, output } = await waitForReady(proc);
           expect(port).toBeGreaterThan(wanted);
+          expect(output).toContain("dev port in use on loopback");
           expect((await httpGet(port, "/")).body).toContain("static@mine");
         } finally {
           squatter.stop(true);

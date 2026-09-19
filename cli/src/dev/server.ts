@@ -138,7 +138,17 @@ function probeBind(hostname: string, port: number): Effect.Effect<boolean> {
     }),
     () => Effect.succeed(true),
     (listener) => Effect.sync(() => listener.stop(true)),
-  ).pipe(Effect.catchAll((error) => Effect.succeed(!addressInUse(error))));
+  ).pipe(
+    Effect.catchAll((error) =>
+      addressInUse(error)
+        ? Effect.succeed(false)
+        : logDebug("dev port probe inconclusive", {
+            hostname,
+            port,
+            error: errorMessage(error),
+          }).pipe(Effect.as(true)),
+    ),
+  );
 }
 
 /** Detects Bun's address-in-use failures, which arrive as defects here. */
