@@ -43,7 +43,6 @@ export function serve(
     let port = startPort;
     for (let attempt = 0; attempt < 100; attempt++) {
       if (!(yield* loopbackFree(port))) {
-        yield* logDebug("dev port in use on loopback", { port });
         port++;
         continue;
       }
@@ -141,7 +140,9 @@ function probeBind(hostname: string, port: number): Effect.Effect<boolean> {
   ).pipe(
     Effect.catchAll((error) =>
       addressInUse(error)
-        ? Effect.succeed(false)
+        ? logDebug("dev port in use on loopback", { hostname, port }).pipe(
+            Effect.as(false),
+          )
         : logDebug("dev port probe inconclusive", {
             hostname,
             port,
@@ -151,7 +152,7 @@ function probeBind(hostname: string, port: number): Effect.Effect<boolean> {
   );
 }
 
-/** Detects Bun's address-in-use failures, which arrive as defects here. */
+/** Detects Bun's address-in-use failures: defects from Bun.serve, typed failures from the probe. */
 function addressInUse(error: unknown): boolean {
   const candidate = error as {
     readonly code?: string;
