@@ -49,7 +49,7 @@ export { isSafeProjectIdentifier } from "@scratchwork/shared/site/identifiers";
  * ".well-known") is unclaimable without an entry here. */
 const RESERVED_ROUTE_SLUGS: ReadonlySet<string> = new Set([
   // Server-owned routes.
-  "api", "auth", "health", "favicon.ico", "favicon.svg",
+  "api", "auth", "health", "favicon.ico", "favicon.svg", "mcp", "oauth",
   // Host-wide root files.
   "robots.txt", "sitemap.xml", "ads.txt", "app-ads.txt", "security.txt",
   // Future namespace prefixes.

@@ -182,19 +182,23 @@ const MAX_CLI_TOKEN_BODY_BYTES = 64 * 1024;
 
 /** Handles `POST /auth/cli/token`: the back-channel exchange of a one-time CLI
  * authorization code plus PKCE verifier for a bearer token. */
-function exchangeCliToken({ request, payload }: ApiContext<"cli-token-exchange">) {
+/** Records the one-time redemption of a signed authorization code. Burn before
+ * checking possession: the conditional create fails on any second attempt, so an
+ * intercepted code that is replayed — or raced with a wrong verifier — fails
+ * closed instead of staying redeemable within its lifetime. Shared by the CLI
+ * and MCP code exchanges. */
+export function burnOneTimeCode(
+  namespace: string,
+  id: string,
+  expiresAt: number,
+): Effect.Effect<void, AuthError | HttpError, PrimitiveDb> {
   return Effect.gen(function* () {
-    const config = yield* ServerConfig;
     const db = yield* PrimitiveDb;
-    const code = yield* decodeCliAuthorizationCode(payload.code, config.auth);
-    // Burn the code before checking possession: the first redemption attempt
-    // consumes it, so an intercepted code that is replayed — or raced with a wrong
-    // verifier — fails closed instead of staying redeemable within its lifetime.
     yield* db.put(
-      CLI_CODE_NAMESPACE,
-      code.id,
+      namespace,
+      id,
       { redeemedAt: Math.floor(Date.now() / 1000) },
-      { ifNoneMatch: "*", expiresAt: code.expiresAt },
+      { ifNoneMatch: "*", expiresAt },
     ).pipe(
       Effect.mapError((error) =>
         error._tag === "PrimitiveDbConflict"
@@ -202,6 +206,14 @@ function exchangeCliToken({ request, payload }: ApiContext<"cli-token-exchange">
           : new HttpError({ status: 500, message: "Could not record the code redemption" }),
       ),
     );
+  });
+}
+
+function exchangeCliToken({ request, payload }: ApiContext<"cli-token-exchange">) {
+  return Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    const code = yield* decodeCliAuthorizationCode(payload.code, config.auth);
+    yield* burnOneTimeCode(CLI_CODE_NAMESPACE, code.id, code.expiresAt);
     const user = yield* verifyCliCodeExchange(code, payload.codeVerifier, payload.redirectUri, config.auth);
     const cfToken = yield* decryptCliCloudflareToken(code, config.auth);
     const token = yield* createSessionToken(user, config.auth);

@@ -24,10 +24,18 @@ import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import {
+  createMcpAccessToken,
+  createMcpConsentToken,
+  createMcpRefreshToken,
   createSessionToken,
   decodeCliAuthorizationCode,
+  decodeMcpAuthorizationCode,
   issueCliAuthorizationCode,
+  issueMcpAuthorizationCode,
   makeAuth,
+  verifyMcpAccessToken,
+  verifyMcpConsentToken,
+  verifyMcpRefreshToken,
   type AuthUser,
 } from "../src/auth";
 import type { AuthConfig } from "../src/config";
@@ -118,6 +126,11 @@ async function oauthStateAccepts(token: string, stateParam: string = FIXED_STATE
 }
 
 const CLI_REDIRECT = "http://127.0.0.1:5555/callback";
+/** The MCP resource URL every mcp-access/mcp-refresh oracle verifies against. */
+const MCP_AUD = `${BASE_URL}/mcp`;
+const MCP_CLIENT_ID = "corpus-mcp-client-1";
+const MCP_REDIRECT = "http://127.0.0.1:6060/callback";
+const MCP_CHALLENGE = "corpus-challenge-corpus-challenge-corpus-ch1";
 
 const KINDS: readonly TokenKind[] = [
   {
@@ -201,6 +214,88 @@ const KINDS: readonly TokenKind[] = [
     }),
     accepts: (token) =>
       Effect.runPromise(auth.verifyProjectAccessToken(token, "site", "cookie")).then(
+        (found) => found != null,
+        () => false,
+      ),
+  },
+  {
+    name: "mcp-consent",
+    mint: () =>
+      Effect.runPromise(createMcpConsentToken({
+        clientId: MCP_CLIENT_ID,
+        redirectUri: MCP_REDIRECT,
+        codeChallenge: MCP_CHALLENGE,
+        userId: user.id,
+      }, config)),
+    validPayload: () => ({
+      version: 1,
+      kind: "mcp-consent",
+      clientId: MCP_CLIENT_ID,
+      redirectUri: MCP_REDIRECT,
+      codeChallenge: MCP_CHALLENGE,
+      userId: user.id,
+      expiresAt: now() + 600,
+    }),
+    accepts: (token) =>
+      Effect.runPromise(verifyMcpConsentToken(token, config)).then(() => true, () => false),
+  },
+  {
+    name: "mcp-code",
+    mint: () =>
+      Effect.runPromise(issueMcpAuthorizationCode(user, {
+        clientId: MCP_CLIENT_ID,
+        redirectUri: MCP_REDIRECT,
+        codeChallenge: MCP_CHALLENGE,
+      }, config)),
+    validPayload: () => ({
+      version: 1,
+      kind: "mcp-code",
+      id: "corpus-mcp-code-1",
+      user: { id: user.id, email: user.email },
+      clientId: MCP_CLIENT_ID,
+      redirectUri: MCP_REDIRECT,
+      codeChallenge: MCP_CHALLENGE,
+      expiresAt: now() + 60,
+    }),
+    accepts: (token) =>
+      Effect.runPromise(decodeMcpAuthorizationCode(token, config)).then(() => true, () => false),
+  },
+  {
+    name: "mcp-access",
+    mint: () =>
+      Effect.runPromise(createMcpAccessToken({ user, clientId: MCP_CLIENT_ID }, MCP_AUD, config)),
+    validPayload: () => ({
+      version: 1,
+      kind: "mcp-access",
+      user: { id: user.id, email: user.email },
+      clientId: MCP_CLIENT_ID,
+      aud: MCP_AUD,
+      scope: "mcp",
+      issuedAt: now(),
+      expiresAt: now() + 3600,
+    }),
+    accepts: (token) =>
+      Effect.runPromise(verifyMcpAccessToken(token, MCP_AUD, config)).then(
+        (found) => found != null,
+        () => false,
+      ),
+  },
+  {
+    name: "mcp-refresh",
+    mint: () =>
+      Effect.runPromise(createMcpRefreshToken({ user, clientId: MCP_CLIENT_ID }, MCP_AUD, config)),
+    validPayload: () => ({
+      version: 1,
+      kind: "mcp-refresh",
+      user: { id: user.id, email: user.email },
+      clientId: MCP_CLIENT_ID,
+      aud: MCP_AUD,
+      scope: "mcp",
+      issuedAt: now(),
+      expiresAt: now() + 3600,
+    }),
+    accepts: (token) =>
+      Effect.runPromise(verifyMcpRefreshToken(token, MCP_AUD, config)).then(
         (found) => found != null,
         () => false,
       ),
@@ -333,6 +428,38 @@ describe("token corpus: typed meaning", () => {
     const token = await craft(KINDS[1].validPayload());
     expect(await oauthStateAccepts(token, "different-state-param")).toBe(false);
   });
+
+  test("mcp-access and mcp-refresh: reject a token bound to a different audience", async () => {
+    const otherAud = "https://other.scratch.test/mcp";
+    for (const kind of [KINDS[7], KINDS[8]]) {
+      // A token minted for another resource URL fails here...
+      expect(await kind.accepts(await craft({ ...kind.validPayload(), aud: otherAud }))).toBe(false);
+    }
+    // ...and a token minted for this resource fails at another resource.
+    const minted = await Effect.runPromise(
+      createMcpAccessToken({ user, clientId: MCP_CLIENT_ID }, MCP_AUD, config),
+    );
+    const elsewhere = await Effect.runPromise(verifyMcpAccessToken(minted, otherAud, config));
+    expect(elsewhere).toBeNull();
+  });
+
+  test("mcp-access and mcp-refresh: reject a scope other than the literal", async () => {
+    for (const kind of [KINDS[7], KINDS[8]]) {
+      for (const scope of ["admin", "mcp mcp", "", "MCP"]) {
+        expect({ scope, accepted: await kind.accepts(await craft({ ...kind.validPayload(), scope })) }).toEqual({
+          scope,
+          accepted: false,
+        });
+      }
+    }
+  });
+
+  test("mcp-access and mcp-refresh: reject future issuance beyond clock skew", async () => {
+    for (const kind of [KINDS[7], KINDS[8]]) {
+      expect(await kind.accepts(await craft({ ...kind.validPayload(), issuedAt: now() + 3600 }))).toBe(false);
+      expect(await kind.accepts(await craft({ ...kind.validPayload(), issuedAt: now() + 5 }))).toBe(true);
+    }
+  });
 });
 
 describe("token corpus: parser hardening", () => {
@@ -415,15 +542,36 @@ describe("token corpus: lifecycle", () => {
     expect(await KINDS[1].accepts(await craft({ ...KINDS[1].validPayload(), expiresAt: now() - 1 }))).toBe(false);
   });
 
+  test("mcp-consent: expires after the consent TTL", async () => {
+    const expired = await withShiftedClock(-(600 + 60), () => KINDS[5].mint());
+    expect(await KINDS[5].accepts(expired)).toBe(false);
+  });
+
+  test("mcp-code: expires after its ~60s window", async () => {
+    const expired = await withShiftedClock(-120, () => KINDS[6].mint());
+    expect(await KINDS[6].accepts(expired)).toBe(false);
+  });
+
+  test("mcp-access: expires after its one-hour TTL", async () => {
+    const expired = await withShiftedClock(-(3600 + 60), () => KINDS[7].mint());
+    expect(await KINDS[7].accepts(expired)).toBe(false);
+  });
+
+  test("mcp-refresh: expires after the session TTL", async () => {
+    const expired = await withShiftedClock(-(config.sessionTtlSeconds + 60), () => KINDS[8].mint());
+    expect(await KINDS[8].accepts(expired)).toBe(false);
+  });
+
   test("stateless kinds are replayable within their lifetime — by design", async () => {
-    // Documented accepted trade-off (AGENTS.md invariant 3): sessions and
-    // project-access tokens are stateless HMAC, so a token verifies any number
-    // of times until expiry or an allow-list/SESSION_VERSION revocation. The
-    // cli-code kind is the deliberate exception: its one-time redemption
-    // record lives in PrimitiveDb at the /auth/cli/token exchange route
-    // (exercised in server/core/test/app.test.ts and the e2e auth-negative
-    // lanes), not in the stateless decode exercised here.
-    for (const kind of [KINDS[0], KINDS[3], KINDS[4]]) {
+    // Documented accepted trade-off (AGENTS.md invariant 3): sessions,
+    // project-access tokens, and MCP access/refresh tokens are stateless HMAC,
+    // so a token verifies any number of times until expiry or an allow-list /
+    // SESSION_VERSION / MCP_TOKEN_VERSION revocation. The cli-code and
+    // mcp-code kinds are the deliberate exceptions: their one-time redemption
+    // records live in PrimitiveDb at their exchange routes (exercised in
+    // server/core/test/app.test.ts, mcp-oauth.test.ts, and the e2e
+    // auth-negative lanes), not in the stateless decode exercised here.
+    for (const kind of [KINDS[0], KINDS[3], KINDS[4], KINDS[7], KINDS[8]]) {
       const token = await kind.mint();
       expect(await kind.accepts(token)).toBe(true);
       expect(await kind.accepts(token)).toBe(true);

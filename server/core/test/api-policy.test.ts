@@ -11,10 +11,11 @@
 import { describe, expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import { API_ROUTES, type ApiRoute } from "../src/api-routes";
-import { createSessionToken, type AuthUser } from "../src/auth";
+import { createMcpAccessToken, createSessionToken, type AuthUser } from "../src/auth";
 import type { AuthConfig } from "../src/config";
+import { MCP_OAUTH_ROUTES } from "../src/mcp-oauth-routes";
 import { roleAtLeast, type ProjectRole } from "../src/site-store";
-import { appHandler, bundle } from "./helpers";
+import { appHandler, bundle, json } from "./helpers";
 
 /** Must match the appHandler defaults in helpers.ts so minted bearers verify. */
 const authConfig: AuthConfig = {
@@ -220,6 +221,82 @@ describe("api route policy matrix", () => {
       body: "not json",
     }));
     expect(empty.status).toBe(400);
+  });
+
+  test("an mcp-access bearer never authenticates on the JSON API (audience confusion)", async () => {
+    // The MCP access token authorizes only the /mcp endpoint. Presented to any
+    // JSON API route it must read as no credential at all: bearer routes 401,
+    // optional routes answer anonymously. This is the deny-all matrix row for
+    // the credential kind introduced by the MCP OAuth surface.
+    const handler = await fixture();
+    const token = await Effect.runPromise(createMcpAccessToken(
+      { user: users.owner, clientId: "matrix-client-1" },
+      "https://scratch.test/mcp",
+      authConfig,
+    ));
+    for (const route of API_ROUTES.filter((candidate) => candidate.auth !== "code-exchange")) {
+      const { path, method, body } = FIXTURES[route.name]!("site");
+      const response = await handler(new Request(`https://scratch.test${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }));
+      const label = `${route.name} × mcp-access bearer`;
+      if (route.auth === "bearer") {
+        expect({ label, status: response.status }).toEqual({ label, status: 401 });
+      } else if (route.name === "me") {
+        expect({ label, body: await json(response) }).toEqual({ label, body: { authenticated: false, user: null } });
+      } else {
+        expect({ label, status: response.status }).toEqual({ label, status: 200 });
+      }
+    }
+  });
+
+  test("every MCP OAuth route is dispatched at its declared method, and only there", async () => {
+    // The MCP OAuth surface keeps its own registry (it is server-only, outside
+    // the shared contract); this is its completeness check — a dispatched path
+    // missing from MCP_OAUTH_ROUTES, or a registry row nothing dispatches,
+    // fails here. Behavior per endpoint is covered in mcp-oauth.test.ts.
+    const handler = await fixture();
+    for (const route of MCP_OAUTH_ROUTES) {
+      const declared = await handler(new Request(`https://scratch.test${route.path}`, {
+        method: route.method,
+        ...(route.method === "POST" ? { headers: { "content-type": "application/json" }, body: "{}" } : {}),
+      }));
+      // Dispatched: anything but the not-found/method-not-allowed fallthroughs.
+      expect({ route: route.name, dispatched: declared.status }).not.toEqual({ route: route.name, dispatched: 404 });
+      expect({ route: route.name, dispatched: declared.status }).not.toEqual({ route: route.name, dispatched: 405 });
+      const wrongMethod = await handler(new Request(`https://scratch.test${route.path}`, {
+        method: route.method === "GET" ? "POST" : "GET",
+      }));
+      expect({ route: route.name, status: wrongMethod.status }).toEqual({ route: route.name, status: 405 });
+    }
+  });
+
+  test("MCP OAuth cross-origin policy follows each route's credential model", async () => {
+    const handler = await fixture();
+    // Consent reads the session cookie, so it must reject cross-origin like
+    // every API route. The credential-free endpoints are deliberately
+    // CORS-open (they never read an ambient credential), and that must stay
+    // visible as an explicit ACAO header, not an accident.
+    const sessionUser = await bearer(users.owner);
+    const consent = await handler(new Request("https://scratch.test/oauth/consent", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        authorization: `Bearer ${sessionUser}`,
+        origin: "https://evil.example",
+      },
+      body: "txn=x&decision=approve",
+    }));
+    expect(consent.status).toBe(403);
+    for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"]) {
+      const response = await handler(new Request(`https://scratch.test${path}`));
+      expect({ path, acao: response.headers.get("access-control-allow-origin") }).toEqual({ path, acao: "*" });
+    }
   });
 
   test("permissions are visible only to admin+ callers (declared visibility)", async () => {
