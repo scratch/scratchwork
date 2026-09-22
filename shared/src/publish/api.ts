@@ -31,13 +31,17 @@ export const ProjectIdentifierSchema = Schema.String.pipe(
 /** The JSON body of `POST /api/publish`. `project` is optional at the protocol
  * level — a random-naming server mints a name when none is sent; `isPublic` is
  * the public/private toggle (omitted preserves an existing project's setting,
- * and a new project is created private). Per-account and per-domain access is a
- * separate grant list managed through the share API, not a publish-time setting. */
+ * and a new project is created private). `commentsEnabled` turns on viewer
+ * comments (omitted preserves the current setting; new projects default off;
+ * the server rejects comments on a public project). Per-account and per-domain
+ * access is a separate grant list managed through the share API, not a
+ * publish-time setting. */
 export const PublishRequestBodySchema = Schema.Struct({
   bundle: PublishBundleSchema,
   openPath: Schema.optional(Schema.String),
   project: Schema.optional(ProjectIdentifierSchema),
   isPublic: Schema.optional(Schema.Boolean),
+  commentsEnabled: Schema.optional(Schema.Boolean),
 });
 
 /** The publish request body as the CLI builds it and the server decodes it. */
@@ -48,6 +52,7 @@ export type PublishRequestBody = typeof PublishRequestBodySchema.Type;
 export const PublishResponseSchema = Schema.Struct({
   project: Schema.String,
   isPublic: Schema.Boolean,
+  commentsEnabled: Schema.optional(Schema.Boolean),
   openPath: Schema.String,
   url: Schema.String,
 });
@@ -109,6 +114,7 @@ export type ProjectPermissions = typeof ProjectPermissionsSchema.Type;
 export const ProjectInfoSchema = Schema.Struct({
   project: Schema.String,
   isPublic: Schema.Boolean,
+  commentsEnabled: Schema.optional(Schema.Boolean),
   permissions: Schema.optional(ProjectPermissionsSchema),
   url: Schema.optional(Schema.String),
   owner: Schema.Struct({ id: Schema.String, email: Schema.String }),

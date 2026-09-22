@@ -476,8 +476,10 @@ function runRoute(
 /** Reads, size-limits, parses, and strictly decodes one request body through
  * the contract payload schema. Decoding is deliberately strict — every
  * problem is reported and unknown fields are errors — so protocol drift
- * surfaces as a clear 400 instead of being silently dropped. */
-function readEndpointPayload(
+ * surfaces as a clear 400 instead of being silently dropped. Also used by the
+ * content-origin comments routes, so every JSON body the server accepts is
+ * read through the same gate. */
+export function readEndpointPayload(
   request: HttpServerRequest.HttpServerRequest,
   schema: Schema.Schema.Any,
   limit: PayloadLimit,
@@ -556,6 +558,7 @@ export function projectSummary(record: SiteRecord, contentBase: string, callerRo
   return {
     project: record.project,
     isPublic: record.isPublic,
+    commentsEnabled: record.commentsEnabled,
     ...permissions,
     url: projectUrl(record.project, contentBase, config),
     owner: record.owner,

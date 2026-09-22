@@ -109,6 +109,18 @@ export function sameOrigin(left: string, right: string): boolean {
   }
 }
 
+/** Matches the request's origin against the configured homepage origins; null when the
+ * server has no homepage or the request is for another host. */
+export function requestHomepageOrigin(
+  request: HttpServerRequest.HttpServerRequest,
+  config: ServerConfigShape,
+): string | null {
+  if (config.homepageProject == null || config.homepageUrls.length === 0) return null;
+  const requestBase = requestBaseUrl(request);
+  if (requestBase == null) return null;
+  return config.homepageUrls.find((url) => sameOrigin(url, requestBase)) ?? null;
+}
+
 /** Builds the user-facing URL returned by publish. The homepage project reports its
  * canonical home origin; every other project reports its content route. */
 export function publishedUrl(baseUrl: string, project: string, openPath: string, config: ServerConfigShape): string {

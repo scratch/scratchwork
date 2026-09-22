@@ -22,12 +22,14 @@ export interface TemplateConfig {
 }
 
 /** `scratchwork publish` options. `isPublic` stays undefined when neither --public nor
- * --private is passed, letting saved config or the server decide. */
+ * --private is passed, letting saved config or the server decide; `commentsEnabled`
+ * behaves the same for --comments/--no-comments. */
 export interface PublishConfig {
   readonly path: string;
   readonly server?: string;
   readonly project?: string;
   readonly isPublic?: boolean;
+  readonly commentsEnabled?: boolean;
 }
 
 /** `scratchwork login` options. */

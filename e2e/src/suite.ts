@@ -215,6 +215,90 @@ export function publishLoopSuite(
       expect(deniedBody).not.toContain("marker-v2");
     }, 60_000);
 
+    test("comments: viewers comment through the content-origin API; the widget is injected", async () => {
+      // Turn comments on for the private project (admin toggle via republish).
+      const enabled = await runCli(["publish", ".", "--comments"], site.path, { SCRATCHWORK_HOME: ownerHome.path });
+      expect(enabled.stderr).toBe("");
+      expect(enabled.code).toBe(0);
+      expect(enabled.stdout).toContain("comments enabled");
+
+      // Making the project public now must fail: comments require privacy.
+      // (The saved config carries commentsEnabled, so the CLI catches this
+      // before uploading; the server enforces the same rule.)
+      const flippedPublic = await runCli(["publish", ".", "--public"], site.path, { SCRATCHWORK_HOME: ownerHome.path });
+      expect(flippedPublic.code).toBe(1);
+
+      // The served page carries the widget script, and the script serves.
+      const pageUrl = `${context.contentUrl}/${project}/`;
+      const apiBase = `${context.contentUrl}/${project}/__scratchwork/comments`;
+      const page = await ownerBrowser.get(pageUrl);
+      expect(page.status).toBe(200);
+      expect(await page.response.text()).toContain("/__scratchwork/comments/widget.js");
+      const widget = await ownerBrowser.request(`${apiBase}/widget.js`, {
+        headers: { referer: pageUrl, "sec-fetch-dest": "script" },
+      });
+      expect(widget.status).toBe(200);
+      expect(widget.headers.get("content-type")).toContain("text/javascript");
+
+      // The owner comments, exactly as the widget would (same-origin fetch,
+      // path-scoped access cookie).
+      const created = await ownerBrowser.request(apiBase, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: context.contentUrl },
+        body: JSON.stringify({ page: "/", body: "owner comment", anchors: [{ selector: "body", x: 10, y: 20 }] }),
+      });
+      expect(created.status).toBe(200);
+      const ownerComment = (await created.json() as { comment: { id: string } }).comment;
+
+      // A shared viewer sees it, resolves it, and adds their own — but cannot
+      // delete the owner's.
+      const shared = await runCli(
+        ["share", VIEWER.email, "--server", context.appUrl, "--project", project],
+        site.path,
+        { SCRATCHWORK_HOME: ownerHome.path },
+      );
+      expect(shared.code).toBe(0);
+      provider.user = VIEWER;
+      const viewerBrowser = new Browser();
+      await loginBrowser(context, viewerBrowser);
+      expect((await viewerBrowser.get(pageUrl)).status).toBe(200);
+
+      const listed = await viewerBrowser.request(`${apiBase}?page=/`);
+      expect(listed.status).toBe(200);
+      const listing = await listed.json() as {
+        viewer: { email: string; canModerate: boolean };
+        comments: Array<{ id: string; body: string }>;
+      };
+      expect(listing.viewer).toEqual({ email: VIEWER.email, canModerate: false });
+      expect(listing.comments.map((comment) => comment.body)).toEqual(["owner comment"]);
+
+      const resolved = await viewerBrowser.request(`${apiBase}/${ownerComment.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: context.contentUrl },
+        body: JSON.stringify({ page: "/", resolved: true }),
+      });
+      expect(resolved.status).toBe(200);
+      expect((await resolved.json() as { comment: { resolvedBy: string } }).comment.resolvedBy).toBe(VIEWER.email);
+
+      const denied = await viewerBrowser.request(`${apiBase}/${ownerComment.id}?page=/`, {
+        method: "DELETE",
+        headers: { origin: context.contentUrl },
+      });
+      expect(denied.status).toBe(403);
+
+      // Anonymous callers get nothing.
+      const anonymous = await rawFetch(`${apiBase}?page=/`);
+      expect(anonymous.status).toBe(401);
+
+      // Comments survive a republish (they live beside the content, not in it).
+      writeFileSync(join(site.path, "index.html"), "<h1>marker-v3</h1>");
+      const republished = await runCli(["publish", "."], site.path, { SCRATCHWORK_HOME: ownerHome.path });
+      expect(republished.code).toBe(0);
+      const after = await ownerBrowser.request(`${apiBase}?page=/`);
+      expect(after.status).toBe(200);
+      expect((await after.json() as { comments: unknown[] }).comments).toHaveLength(1);
+    }, 60_000);
+
     test("a public project serves without any credentials", async () => {
       const publicSite = tempDir(`scratchwork-e2e-${lane}-public-`);
       try {
