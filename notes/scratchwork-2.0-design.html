@@ -1,0 +1,223 @@
+<title>Scratchwork 2.0 Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: single reading column; decisions are the only boxed objects, each with a status chip. */
+  :root {
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --ink: #1b2330;
+    --muted: #5b6676;
+    --rule: #dde2ea;
+    --accent: #1f5f8b;
+    --open-bg: #fbeed3; --open-fg: #7a4d00;
+    --lean-bg: #dcebf7; --lean-fg: #1f5f8b;
+    --done-bg: #dcf1e3; --done-fg: #1e6b3c;
+    --display: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+    --body: "Literata", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161d; --surface: #1a2029; --ink: #e4e8ee; --muted: #9aa5b4; --rule: #2c3440; --accent: #7fb6e0;
+      --open-bg: #3a2e14; --open-fg: #f0c46e; --lean-bg: #173049; --lean-fg: #9ccbef; --done-bg: #173524; --done-fg: #8fd6a8;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161d; --surface: #1a2029; --ink: #e4e8ee; --muted: #9aa5b4; --rule: #2c3440; --accent: #7fb6e0;
+    --open-bg: #3a2e14; --open-fg: #f0c46e; --lean-bg: #173049; --lean-fg: #9ccbef; --done-bg: #173524; --done-fg: #8fd6a8;
+    color-scheme: dark;
+  }
+
+  body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 17px; line-height: 1.6; }
+  .page { max-width: 44rem; margin: 0 auto; padding-inline: 20px; padding-block: 56px 96px; display: grid; gap: 40px; }
+  header { display: grid; gap: 10px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1, h2, h3 { font-family: var(--display); line-height: 1.15; margin: 0; text-wrap: balance; }
+  h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -.01em; }
+  h2 { font-size: 1.35rem; font-weight: 600; }
+  h3 { font-size: 1.05rem; font-weight: 600; }
+  p { margin: 0; }
+  .lede { font-size: 1.12rem; color: var(--muted); }
+  section { display: grid; gap: 14px; }
+  ul, ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; }
+  code { font-family: var(--mono); font-size: .86em; background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 0 .3em; }
+  a { color: var(--accent); }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: var(--display); font-size: 13px; color: var(--muted); }
+  .chip { font-family: var(--display); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .chip.open { background: var(--open-bg); color: var(--open-fg); }
+  .chip.lean { background: var(--lean-bg); color: var(--lean-fg); }
+  .chip.done { background: var(--done-bg); color: var(--done-fg); }
+
+  .decisions { display: grid; gap: 20px; }
+  .decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 20px 22px; display: grid; gap: 12px; min-width: 0; }
+  .decision-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .decision-head h3 { display: flex; gap: 10px; align-items: baseline; }
+  .decision-head .id { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--muted); }
+  .options { list-style: none; padding: 0; gap: 8px; }
+  .options li { display: grid; grid-template-columns: 1.6em 1fr; gap: 4px; }
+  .options .key { font-family: var(--mono); font-size: 14px; color: var(--muted); padding-top: 2px; }
+  .lean-line, .call-line { font-size: 15.5px; padding-left: 12px; border-left: 2px solid var(--rule); }
+  .lean-line strong, .call-line strong { font-family: var(--display); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; margin-right: 6px; }
+  .lean-line strong { color: var(--accent); }
+  .call-line { color: var(--muted); }
+
+  .sketch { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; }
+  .sketch pre { margin: 0; font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink); }
+
+  @media (max-width: 480px) {
+    body { font-size: 16px; }
+    h1 { font-size: 1.9rem; }
+    .decision { padding: 16px; }
+  }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">Design doc · Draft 1 · Sep 29, 2026</div>
+    <h1>Scratchwork 2.0</h1>
+    <p class="lede">A shared workspace where people and agents write and publish documents together. You write and share like in Google Docs, and agents can still use everything HTML and JS can do.</p>
+  </header>
+
+  <section>
+    <h2>What we want to be able to do</h2>
+    <ol>
+      <li>Use my own agent (e.g. Claude Code) to create and publish documents made of any HTML and JS.</li>
+      <li>Use an agent built into the web app to create or edit a document live.</li>
+      <li>Write and edit the text in my documents by hand, including in documents an agent built.</li>
+      <li>See where other people are editing in real time.</li>
+      <li>See where agents are editing in real time.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Starting point</h2>
+    <p>Scratchwork 1 already covers item 1: <code>scratchwork dev</code> / <code>publish</code>, a Markdown renderer that supports React components, project roles (<code>read</code> / <code>write</code> / <code>admin</code>), and servers that run on Cloudflare, AWS, and locally. What it doesn't have is live editing. Documents are static files, and republishing replaces the whole file.</p>
+    <p>The hard part is item 3. Past editors worked because they owned a narrow format (Word, Docs). Here, an agent writes the document as arbitrary code, and a person still needs to edit its text without breaking it.</p>
+  </section>
+
+  <section>
+    <h2>Working model</h2>
+    <p>This is a straw man to react to, not a decision. It splits every document into two layers that change in different ways:</p>
+    <div class="sketch"><pre>document
+├── code    HTML / JS / components     written by agents, saved as whole versions
+└── text    named text regions          edited live by people + agents (CRDT)
+
+rendered page = code, with each text region filled in from the live text</pre></div>
+    <p>The code declares where the editable text goes. The editor only touches those regions, so hand edits can't produce broken code. Agents can edit either layer. People mostly edit text.</p>
+  </section>
+
+  <hr>
+
+  <section>
+    <h2>Decisions</h2>
+    <div class="legend">
+      <span><span class="chip open">Open</span> not discussed yet</span>
+      <span><span class="chip lean">Leaning</span> has a tentative answer</span>
+      <span><span class="chip done">Decided</span> settled</span>
+    </div>
+
+    <div class="decisions">
+
+      <article class="decision" id="d1">
+        <div class="decision-head">
+          <h3><span class="id">D1</span> How does a document expose editable text?</h3>
+          <span class="chip open">Open</span>
+        </div>
+        <ul class="options">
+          <li><span class="key">A</span><span><b>MDX-style.</b> Markdown prose with embedded components. The prose is editable and text inside components isn't. Builds on the renderer we already have, but agent-made HTML pages don't fit.</span></li>
+          <li><span class="key">B</span><span><b>Marked regions.</b> Any HTML page marks editable text with an attribute like <code>data-sw-text="intro"</code>. The editor owns those regions. Works for any page, but agents have to follow the convention, and we need a validator.</span></li>
+          <li><span class="key">C</span><span><b>Exported data.</b> The document exports a structure of strings (like a content file) and renders from it. Very robust, but the most work for agents, and inline editing on the page is harder.</span></li>
+        </ul>
+        <p class="lean-line"><strong>Claude's lean</strong>B, with A as sugar on top: Markdown prose becomes one large marked region automatically, so Markdown documents need no extra work.</p>
+        <p class="call-line"><strong>Pete</strong>—</p>
+      </article>
+
+      <article class="decision" id="d2">
+        <div class="decision-head">
+          <h3><span class="id">D2</span> How are conflicting edits resolved?</h3>
+          <span class="chip open">Open</span>
+        </div>
+        <ul class="options">
+          <li><span class="key">A</span><span><b>CRDT for text, versions for code.</b> Text regions use a CRDT (e.g. Yjs), so concurrent edits merge on their own. Code changes are saved as whole versions. If two conflict, the later one is rebased or rejected.</span></li>
+          <li><span class="key">B</span><span><b>An arbiter agent for everything.</b> An agent merges conflicting edits. Flexible, but slow and nondeterministic, and it's in the path of every keystroke.</span></li>
+          <li><span class="key">C</span><span><b>A (deterministic) plus an arbiter only for code conflicts.</b></span></li>
+        </ul>
+        <p class="lean-line"><strong>Claude's lean</strong>C. Typing must never wait on a model. Notion's <a href="https://www.notion.com/blog/how-notion-handles-concurrent-editing-with-crdts" target="_blank" rel="noopener">CRDT write-up</a> shows the text side works at scale.</p>
+        <p class="call-line"><strong>Pete</strong>—</p>
+      </article>
+
+      <article class="decision" id="d3">
+        <div class="decision-head">
+          <h3><span class="id">D3</span> Where does real-time sync run?</h3>
+          <span class="chip open">Open</span>
+        </div>
+        <ul class="options">
+          <li><span class="key">A</span><span><b>Cloudflare-first.</b> One Durable Object per document holds the WebSocket connections, orders edits, and saves snapshots. It's the simplest fit, but the AWS and local servers would fall behind in features, which breaks today's rule that every deploy target behaves the same.</span></li>
+          <li><span class="key">B</span><span><b>A sync interface for every target.</b> Define a sync service and implement it for Cloudflare (Durable Objects), local (an in-process Bun server), and AWS (API Gateway WebSockets). Keeps the targets equal, but it's roughly three times the work.</span></li>
+          <li><span class="key">C</span><span><b>A hosted sync service</b> (Liveblocks, PartyKit, etc.). Fastest to ship, but adds an outside dependency and makes self-hosting harder.</span></li>
+        </ul>
+        <p class="lean-line"><strong>Claude's lean</strong>B's interface with only A implemented at first. Local dev gets an in-memory version so tests stay hermetic. AWS waits until someone needs it.</p>
+        <p class="call-line"><strong>Pete</strong>—</p>
+      </article>
+
+      <article class="decision" id="d4">
+        <div class="decision-head">
+          <h3><span class="id">D4</span> How do outside agents work with documents?</h3>
+          <span class="chip open">Open</span>
+        </div>
+        <ul class="options">
+          <li><span class="key">A</span><span><b>CLI only.</b> Extend <code>scratchwork</code> with commands like <code>edit</code>, <code>pull</code>, and <code>watch</code>.</span></li>
+          <li><span class="key">B</span><span><b>MCP only.</b></span></li>
+          <li><span class="key">C</span><span><b>Both, as thin layers over one HTTP API</b> defined in <code>shared/</code> like today's publish API.</span></li>
+        </ul>
+        <p class="lean-line"><strong>Claude's lean</strong>C. The built-in agent should use the same API, so it can't do anything an outside agent can't.</p>
+        <p class="call-line"><strong>Pete</strong>—</p>
+      </article>
+
+      <article class="decision" id="d5">
+        <div class="decision-head">
+          <h3><span class="id">D5</span> What does "seeing where an agent is editing" look like?</h3>
+          <span class="chip open">Open</span>
+        </div>
+        <ul class="options">
+          <li><span class="key">A</span><span><b>A cursor, like a person's.</b> The agent streams small edits into text regions, and you watch it type.</span></li>
+          <li><span class="key">B</span><span><b>Region highlights.</b> Show which region or component the agent is working in ("Claude is editing Pricing"), then apply its changes as one reviewable change.</span></li>
+          <li><span class="key">C</span><span><b>Suggestions.</b> Agent edits show up as tracked changes that a person accepts.</span></li>
+        </ul>
+        <p class="lean-line"><strong>Claude's lean</strong>B by default, with C as a per-document setting. Watching an agent type feels good, but it's noisy and hard to undo.</p>
+        <p class="call-line"><strong>Pete</strong>—</p>
+      </article>
+
+      <article class="decision" id="d6">
+        <div class="decision-head">
+          <h3><span class="id">D6</span> Is this Scratchwork 2.0 or a new product?</h3>
+          <span class="chip open">Open</span>
+        </div>
+        <ul class="options">
+          <li><span class="key">A</span><span><b>Grow Scratchwork.</b> Keep the CLI, server, and renderer, and add documents, sync, and an editor.</span></li>
+          <li><span class="key">B</span><span><b>A new product ("Writer")</b> that reuses Scratchwork's pieces as libraries.</span></li>
+        </ul>
+        <p class="lean-line"><strong>Claude's lean</strong>A. Auth, roles, publishing, and the deploy targets are most of the backend already. The existing roles map to read / write / owner, and "at least one owner" becomes a server-side rule.</p>
+        <p class="call-line"><strong>Pete</strong>—</p>
+      </article>
+
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <h2>Not yet covered</h2>
+    <ul>
+      <li>Version history and undo when both people and agents edit.</li>
+      <li>Security of running agent-written JS next to an editor with write access. This probably needs a sandboxed frame and a narrow bridge between the page and the editor.</li>
+      <li>Offline editing.</li>
+      <li>How existing published projects move over.</li>
+    </ul>
+  </section>
+</div>
