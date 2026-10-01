@@ -84,9 +84,13 @@
 <main class="page">
 
   <header>
-    <div class="eyebrow">Design doc · Draft 2 · Sep 29, 2026</div>
-    <h1>Editing rendered documents</h1>
-    <p class="lede">People edit the manuscript of an agent-built document on the rendered page, live with other viewers, and the edits land in the source files. Everything else is app logic, which agents edit in the files.</p>
+    <div class="eyebrow"></div>
+    <h1>Scratchwork 2.0</h1>
+    <p class="lede">Scratchwork 2.0 is a collaborative environment for expressing ideas with AI. It's meant to fill the gap between Google Docs, where the user writes everything by hand, and Claude Artifacts, where the user has to ask an agent for everything.</p>
+    <p class="lede"></p>
+    <p class="lede"></p>
+    <p class="lede"></p>
+    <p class="lede">People edit the manuscripts of an agent-built document on the rendered page, live with other viewers, and the edits land in the source files. Everything else is app logic, which agents edit in the files.</p>
   </header>
 
   <section>
@@ -103,8 +107,7 @@
     <h2>Manuscript and app logic</h2>
     <p>A document has two kinds of text:</p>
     <ul>
-      <li><b>Manuscript</b> is text in vanilla HTML elements that roughly match what Markdown expresses: headings, paragraphs, list items, blockquotes, table cells, code blocks, and inline emphasis, links and code. It is written as plain HTML or Markdown, and people edit it on the rendered page.</li>
-      <li>Hello </li>
+      <li><b>Manuscript</b> is prose in the basic elements Markdown can express: headings, paragraphs, list items, blockquotes, table cells, code blocks, and inline emphasis, links and code. The source can be Markdown or plain HTML using only those elements. People edit it on the rendered page.</li>
       <li><b>App logic</b> is everything else: JS, components, SVG, canvas, and any string in code or built at runtime. Agents edit it in the files.</li>
     </ul>
     <p>The test is mechanical: an element is manuscript if a deterministic parse of the source finds its text at a known position. Text that JS created or changed fails the test and is locked. Clicking it does nothing in v1; later it can open the embedded agent with that text as context.</p>
